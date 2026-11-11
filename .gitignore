@@ -1,0 +1,31 @@
+# ==== 凭证 / 账号池（绝不入库）====
+accounts.json
+accounts.md
+accounts*.json
+out/
+captures/
+patches/
+wordlists/
+**/cookies/
+*.flow
+*.har
+.env
+.env.*
+!.env.example
+
+# ==== 依赖与构建产物 ====
+node_modules/
+.pnpm-store/
+.next/
+dist/
+build/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# ==== 运行时日志与临时件 ====
+*.log
+*.tmp
+.DS_Store
+Thumbs.db

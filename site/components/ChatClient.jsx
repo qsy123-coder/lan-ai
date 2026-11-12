@@ -650,7 +650,11 @@ export default function ChatClient({ card }) {
                   setInput(e.target.value);
                   const el = e.target;
                   el.style.height = "auto";
-                  el.style.height = Math.min(180, el.scrollHeight) + "px";
+                  // 清空后 scrollHeight 仍含 padding，不会自动回到一行；
+                  // 空值时显式用 scrollHeight 与最小高度取小，才能缩回去。
+                  const min = 24; // 一行 16px*1.45 ≈ 23.2
+                  el.style.height =
+                    (e.target.value ? Math.min(180, el.scrollHeight) : min) + "px";
                 }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
@@ -659,7 +663,7 @@ export default function ChatClient({ card }) {
                   }
                   if (e.key === "Escape" && busy) stop();
                 }}
-                placeholder={`和「${card.name}」说点什么…  Enter 发送 · Shift+Enter 换行`}
+                placeholder="说点什么…"
                 rows={1}
                 enterKeyHint="send"
                 autoComplete="off"

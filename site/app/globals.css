@@ -5022,16 +5022,18 @@ html[data-theme="dark"] .nd-switch > span {
   /* 输入框：原来 min-height 44px，但 16px 字 + 1.45 行高 + 上下 padding 8px
      两行就要 62px，scrollHeight 62 塞进 clientHeight 44 → 文字被裁。
      提到 68px（约两行半），并让 max-height 跟视口走。 */
+  /* 输入框已有 JS 自动调高（onChange 里设 el.style.height = scrollHeight）。
+     CSS 只负责「空态一行」的下限，别用大 min-height 把空框顶高；
+     行高与 padding 保证两行内容 = 2*23.2 + 16 ≈ 62px 时脚本能算准。 */
   .composer textarea {
-    min-height: 68px;
-    max-height: min(132px, 22dvh);
+    min-height: 44px;
+    max-height: none;
     line-height: 1.45;
-    padding: 10px 0;
+    padding: 8px 0;
     font-size: 16px;
   }
 
   .composer {
-    /* 输入框变高后，底栏整体高度交给内容，不再被写死 */
     height: auto;
     min-height: 0;
     padding: 8px 10px calc(8px + env(safe-area-inset-bottom));

@@ -1,0 +1,11 @@
+{$SITE_HOST} {
+	encode zstd gzip
+	reverse_proxy site:3000 {
+		flush_interval -1
+	}
+	header {
+		# 私人站点，别被搜索引擎收录
+		X-Robots-Tag "noindex, nofollow"
+		Referrer-Policy "no-referrer"
+	}
+}

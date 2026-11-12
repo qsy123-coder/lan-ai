@@ -1,0 +1,52 @@
+# 共存版：不抢 80/443，不碰已有容器
+#
+#   docker compose -f docker-compose.existing.yml up -d --build
+#
+# 只对外开一个口子：127.0.0.1:18100（给本机已有的 nginx / 宝塔 / caddy 反代用）
+# 引擎完全不 publish，只在 lan-net 内网可达。
+
+services:
+  lan-engine:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.engine
+    image: lan-engine:latest
+    container_name: lan-engine
+    restart: unless-stopped
+    environment:
+      DZMM_ROOT: /data
+      DZMM_PROXY: ${DZMM_PROXY:-}
+      SITE_TOKEN: ${SITE_TOKEN}
+    volumes:
+      - ./data:/data
+    networks:
+      - lan
+    # 不写 ports：外部访问不到 8787
+
+  lan-site:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.site
+    image: lan-site:latest
+    container_name: lan-site
+    restart: unless-stopped
+    depends_on:
+      - lan-engine
+    environment:
+      ENGINE_URL: http://lan-engine:8787
+      SITE_TOKEN: ${SITE_TOKEN}
+      SITE_PASS: ${SITE_PASS}
+      CARDS_FILE: /data/cards.json
+    volumes:
+      - ./data:/data:ro
+    ports:
+      # 只绑本机回环：外部只能经由已有反代进来
+      - "127.0.0.1:18100:3000"
+      # 想直接拿公网 IP 访问（无 HTTPS），改成：
+      # - "18100:3000"
+    networks:
+      - lan
+
+networks:
+  lan:
+    name: lan-net

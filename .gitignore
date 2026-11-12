@@ -1,0 +1,51 @@
+# ---------- 凭证与个人数据：绝不入库 ----------
+accounts.json
+accounts.md
+**/accounts.json
+**/accounts.md
+out/cookies/
+out/site_pass.txt
+out/site_token.txt
+out/*.jsonl
+webstate.json
+**/webstate.json
+
+# 原始抓包（含 cookie / 鉴权头）
+captures/
+*.flow
+trpc.jsonl
+
+# 运行时产物
+out/
+*.pyc
+__pycache__/
+*.log
+
+# Node / Next
+node_modules/
+.next/
+.npmrc
+dist/
+build/
+
+# 本地环境与密钥
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+*.tmp
+
+# 本机部署数据副本
+deploy/data/
+# 与本站无关的其他项目文档
+新建文本文档.txt
+*.bak

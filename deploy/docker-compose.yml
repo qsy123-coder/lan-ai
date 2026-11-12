@@ -1,0 +1,51 @@
+services:
+  engine:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.engine
+    restart: unless-stopped
+    environment:
+      DZMM_ROOT: /data
+      # 云主机通常直连即可；需要走代理时填 http://host:port
+      DZMM_PROXY: ${DZMM_PROXY:-}
+      SITE_TOKEN: ${SITE_TOKEN}
+    volumes:
+      - ./data:/data
+    expose:
+      - "8787"
+
+  site:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.site
+    restart: unless-stopped
+    depends_on:
+      - engine
+    environment:
+      ENGINE_URL: http://engine:8787
+      SITE_TOKEN: ${SITE_TOKEN}
+      SITE_PASS: ${SITE_PASS}
+      CARDS_FILE: /data/cards.json
+    volumes:
+      - ./data:/data:ro
+    expose:
+      - "3000"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - site
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SITE_HOST: ${SITE_HOST}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

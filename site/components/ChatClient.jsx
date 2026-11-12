@@ -1,0 +1,731 @@
+﻿"use client";
+
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+const MODELS = [
+  { id: "x-apex-flux-0217-16k", label: "Flux 16K" },
+  { id: "x-apex-surge-0505", label: "Surge 32K" },
+  { id: "nalang-xl-0826-16k", label: "XL 16K" },
+  { id: "nalang-medium-0826", label: "Medium" },
+];
+
+const TOKEN_MIN = 200;
+const TOKEN_MAX = 8000;
+const TOKEN_DEFAULT = 4000;
+const TKEY = "lg.maxtokens.v1";
+
+function clampTokens(v) {
+  const n = Math.floor(Number(v));
+  if (!Number.isFinite(n)) return TOKEN_DEFAULT;
+  return Math.min(TOKEN_MAX, Math.max(TOKEN_MIN, n));
+}
+
+const SKEY = "lg.sessions.v2";
+const mkey = (id) => `lg.msgs.v2.${id}`;
+const uid = () => Math.random().toString(36).slice(2, 9);
+
+// 多段续写会产出多个 <sug> 块，必须全局匹配；
+// 否则第一个之后的标签会漏进正文，皔得像 HTML。
+const SUG_RE_G = /<sug>([\s\S]*?)<\/sug>/gi;
+const SUG_STRAY_RE = /<\/?sug>/gi;
+const LUG_RE_G = /<lug>([\s\S]*?)<\/lug>/gi;
+const LUG_STRAY_RE = /<\/?lug>/gi;
+
+// 只砍「最后一个 <\/sug> 之后」残留的未闭合块，
+// 不能直接 /<sug>[\s\S]*$/ —— 那会把后面的正文全吐掉。
+function stripOpenSug(src) {
+  const low = src.toLowerCase();
+  const lastClose = low.lastIndexOf("</sug>");
+  const tail = lastClose >= 0 ? src.slice(lastClose) : src;
+  const idx = tail.toLowerCase().indexOf("<sug>");
+  if (idx < 0) return src;
+  return (lastClose >= 0 ? src.slice(0, lastClose) : "") + tail.slice(0, idx);
+}
+
+function splitSug(text) {
+  let src = text || "";
+  if (!src) return { text: "", sug: [] };
+
+  // 1) 收集所有 <sug> 块里的选项（去重、保序）
+  const sug = [];
+  for (const m of src.matchAll(SUG_RE_G)) {
+    for (const part of m[1].split("|")) {
+      const v = part.trim().replace(/^[“"「『]|[”"」』]$/g, "").trim();
+      if (v && !sug.includes(v)) sug.push(v);
+    }
+  }
+
+  // 2) <lug> 是更长的建议块，整块删
+  src = src.replace(LUG_RE_G, "");
+  // 3) 流式中未闭合的尾部块
+  src = stripOpenSug(src);
+  // 4) 已闭合的块整块删；再兜底清裸标签
+  src = src.replace(SUG_RE_G, "");
+  src = src.replace(SUG_STRAY_RE, "").replace(LUG_STRAY_RE, "");
+
+  // 5) 收尾
+  const body = src.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trimEnd();
+  return { text: body, sug: sug.slice(0, 4) };
+}
+
+function readJSON(k, d) {
+  try {
+    const v = JSON.parse(localStorage.getItem(k) || "null");
+    return v ?? d;
+  } catch {
+    return d;
+  }
+}
+
+function groupLabel(ts) {
+  const d = new Date(ts);
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) return "今天";
+  if (d.toDateString() === new Date(now.getTime() - 864e5).toDateString()) return "昨天";
+  if (now - d < 7 * 864e5) return "本周";
+  return "更早";
+}
+
+const timeOf = (ts) =>
+  new Date(ts).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+
+async function readSSE(res, onEvent) {
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf("\n\n")) >= 0) {
+      const raw = buf.slice(0, i);
+      buf = buf.slice(i + 2);
+      let ev = "message";
+      let data = "";
+      for (const line of raw.split("\n")) {
+        if (line.startsWith("event:")) ev = line.slice(6).trim();
+        else if (line.startsWith("data:")) data += line.slice(5).trim();
+      }
+      if (data) {
+        try {
+          onEvent(ev, JSON.parse(data));
+        } catch {}
+      }
+    }
+  }
+}
+
+export default function ChatClient({ card }) {
+  const [msgs, setMsgs] = useState([]);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [streaming, setStreaming] = useState("");
+  const [model, setModel] = useState(MODELS[0].id);
+  const [maxTokens, setMaxTokens] = useState(TOKEN_DEFAULT);
+  const [sessions, setSessions] = useState([]);
+  const [note, setNote] = useState("");
+  const [showPanel, setShowPanel] = useState(true);
+  const [pool, setPool] = useState(null);
+
+  const box = useRef(null);
+  const taRef = useRef(null);
+  const abort = useRef(null);
+  const stick = useRef(true);
+  const chatIdRef = useRef(null);   // 恢复的历史属于哪个上游会话
+  const seedAcctRef = useRef(null);  // 该会话在哪个号下
+
+  useEffect(() => {
+    setMaxTokens(clampTokens(readJSON(TKEY, TOKEN_DEFAULT)));
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(TKEY, JSON.stringify(clampTokens(maxTokens)));
+    } catch {}
+  }, [maxTokens]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    if (window.matchMedia("(max-width: 1180px)").matches) setShowPanel(false);
+  }, []);
+
+  useEffect(() => {
+    const saved = readJSON(mkey(card.id), []);
+    setMsgs(saved);
+
+    // 本地空白时，从上游导出的 seeds.json 恢复真实历史（带 chatId），
+    // 这样「上下文满了被重置」的对话能直接接着写。
+    if (!saved.length) {
+      let alive = true;
+      fetch("/seeds.json", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((all) => {
+          if (!alive || !all) return;
+          const seed = all[String(card.id)];
+          if (!seed || !Array.isArray(seed.msgs) || !seed.msgs.length) return;
+          const restored = seed.msgs.map((m, i) => ({
+            id: `s${i}`,
+            role: m.role,
+            content: m.content,
+            ts: Date.now() - (seed.msgs.length - i) * 1000,
+          }));
+          setMsgs(restored);
+          if (seed.chatId) chatIdRef.current = seed.chatId;
+          if (seed.account) seedAcctRef.current = seed.account;
+          localStorage.setItem(mkey(card.id), JSON.stringify(restored));
+        })
+        .catch(() => {});
+      return () => {
+        alive = false;
+      };
+    }
+
+    const s = readJSON(SKEY, []);
+    const prev = s.find((x) => String(x.cardId) === String(card.id));
+    const next = [
+      {
+        cardId: card.id,
+        name: card.name,
+        cover: card.cover,
+        lastAt: prev?.lastAt || Date.now(),
+        last: prev?.last || "",
+      },
+      ...s.filter((x) => String(x.cardId) !== String(card.id)),
+    ].slice(0, 40);
+    localStorage.setItem(SKEY, JSON.stringify(next));
+    setSessions(next);
+  }, [card.id, card.name, card.cover]);
+
+  const loadPool = useCallback(async () => {
+    try {
+      const r = await fetch("/api/pool", { cache: "no-store" });
+      const j = await r.json();
+      setPool(j);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    loadPool();
+    const t = setInterval(loadPool, 30000);
+    return () => clearInterval(t);
+  }, [loadPool]);
+
+  useEffect(() => {
+    if (!box.current || !stick.current) return;
+    box.current.scrollTop = box.current.scrollHeight;
+  }, [msgs, streaming]);
+
+  const onScroll = () => {
+    const el = box.current;
+    if (!el) return;
+    stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
+
+  const save = useCallback(
+    (list, lastText) => {
+      const trimmed = list
+        .slice(-120)
+        .map(({ id, role, content, ts }) => ({ id, role, content, ts }));
+      localStorage.setItem(mkey(card.id), JSON.stringify(trimmed));
+      const s = readJSON(SKEY, []);
+      const prev = s.find((x) => String(x.cardId) === String(card.id));
+      const next = [
+        {
+          cardId: card.id,
+          name: card.name,
+          cover: card.cover,
+          lastAt: Date.now(),
+          last: lastText ?? prev?.last ?? "",
+        },
+        ...s.filter((x) => String(x.cardId) !== String(card.id)),
+      ].slice(0, 40);
+      localStorage.setItem(SKEY, JSON.stringify(next));
+      setSessions(next);
+    },
+    [card.id, card.name, card.cover]
+  );
+
+  const send = useCallback(
+    async (textArg, historyArg) => {
+      const text = (textArg ?? input).trim();
+      if (!text || busy) return;
+      const base = historyArg ?? msgs;
+      if (!textArg) setInput("");
+      setBusy(true);
+      setStreaming("");
+      setNote("");
+      stick.current = true;
+
+      const userMsg = { id: uid(), role: "user", content: text, ts: Date.now() };
+      const nextMsgs = [...base, userMsg];
+      setMsgs(nextMsgs);
+
+      // 保住开头两轮（开场与人设锚点），再从尾部回填预算内的近期轮次。
+      // 只按 [-24:] 从尾部截，长对话一满就会把开场丢光，人物设定全重置。
+      const all = base.filter((m) => m.role === "user" || m.role === "assistant");
+      const HEAD_KEEP = 2;
+      const TAIL_BUDGET = 11000;
+      const head = all.slice(0, HEAD_KEEP);
+      const rest = all.slice(HEAD_KEEP);
+      let tail = [];
+      let used = 0;
+      for (let i = rest.length - 1; i >= 0; i -= 1) {
+        const len = rest[i].content.length;
+        if (used + len > TAIL_BUDGET && tail.length) break;
+        tail.unshift(rest[i]);
+        used += len;
+      }
+      if (rest.length && !tail.length) tail = rest.slice(-4);
+      const history = [...head, ...tail].map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
+
+      const ctl = new AbortController();
+      abort.current = ctl;
+      let acc = "";
+      let finished = false;
+
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            cardId: card.id,
+            prompt: text,
+            history,
+            model,
+            maxTokens: clampTokens(maxTokens),
+            // 恢复的旧会话：告诉引擎用哪个 chatId / 哪个号，
+            // 否则 createByCard 会新建一个空会话，历史接不上。
+            chatId: chatIdRef.current || undefined,
+            account: seedAcctRef.current || undefined,
+          }),
+          signal: ctl.signal,
+        });
+        if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+        await readSSE(res, (ev, d) => {
+          if (ev === "delta") {
+            acc += d.text || "";
+            setStreaming(acc);
+          } else if (ev === "account") {
+            setNote(`账号 ${d.name}`);
+          } else if (ev === "complete") {
+            finished = true;
+            const final = d.text || acc || "";
+            const list = [
+              ...nextMsgs,
+              { id: uid(), role: "assistant", content: final, ts: Date.now() },
+            ];
+            setMsgs(list);
+            setStreaming("");
+            save(list, final.slice(0, 42));
+            setNote(
+              d.credit != null
+                ? `完成 · ${d.account} · 余额 ${Number(d.credit).toFixed(2)}`
+                : "完成"
+            );
+            loadPool();
+          } else if (ev === "switch") {
+            setNote(d.reason === "credit" ? "余额见底，切换到下一个账号" : `切换：${d.reason}`);
+          } else if (ev === "end" && d.reason !== "stopped") {
+            setNote(
+              d.reason === "no_credit"
+                ? "池子暂时没有可用额度"
+                : d.message || "这次没成功，点重试再发一次"
+            );
+          }
+        });
+      } catch (e) {
+        if (e.name !== "AbortError") setNote(String(e.message || e));
+      } finally {
+        if (!finished && acc) {
+          const list = [
+            ...nextMsgs,
+            { id: uid(), role: "assistant", content: acc, ts: Date.now() },
+          ];
+          setMsgs(list);
+          save(list, acc.slice(0, 42));
+        }
+        setBusy(false);
+        setStreaming("");
+        abort.current = null;
+        taRef.current?.focus();
+      }
+    },
+    [input, busy, msgs, card.id, model, maxTokens, save]
+  );
+
+  const stop = useCallback(() => {
+    abort.current?.abort();
+    setNote("已停止");
+  }, []);
+
+  const regenerate = useCallback(() => {
+    if (busy) return;
+    const idx = [...msgs].reverse().findIndex((m) => m.role === "user");
+    if (idx < 0) return;
+    const realIdx = msgs.length - 1 - idx;
+    const head = msgs.slice(0, realIdx);
+    setMsgs(head);
+    save(head, head[head.length - 1]?.content?.slice(0, 42) || "");
+    send(msgs[realIdx].content, head);
+  }, [busy, msgs, save, send]);
+
+  const del = useCallback(
+    (id) => {
+      const list = msgs.filter((m) => m.id !== id);
+      setMsgs(list);
+      const last = list.filter((m) => m.role === "assistant").at(-1);
+      save(list, last?.content?.slice(0, 42) || "");
+    },
+    [msgs, save]
+  );
+
+  const clear = useCallback(() => {
+    setMsgs([]);
+    localStorage.removeItem(mkey(card.id));
+    save([], "");
+    setNote("已清空本会话");
+  }, [card.id, save]);
+
+  const grouped = useMemo(() => {
+    const g = new Map();
+    for (const s of sessions) {
+      const k = groupLabel(s.lastAt);
+      if (!g.has(k)) g.set(k, []);
+      g.get(k).push(s);
+    }
+    return [...g.entries()];
+  }, [sessions]);
+
+  const modelLabel = MODELS.find((m) => m.id === model)?.label || model;
+  const turns = msgs.filter((m) => m.role === "user").length;
+
+  return (
+    <div className="shell">
+      <div className="topnav-wrap">
+        <nav className="topnav glass">
+          <Link href="/" className="brand">
+            <span className="dot" />
+            澜
+          </Link>
+          <Link href="/" className="tab">
+            角色
+          </Link>
+          <Link href="/chat" className="tab active">
+            对话
+          </Link>
+          <span className="spacer" />
+          {pool && !pool.offline ? (
+            <span className={`pool-badge ${pool.total < 3.4 ? "empty" : ""}`}>
+              池子 {Number(pool.total).toFixed(1)} · {pool.usable}/{pool.count} 号
+            </span>
+          ) : null}
+          <span className="nav-note">{note || (busy ? "生成中…" : "就绪")}</span>
+        </nav>
+      </div>
+
+      <div className={`chat-shell ${showPanel ? "" : "no-panel"}`}>
+        <aside className="side glass glass-tinted side-left">
+          <h3>会话</h3>
+          {sessions.length === 0 ? <div className="state">还没有对话</div> : null}
+          {grouped.map(([label, list]) => (
+            <div key={label} className="sess-group">
+              <div className="sess-label">{label}</div>
+              {list.map((s) => (
+                <Link
+                  key={s.cardId}
+                  href={`/chat?card=${s.cardId}`}
+                  className={`sess ${String(s.cardId) === String(card.id) ? "on" : ""}`}
+                >
+                  {s.cover ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={s.cover} alt="" />
+                  ) : (
+                    <span className="ph" />
+                  )}
+                  <span className="t">
+                    <b>{s.name}</b>
+                    <span>{s.last || "开始新的对话"}</span>
+                  </span>
+                  <span className="time">{timeOf(s.lastAt)}</span>
+                </Link>
+              ))}
+            </div>
+          ))}
+          <div className="side-foot">
+            <Link href="/" className="mini-link">
+              ← 去挑新角色
+            </Link>
+          </div>
+        </aside>
+
+        <main className="chat-main">
+          <div className="chat-head">
+            {/* 手机端侧栏被隐藏，用这里回到角色列表；桌面端 display:none */}
+            <Link className="head-back press" href="/" aria-label="返回角色列表">
+              ‹
+            </Link>
+            {card.cover ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img className="head-cover" src={card.cover} alt="" />
+            ) : null}
+            <div className="who">
+              <b>{card.name}</b>
+              <span>{(card.tags || []).slice(0, 3).join(" · ") || "角色卡"}</span>
+            </div>
+            <span className="spacer" />
+            <select
+              className="model-pick"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              disabled={busy}
+              aria-label="模型"
+            >
+              {MODELS.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+            <button
+              className="icon-btn press"
+              onClick={() => setShowPanel((v) => !v)}
+              aria-label="设置"
+              title="设置"
+            >
+              ⚙
+            </button>
+          </div>
+
+          {pool && !pool.offline && pool.usable === 0 ? (
+            <div className="pool-empty">
+              号池额度已用完（{pool.count} 个号全部见底）。开新号后这里会自动恢复。
+            </div>
+          ) : null}
+
+          <div className="msgs" ref={box} onScroll={onScroll}>
+            {msgs.length === 0 && !streaming ? (
+              <div className="empty-chat">
+                <div className="ec-badge">开场</div>
+                <p>
+                  和「{card.name}」的第一句话，会决定这场戏的走向。
+                  <br />
+                  直接输入，或者从下面挑一句。
+                </p>
+                <div className="starter">
+                  {["（敲门）我进来了。", "今天有点累，陪我待一会儿。", "你在忙什么？"].map((s) => (
+                    <button key={s} className="chip press" onClick={() => send(s)}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {msgs.map((m, i) => {
+              const isUser = m.role === "user";
+              const parsed = isUser ? { text: m.content, sug: [] } : splitSug(m.content);
+              return (
+                <div className={`turn ${isUser ? "me" : "them"}`} key={m.id || i}>
+                  {!isUser ? (
+                    <div className="turn-head">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img className="turn-avatar" src={card.cover} alt="" />
+                      <span>{card.name}</span>
+                      <time>{timeOf(m.ts)}</time>
+                    </div>
+                  ) : null}
+
+                  <div className={`bubble ${isUser ? "user" : "bot"}`}>{parsed.text}</div>
+
+                  {parsed.sug.length ? (
+                    <div className="sug">
+                      {parsed.sug.map((s) => (
+                        <button
+                          key={s}
+                          className="sug-chip press"
+                          onClick={() => send(s)}
+                          disabled={busy}
+                        >
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  <div className="turn-ops">
+                    <button
+                      className="mini-btn"
+                      onClick={() => navigator.clipboard?.writeText(m.content)}
+                    >
+                      复制
+                    </button>
+                    {!isUser && i === msgs.length - 1 ? (
+                      <button className="mini-btn" onClick={regenerate} disabled={busy}>
+                        重生成
+                      </button>
+                    ) : null}
+                    <button className="mini-btn" onClick={() => del(m.id)} disabled={busy}>
+                      删除
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+
+            {streaming ? (
+              <div className="turn them">
+                <div className="turn-head">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img className="turn-avatar" src={card.cover} alt="" />
+                  <span>{card.name}</span>
+                  <span className="typing">正在输入</span>
+                </div>
+                <div className="bubble bot">
+                  {streaming}
+                  <span className="caret" />
+                </div>
+              </div>
+            ) : null}
+
+            {busy && !streaming ? (
+              <div className="turn them">
+                <div className="turn-head">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img className="turn-avatar" src={card.cover} alt="" />
+                  <span>{card.name}</span>
+                  <span className="typing">
+                    <i />
+                    <i />
+                    <i />
+                  </span>
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="composer">
+            <div className="composer-inner">
+              <textarea
+                ref={taRef}
+                value={input}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  const el = e.target;
+                  el.style.height = "auto";
+                  el.style.height = Math.min(180, el.scrollHeight) + "px";
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    send();
+                  }
+                  if (e.key === "Escape" && busy) stop();
+                }}
+                placeholder={`和「${card.name}」说点什么…  Enter 发送 · Shift+Enter 换行`}
+                rows={1}
+                enterKeyHint="send"
+                autoComplete="off"
+                autoCorrect="off"
+              />
+              {busy ? (
+                <button className="send stop press" onClick={stop} aria-label="停止">
+                  ■
+                </button>
+              ) : (
+                <button
+                  className="send press"
+                  onClick={() => send()}
+                  disabled={!input.trim()}
+                  aria-label="发送"
+                >
+                  ↑
+                </button>
+              )}
+            </div>
+            <div className="hint">
+              <span>{input.length} 字</span>
+              <span>·</span>
+              <span>{modelLabel}</span>
+              <span>·</span>
+              <span>{turns} 轮</span>
+              <span className="spacer" />
+              <span>自动带上最近 24 条上下文</span>
+            </div>
+          </div>
+        </main>
+
+        {showPanel ? (
+          <>
+            <div
+              className="drawer-mask"
+              onClick={() => setShowPanel(false)}
+              aria-hidden="true"
+            />
+            <aside className="side glass glass-tinted side-right drawer">
+              <h3>本会话</h3>
+              <div className="panel-body">
+                <label className="fld">模型</label>
+                <select
+                  className="inp"
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  disabled={busy}
+                >
+                  {MODELS.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+
+                <label className="fld">最大输出 token</label>
+                <input
+                  className="inp"
+                  type="number"
+                  min={TOKEN_MIN}
+                  max={TOKEN_MAX}
+                  step={100}
+                  value={maxTokens}
+                  onChange={(e) => setMaxTokens(e.target.value)}
+                  disabled={busy}
+                />
+
+                <div className="divider" />
+
+                <div className="kv">
+                  <span>消息</span>
+                  <b>{msgs.length}</b>
+                </div>
+                <div className="kv">
+                  <span>字数</span>
+                  <b>{msgs.reduce((n, m) => n + m.content.length, 0)}</b>
+                </div>
+
+                <button
+                  className="btn btn-ghost press wide"
+                  onClick={clear}
+                  disabled={busy || msgs.length === 0}
+                >
+                  清空本会话
+                </button>
+                <p className="tip">消息存在本机浏览器；额度由后台池子统一转发。</p>
+                <button
+                  className="btn btn-ghost press wide drawer-close"
+                  onClick={() => setShowPanel(false)}
+                >
+                  收起
+                </button>
+              </div>
+            </aside>
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}

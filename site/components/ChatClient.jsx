@@ -127,6 +127,8 @@ export default function ChatClient({ card }) {
   const [sessions, setSessions] = useState([]);
   const [note, setNote] = useState("");
   const [showPanel, setShowPanel] = useState(true);
+  // 手机端会话抽屉：与设置抽屉独立开关
+  const [showSess, setShowSess] = useState(false);
   const [pool, setPool] = useState(null);
 
   const box = useRef(null);
@@ -407,7 +409,8 @@ export default function ChatClient({ card }) {
 
   return (
     <div className="shell">
-      <div className="topnav-wrap">
+      {/* 手机端(<860px)整条导航隐藏，空间让给对话；关键信息并在 .chat-head 内 */}
+      <div className="topnav-wrap nav-desktop-only">
         <nav className="topnav glass">
           <Link href="/" className="brand">
             <span className="dot" />
@@ -430,7 +433,16 @@ export default function ChatClient({ card }) {
       </div>
 
       <div className={`chat-shell ${showPanel ? "" : "no-panel"}`}>
-        <aside className="side glass glass-tinted side-left">
+        {showSess ? (
+          <div
+            className="drawer-mask sess-mask"
+            onClick={() => setShowSess(false)}
+            aria-hidden="true"
+          />
+        ) : null}
+        <aside
+          className={`side glass glass-tinted side-left${showSess ? " open" : ""}`}
+        >
           <h3>会话</h3>
           {sessions.length === 0 ? <div className="state">还没有对话</div> : null}
           {grouped.map(([label, list]) => (
@@ -441,6 +453,7 @@ export default function ChatClient({ card }) {
                   key={s.cardId}
                   href={`/chat?card=${s.cardId}`}
                   className={`sess ${String(s.cardId) === String(card.id) ? "on" : ""}`}
+                  onClick={() => setShowSess(false)}
                 >
                   {s.cover ? (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -466,7 +479,18 @@ export default function ChatClient({ card }) {
 
         <main className="chat-main">
           <div className="chat-head">
-            {/* 手机端侧栏被隐藏，用这里回到角色列表；桌面端 display:none */}
+            {/* 手机端：汉堡展开会话抽屉 */}
+            <button
+              className="head-burger press"
+              onClick={() => setShowSess((v) => !v)}
+              aria-label="会话列表"
+              aria-expanded={showSess}
+            >
+              <span />
+              <span />
+              <span />
+            </button>
+            {/* 手机端侧栏收起后，用这里回到角色列表；桌面端 display:none */}
             <Link className="head-back press" href="/" aria-label="返回角色列表">
               ‹
             </Link>
@@ -479,6 +503,11 @@ export default function ChatClient({ card }) {
               <span>{(card.tags || []).slice(0, 3).join(" · ") || "角色卡"}</span>
             </div>
             <span className="spacer" />
+            {pool && !pool.offline ? (
+              <span className={`pool-badge head-pool ${pool.total < 3.4 ? "empty" : ""}`}>
+                池 {Number(pool.total).toFixed(1)}
+              </span>
+            ) : null}
             <select
               className="model-pick"
               value={model}

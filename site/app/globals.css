@@ -1598,6 +1598,16 @@ html[data-theme="dark"] .notes-card .notes {
   display: none;
 }
 
+/* 号池徽标在 .chat-head 内的一份：桌面端隐藏（顶栏已有），仅手机显示 */
+.head-pool {
+  display: none;
+}
+
+/* 会话抽屉触发器：仅手机显示 */
+.head-burger {
+  display: none;
+}
+
 /* 消息流 */
 .msgs {
   flex: 1;
@@ -1979,28 +1989,50 @@ html[data-theme="dark"] .notes-card .notes {
 }
 
 @media (max-width: 860px) {
-  /* 视口高度用 dvh，避开手机浏览器地址栏伸缩导致的底部裁切 */
+  /* ========== 手机端对话页：应用式单列布局 ==========
+     结构：.shell(占满视口) > .chat-shell(1fr 单列) > .chat-main(flex 纵向)
+           .chat-main > .chat-head(固定) + .msgs(吃掉剩余) + .composer(贴底)
+     两侧栏在手机上不参与栅格，改由底部抽屉承载。 */
+
   .shell {
-    padding-top: 56px;
+    padding-top: 0;
     padding-bottom: 0;
-    min-height: 100dvh;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
   }
 
-  .topnav-wrap {
-    top: 6px;
-    height: 60px;
+  /* 手机端整条顶部导航去掉，空间全部给对话 */
+  .nav-desktop-only {
+    display: none;
   }
 
-  .topnav {
-    height: 52px;
-    padding: 0 8px 0 13px;
-    gap: 4px;
+  /* 导航没了，head 顶到屏幕最上沿 */
+  .head-pool {
+    display: inline-flex;
+    align-items: center;
+    height: 22px;
+    padding: 0 8px;
+    margin-left: 2px;
+    border-radius: 999px;
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0;
+    flex: none;
+    background: rgba(85, 123, 121, 0.1);
+    color: rgba(32, 41, 41, 0.62);
+    white-space: nowrap;
+  }
+
+  .head-pool.empty {
+    background: rgba(196, 92, 74, 0.12);
+    color: rgba(150, 62, 46, 0.9);
   }
 
   .brand {
     font-size: 14px;
-    padding-right: 10px;
-    margin-right: 4px;
+    padding-right: 8px;
+    margin-right: 0;
   }
 
   .brand .dot {
@@ -2009,8 +2041,8 @@ html[data-theme="dark"] .notes-card .notes {
   }
 
   .tab {
-    height: 40px;
-    padding: 0 13px;
+    height: 38px;
+    padding: 0 11px;
     font-size: 13px;
   }
 
@@ -2019,45 +2051,113 @@ html[data-theme="dark"] .notes-card .notes {
   }
 
   .pool-badge {
-    height: 26px;
-    margin-right: 6px;
+    height: 24px;
+    margin-right: 4px;
     font-size: 11px;
   }
 
-  /* 聊天区：单列 + dvh；顶栏留白由 .shell 承担，这里不再抢 padding */
+  /* 单列：容器只负责分配高度，不留 padding/gap */
   .chat-shell,
   .chat-shell.no-panel {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
     padding: 0;
     gap: 0;
-    height: calc(100dvh - 56px);
-    min-height: 0;
     width: 100%;
+    height: 100dvh;
+    min-height: 0;
+  }
+
+  /* 右栏（设置）在手机上彻底不走栅格，走底部抽屉 */
+  .side.side-right {
+    display: none;
+  }
+
+  /* 会话列表：可伸缩左侧抽屉 */
+  .side.side-left {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 41;
+    width: min(84vw, 320px);
+    max-height: 100dvh;
+    padding: 16px 12px calc(16px + env(safe-area-inset-bottom));
+    border-radius: 0 20px 20px 0;
+    background: var(--solid);
+    box-shadow: 8px 0 32px rgba(19, 37, 41, 0.22);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1),
+      visibility 0s linear 240ms;
+  }
+
+  .side.side-left.open {
+    transform: translateX(0);
+    visibility: visible;
+    transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1),
+      visibility 0s linear 0s;
+  }
+
+  .sess-mask {
+    z-index: 40;
+  }
+
+  /* 汉堡按钮 */
+  .head-burger {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    width: 30px;
+    height: 30px;
+    flex: none;
+    margin-left: -2px;
+    padding: 0 6px;
+    border-radius: 9px;
+  }
+
+  .head-burger span {
+    display: block;
+    height: 1.5px;
+    border-radius: 2px;
+    background: rgba(32, 41, 41, 0.66);
+  }
+
+  .head-burger:hover {
+    background: rgba(32, 41, 41, 0.06);
   }
 
   .chat-main {
-    border-radius: 18px 18px 0 0;
-    border: 1px solid rgba(32, 41, 41, 0.08);
-    border-bottom: none;
-    box-shadow: 0 -6px 24px rgba(19, 37, 41, 0.06);
-    background: rgba(252, 252, 250, 0.96);
+    display: flex;
+    flex-direction: column;
     min-height: 0;
+    height: 100%;
+    border-radius: 0;
+    border: none;
+    box-shadow: none;
+    background: transparent;
     overflow: hidden;
   }
 
-  /* 顶部信息条：吸在聊天区顶端，滚动时卡名与设置常驻 */
+  /* 顶栏：固定不滚，卡名 + 返回 + 设置 */
   .chat-head {
-    position: sticky;
-    top: 0;
-    z-index: 3;
-    padding: 7px 10px;
+    position: relative;
+    top: auto;
+    z-index: 2;
+    flex: none;
+    padding: 8px 10px;
     gap: 8px;
     border-radius: 0;
-    background: rgba(255, 255, 255, 0.86);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    border-bottom: 1px solid rgba(32, 41, 41, 0.07);
-    flex: none;
+    border-bottom: 1px solid rgba(32, 41, 41, 0.08);
+    background: rgba(252, 252, 250, 0.94);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
   }
 
   .head-back {
@@ -2068,53 +2168,114 @@ html[data-theme="dark"] .notes-card .notes {
     flex: none;
     margin-left: -2px;
     border-radius: 999px;
-    font-size: 20px;
+    font-size: 22px;
     line-height: 1;
     color: rgba(32, 41, 41, 0.62);
   }
 
-  .head-back:hover {
-    background: rgba(32, 41, 41, 0.06);
-    color: var(--ink);
+  .head-cover {
+    width: 34px;
+    height: 34px;
+    border-radius: 11px;
+    flex: none;
   }
 
-  .head-cover {
-    width: 32px;
-    height: 32px;
-    border-radius: 10px;
+  .chat-head .who {
+    min-width: 0;
+    flex: 1;
   }
 
   .chat-head .who b {
-    font-size: 13px;
-    max-width: 40vw;
+    display: block;
+    font-size: 13.5px;
+    max-width: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .chat-head .who span {
-    font-size: 10.5px;
+    font-size: 11px;
+    max-width: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
+  .chat-head .spacer {
+    display: none;
+  }
+
+  /* 模型选择：手机上收成图标按钮宽度，不挤占卡名 */
   .model-pick {
     height: 30px;
-    font-size: 11.5px;
-    max-width: 34vw;
+    max-width: 96px;
+    font-size: 11px;
+    flex: none;
   }
 
   .icon-btn {
     width: 30px;
     height: 30px;
+    flex: none;
     font-size: 13px;
   }
 
+  /* 消息流：唯一可滚动区，吃满剩余高度 */
   .msgs {
-    padding: 10px 10px 12px;
-    gap: 10px;
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 12px 12px 14px;
+    gap: 14px;
+    overflow-y: auto;
+    overflow-x: hidden;
     -webkit-overflow-scrolling: touch;
-    overscroll-behavior: contain;
+    overscroll-behavior-y: contain;
   }
 
-  /* 每条消息的「头像 + 名字 + 时间」行压到最小（原本 24px 头像 + 7px 边距 = 31px/条） */
+  .empty-chat {
+    margin: 6vh auto 0;
+    padding: 0 4px;
+  }
+
+  .ec-badge {
+    font-size: 11px;
+    padding: 4px 12px;
+  }
+
+  .empty-chat p {
+    font-size: 14px;
+    line-height: 1.7;
+  }
+
+  /* 开场建议：整行大按钮，拇指好按 */
+  .starter {
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 16px;
+    width: 100%;
+  }
+
+  .starter .chip {
+    height: 44px;
+    width: 100%;
+    justify-content: center;
+    font-size: 13.5px;
+    border-radius: 14px;
+  }
+
+  /* 消息 */
+  .turn {
+    gap: 0;
+    max-width: 100%;
+  }
+
+  .turn + .turn {
+    margin-top: 4px;
+  }
+
   .turn-head {
-    margin-bottom: 3px;
+    margin-bottom: 4px;
     gap: 6px;
     font-size: 10.5px;
   }
@@ -2125,119 +2286,96 @@ html[data-theme="dark"] .notes-card .notes {
     border-radius: 6px;
   }
 
-  .turn + .turn {
-    margin-top: 8px;
-  }
-
-  .turn-ops {
-    opacity: 1;
-    gap: 2px;
-    margin-top: 4px;
-  }
-
-  .turn-ops time {
-    display: none;
-  }
-
-  .empty-chat {
-    margin: 6vh auto 0;
-    padding: 0 6px;
-  }
-
-  .empty-chat p {
-    font-size: 14px;
-  }
-
-  .starter {
-    gap: 6px;
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  /* 开场建议：整行按钮，拇指好按 */
-  .starter .chip {
-    height: 42px;
-    justify-content: center;
-    font-size: 13px;
-  }
-
   .bubble {
     font-size: 15px;
-    line-height: 1.62;
+    line-height: 1.66;
   }
 
   .bubble.user {
-    max-width: 86%;
+    max-width: 84%;
     padding: 10px 14px;
     border-radius: 18px 18px 6px 18px;
   }
 
   .bubble.bot {
     max-width: 100%;
+    padding: 0;
   }
 
-  /* 触屏没有 hover，消息操作常显 */
+  /* 触屏无 hover，操作常显 */
   .turn-ops {
     opacity: 1;
-    gap: 2px;
+    gap: 4px;
     margin-top: 6px;
   }
 
   .mini-btn {
-    padding: 5px 10px;
+    padding: 6px 11px;
     font-size: 11.5px;
+    border-radius: 9px;
   }
 
   .sug {
     gap: 6px;
     margin-top: 10px;
+    flex-wrap: wrap;
   }
 
   .sug-chip {
-    height: 32px;
-    padding: 0 12px;
-    font-size: 12px;
+    height: 34px;
+    padding: 0 13px;
+    font-size: 12.5px;
   }
 
-  /* 输入区回到底部栅格内，不再 fixed 悬浮盖住最后一条消息 */
+  /* 输入区：贴底固定，不参与滚动 */
   .composer {
-    position: static;
-    padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+    position: relative;
+    flex: none;
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
     background: rgba(252, 252, 250, 0.96);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
-    border-top: 1px solid rgba(32, 41, 41, 0.07);
-    flex: none;
-    z-index: auto;
+    border-top: 1px solid rgba(32, 41, 41, 0.08);
+    z-index: 2;
   }
 
   .composer-inner {
-    padding: 6px 6px 6px 13px;
-    border-radius: 20px;
-    box-shadow: 0 4px 16px rgba(19, 37, 41, 0.06);
+    padding: 6px 6px 6px 14px;
+    border-radius: 22px;
+    gap: 8px;
   }
 
+  /* 16px 字号下 placeholder 会折两行，min-height 必须容得下，否则被裁 */
   .composer textarea {
     font-size: 16px;
-    min-height: 38px;
-    max-height: 120px;
+    line-height: 1.45;
+    min-height: 64px;
+    max-height: 132px;
+    padding: 8px 0;
   }
 
   .send {
     width: 40px;
     height: 40px;
+    font-size: 15px;
   }
 
+  /* 提示行：单行不换行，超出省略 */
   .hint {
-    font-size: 10px;
-    margin: 4px 4px 0;
-    gap: 4px;
-    line-height: 1.25;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin: 6px 6px 0;
+    font-size: 10.5px;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
   }
 
-  /* 手机端 .hint 共 7 个 span：字数 · 模型 · 轮数 (spacer) 长文案
-     只隐长文案与最后一个分隔点，spacer 保留以保持左对齐 */
-  .hint span:nth-child(4),
+  .hint span {
+    flex: none;
+  }
+
   .hint span:nth-child(7) {
     display: none;
   }

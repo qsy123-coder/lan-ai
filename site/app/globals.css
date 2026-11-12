@@ -5016,3 +5016,55 @@ html[data-theme="dark"] .nd-switch > span {
     display: none;
   }
 }
+
+/* ---------- 手机端对话页：输入框可容纳多行 + 顶栏不挤 ---------- */
+@media (max-width: 860px) {
+  /* 输入框：原来 min-height 44px，但 16px 字 + 1.45 行高 + 上下 padding 8px
+     两行就要 62px，scrollHeight 62 塞进 clientHeight 44 → 文字被裁。
+     提到 68px（约两行半），并让 max-height 跟视口走。 */
+  .composer textarea {
+    min-height: 68px;
+    max-height: min(132px, 22dvh);
+    line-height: 1.45;
+    padding: 10px 0;
+    font-size: 16px;
+  }
+
+  .composer {
+    /* 输入框变高后，底栏整体高度交给内容，不再被写死 */
+    height: auto;
+    min-height: 0;
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+  }
+
+  /* 顶栏：390px 内原本塞了 7 个元素，卡名只剩 96px 宽，长名必重叠。
+     去掉「返回」（左滑抽屉已能回首页），池子徽章收窄，卡名留足宽度。 */
+  .head-back {
+    display: none;
+  }
+
+  .head-pool {
+    padding: 0 6px;
+    font-size: 10px;
+    max-width: 72px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .chat-head .who {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .chat-head .who b {
+    max-width: 100%;
+  }
+
+  .chat-head .who span {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+}

@@ -4936,3 +4936,23 @@ html[data-theme="dark"] .nd-switch > span {
     box-shadow: -8px 0 32px rgba(0, 0, 0, 0.22);
   }
 }
+
+/* 详情页 404：单列居中，不复用两栏网格 */
+.detail-wrap.detail-wrap-single {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 640px;
+}
+
+.detail-wrap.detail-wrap-single .state-panel {
+  gap: 16px;
+}
+
+.detail-wrap.detail-wrap-single .state-panel p {
+  line-height: 1.8;
+}
+
+.detail-wrap.detail-wrap-single .btn-chat {
+  display: inline-flex;
+  margin-top: 6px;
+  text-decoration: none;
+}

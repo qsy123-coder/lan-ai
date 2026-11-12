@@ -4968,3 +4968,51 @@ html[data-theme="dark"] .nd-switch > span {
   width: 100%;
   padding: 0 22px;
 }
+
+/* ---------- 手机端对话页：顶栏让位 + 左右抽屉方向修正 ---------- */
+@media (max-width: 860px) {
+  /* 对话页的 Nav 被 .nav-hide-phone 隐藏了，但 .shell 的 52px 顶栏占位还在，
+     导致 .chat-shell 从 y=52 开始、再吃满 100dvh，输入框被挤出屏幕 52px。
+     这里把占位归零，让对话页真正从屏幕最上沿开始。 */
+  .nav-hide-phone ~ .shell,
+  .shell:has(> .nav-hide-phone) {
+    padding-top: 0;
+    padding-bottom: 0;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .nav-hide-phone ~ .shell > .chat-shell,
+  .shell:has(> .nav-hide-phone) > .chat-shell {
+    height: 100dvh;
+    padding: 0;
+    gap: 0;
+    width: 100%;
+  }
+
+  /* 会话抽屉：用户要求从左边展开。原来是右侧滑入（translateX(100%)），
+     改成左侧滑入，阴影方向同步翻转。 */
+  .sesspanel,
+  .chat-shell .sesspanel {
+    left: 0;
+    right: auto;
+    border-left: none;
+    border-right: 1px solid var(--ch-line);
+    transform: translateX(-100%);
+  }
+
+  .sesspanel.open {
+    transform: translateX(0);
+    box-shadow: 8px 0 32px rgba(0, 0, 0, 0.24);
+  }
+
+  /* 抽屉从左边出来，关闭键换成左箭头更符合方向感 */
+  .sesspanel .ico-close {
+    display: grid;
+  }
+
+  .sesspanel .ico-back {
+    display: none;
+  }
+}

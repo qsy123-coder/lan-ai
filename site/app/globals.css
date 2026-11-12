@@ -4207,3 +4207,732 @@ html[data-theme="dark"] [tabindex]:focus-visible {
   background: rgba(255, 255, 255, 0.16);
   border-color: rgba(255, 255, 255, 0.22);
 }
+
+/* 次级文字对比度收口：桌面版旧规则（0.5 / 0.42）只有 3.05:1，不够 AA */
+.chat-head .who span {
+  color: var(--ch-fg-3);
+}
+
+@media (max-width: 860px) {
+  .chat-head .who span {
+    color: var(--ch-fg-3);
+  }
+}
+
+html[data-theme="dark"] .chat-head .who span {
+  color: var(--ch-fg-3);
+}
+
+/* 旧 .hint 规则会覆盖新的语义色 */
+html[data-theme="dark"] .hint {
+  color: var(--ch-fg-3);
+}
+
+html[data-theme="dark"] .turn-head,
+html[data-theme="dark"] .turn-head time {
+  color: var(--ch-fg-3);
+}
+
+html[data-theme="dark"] .empty-chat {
+  color: var(--ch-fg-2);
+}
+
+html[data-theme="dark"] .empty-chat .chip {
+  background: var(--ch-surface);
+  border-color: var(--ch-line);
+  color: var(--ch-fg);
+}
+
+html[data-theme="dark"] .ec-badge {
+  color: var(--ch-accent);
+  border-color: var(--ch-accent);
+}
+
+html[data-theme="dark"] .sess-item,
+html[data-theme="dark"] .sess {
+  color: var(--ch-fg);
+}
+
+html[data-theme="dark"] .chat-note {
+  color: var(--ch-accent);
+  background: var(--ch-accent-weak);
+}
+
+html[data-theme="dark"] .pool-empty {
+  color: var(--ch-danger);
+  background: rgba(168, 67, 75, 0.12);
+}
+
+/* ============================================================
+   手机端导航：顶栏只留 52px 细条，其余全部收进抽屉
+   ------------------------------------------------------------
+   窄屏顶栏：汉堡 + logo + 搜索键 + 主题键
+   抽屉：导航四项 / 搜索 / 主题 / 敏感内容 / 去挑角色
+   ============================================================ */
+
+/* 桌面端不显示汉堡与抽屉 */
+.nav-burger {
+  display: none;
+}
+
+.nav-scrim,
+.nav-drawer {
+  display: none;
+}
+
+@media (max-width: 860px) {
+  /* 顶栏收成 52px 一条，去掉中间搜索框与右侧多余图标 */
+  .shell {
+    padding-top: 52px;
+  }
+
+  .topnav-wrap {
+    height: 52px;
+  }
+
+  .topnav {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 52px;
+    padding: 0 8px 0 4px;
+  }
+
+  .nav-burger {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    flex: none;
+    color: var(--ink);
+    background: transparent;
+    border: 1px solid transparent;
+  }
+
+  .nav-burger:active {
+    background: rgba(32, 41, 41, 0.06);
+  }
+
+  /* 顶栏里的整组 tabs / 搜索 / 右侧图标全部隐藏，改由抽屉承载 */
+  .nav-tabs {
+    display: none;
+  }
+
+  .topnav .search {
+    display: none;
+  }
+
+  .nav-right .sens-btn,
+  .nav-right .nav-plus,
+  .nav-right .nav-avatar {
+    display: none;
+  }
+
+  .nav-right {
+    margin-left: auto;
+    gap: 0;
+  }
+
+  /* logo 不再带右分隔线，紧贴汉堡 */
+  .brand {
+    padding-right: 0;
+    margin-right: 0;
+    border-right: none;
+    gap: 6px;
+  }
+
+  .brand-logo {
+    width: 26px;
+    height: 26px;
+  }
+
+  .brand-t {
+    font-size: 15px;
+  }
+
+  .topnav .theme-btn {
+    width: 40px;
+    height: 40px;
+    margin-left: 0;
+  }
+
+  /* ---------- 抽屉 ---------- */
+  .nav-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    background: var(--ch-scrim, rgba(19, 37, 41, 0.42));
+  }
+
+  .nav-drawer {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 71;
+    width: min(84vw, 320px);
+    padding: calc(8px + env(safe-area-inset-top)) 0 calc(12px + env(safe-area-inset-bottom));
+    background: var(--ch-surface, #fcfcfa);
+    color: var(--ch-fg, #202929);
+    border-right: 1px solid var(--ch-line, rgba(32, 41, 41, 0.12));
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
+      visibility 0s linear 260ms;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .nav-drawer.open {
+    transform: translateX(0);
+    visibility: visible;
+    transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
+      visibility 0s linear 0s;
+    box-shadow: 8px 0 32px rgba(0, 0, 0, 0.22);
+  }
+
+  .nd-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    height: 52px;
+    padding: 0 6px 0 14px;
+  }
+
+  .nd-brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .nd-brand b {
+    font-size: 17px;
+    font-weight: 600;
+  }
+
+  .nd-close {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    flex: none;
+    color: var(--ch-fg-2, rgba(32, 41, 41, 0.72));
+    background: transparent;
+  }
+
+  .nd-close:active {
+    background: var(--ch-accent-weak, rgba(85, 123, 121, 0.12));
+  }
+
+  .nd-search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    margin: 6px 12px 10px;
+    padding: 0 10px;
+    height: 44px;
+    border: 1px solid var(--ch-line, rgba(32, 41, 41, 0.12));
+    background: var(--ch-field, #fff);
+    color: var(--ch-fg-3, rgba(32, 41, 41, 0.68));
+  }
+
+  .nd-search:focus-within {
+    border-color: var(--ch-accent, #557b79);
+    box-shadow: inset 0 0 0 1px var(--ch-accent, #557b79);
+  }
+
+  .nd-search input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--ch-fg, #202929);
+    font-size: 16px;
+  }
+
+  .nd-search input::placeholder {
+    color: var(--ch-fg-3, rgba(32, 41, 41, 0.68));
+  }
+
+  .nd-nav {
+    display: flex;
+    flex-direction: column;
+    flex: none;
+  }
+
+  .nd-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 52px;
+    padding: 0 16px;
+    color: var(--ch-fg, #202929);
+    font-size: 15.5px;
+    border-left: 3px solid transparent;
+  }
+
+  .nd-item:active {
+    background: var(--ch-bg-soft, #ecebe5);
+  }
+
+  .nd-item.on {
+    border-left-color: var(--ch-accent, #557b79);
+    background: var(--ch-accent-weak, rgba(85, 123, 121, 0.12));
+    font-weight: 600;
+  }
+
+  .nd-item.soon {
+    color: var(--ch-fg-4, rgba(32, 41, 41, 0.56));
+  }
+
+  .nd-label {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .nd-tag {
+    flex: none;
+    font-style: normal;
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    padding: 2px 5px;
+    color: var(--ch-fg-3, rgba(32, 41, 41, 0.68));
+    border: 1px solid var(--ch-line, rgba(32, 41, 41, 0.12));
+  }
+
+  .nd-sep {
+    height: 1px;
+    margin: 10px 16px;
+    background: var(--ch-line-soft, rgba(32, 41, 41, 0.07));
+  }
+
+  .nd-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 52px;
+    padding: 0 16px;
+    width: 100%;
+    color: var(--ch-fg, #202929);
+    font-size: 15px;
+    text-align: left;
+    background: transparent;
+    border: none;
+  }
+
+  .nd-row-label {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .nd-theme {
+    margin-left: 0;
+    width: 40px;
+    height: 40px;
+  }
+
+  /* 开关：直角，靠位移表达状态 */
+  .nd-switch {
+    position: relative;
+    width: 44px;
+    height: 26px;
+    flex: none;
+    background: var(--ch-line, rgba(32, 41, 41, 0.12));
+    transition: background 160ms ease;
+  }
+
+  .nd-switch > span {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 20px;
+    height: 20px;
+    background: var(--ch-surface, #fcfcfa);
+    transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .nd-switch.on {
+    background: var(--ch-accent, #557b79);
+  }
+
+  .nd-switch.on > span {
+    transform: translateX(18px);
+  }
+
+  .nd-foot {
+    margin-top: auto;
+    padding: 12px 16px 0;
+  }
+
+  .nd-foot a {
+    font-size: 13px;
+    color: var(--ch-fg-2, rgba(32, 41, 41, 0.72));
+  }
+
+  .nd-foot a:active {
+    color: var(--ch-accent, #557b79);
+  }
+}
+
+/* 深色下抽屉与开关的补充 */
+html[data-theme="dark"] .nav-drawer {
+  background: var(--ch-surface, #111820);
+  border-right-color: var(--ch-line, rgba(255, 255, 255, 0.13));
+}
+
+html[data-theme="dark"] .nd-search {
+  background: var(--ch-field, #18222b);
+}
+
+html[data-theme="dark"] .nd-item.on {
+  background: var(--ch-accent-weak, rgba(127, 179, 170, 0.16));
+}
+
+html[data-theme="dark"] .nd-switch > span {
+  background: #e6eaf3;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-drawer,
+  .nav-drawer.open,
+  .nd-switch,
+  .nd-switch > span {
+    transition: none !important;
+  }
+}
+
+/* ============================================================
+   对话页手机端：两条独立抽屉
+   ------------------------------------------------------------
+   1) 导航抽屉（Nav.jsx，从左滑入）—— 首页/详情页用
+   2) 对话抽屉（SessionList.jsx，从右滑入）—— 对话页用
+   对话页手机端不再叠全局导航，避免"双顶栏"。
+   ============================================================ */
+
+/* 对话页手机端隐藏全局导航（Nav 里加了 .nav-hide-phone 类） */
+@media (max-width: 860px) {
+  .nav-hide-phone {
+    display: none;
+  }
+
+  /* 导航没了，对话页从屏幕最上沿开始 */
+  .nav-hide-phone ~ .chat-shell {
+    height: 100dvh;
+  }
+}
+
+@media (max-width: 860px) {
+  /* 对话抽屉：改从右侧滑入，宽度 86vw，左侧留出可点遮罩 */
+  .sesspanel {
+    left: auto;
+    right: 0;
+    width: min(86vw, 360px);
+    border-left: 1px solid var(--ch-line);
+    transform: translateX(100%);
+    box-shadow: none;
+  }
+
+  .sesspanel.open {
+    transform: translateX(0);
+    box-shadow: -8px 0 32px rgba(0, 0, 0, 0.24);
+  }
+
+  /* 抽屉头部：手机端用返回箭头代替 ×，40px 触摸区 */
+  .sesspanel .ico-close {
+    display: none;
+  }
+
+  .sesspanel .ico-back {
+    display: block;
+  }
+
+  /* 底部导航入口：手机上才需要 */
+  .sp-foot-gap {
+    display: block;
+    flex: 1;
+  }
+
+  .sp-foot-nav {
+    display: inline-block;
+  }
+
+  /* 对话页顶栏：手机加高到 60px，容纳汉堡 + 返回 + 卡名 + 主题 + 设置 */
+  .chat-head {
+    height: calc(60px + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) 4px 0;
+    gap: 4px;
+  }
+
+  .head-burger,
+  .head-back {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    flex: none;
+    margin-left: 0;
+    border-radius: 0;
+    color: var(--ch-fg-2);
+    background: transparent;
+    font-size: 0;
+  }
+
+  .head-burger:active,
+  .head-back:active {
+    background: var(--ch-accent-weak);
+    color: var(--ch-accent);
+  }
+
+  .chat-head .who {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .chat-head .who b {
+    font-size: 14.5px;
+    max-width: none;
+  }
+
+  .head-theme {
+    width: 40px;
+    height: 40px;
+    margin-left: 0;
+  }
+
+  .chat-head .icon-btn,
+  .chat-head .head-ico:last-child {
+    width: 40px;
+    height: 40px;
+    flex: none;
+  }
+
+  .chat-head .model-pick {
+    display: none;
+  }
+
+  .chat-head .spacer {
+    display: none;
+  }
+}
+
+/* 桌面端：抽屉底部入口不显示 */
+.sp-foot-gap {
+  display: none;
+}
+
+.sp-foot-nav {
+  display: none;
+}
+
+.sesspanel .ico-back {
+  display: none;
+}
+
+/* ============================================================
+   设置抽屉（参数 / 模型 / 主题 / 续写轮数）
+   ------------------------------------------------------------
+   手机：右侧全高抽屉，从右滑入，与对话抽屉同一套动效
+   桌面：沿用右栏，宽度 280px
+   ============================================================ */
+@media (max-width: 1180px) {
+  .side-right.drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: auto;
+    width: min(86vw, 360px);
+    max-width: 360px;
+    max-height: 100dvh;
+    height: 100dvh;
+    padding: calc(12px + env(safe-area-inset-top)) 14px calc(16px + env(safe-area-inset-bottom));
+    border: none;
+    border-left: 1px solid var(--ch-line);
+    border-top: none;
+    border-radius: 0;
+    transform: translateX(100%);
+    animation: none;
+    transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    box-shadow: -8px 0 32px rgba(0, 0, 0, 0.22);
+  }
+
+  /* 打开态由 React 决定渲染，这里是入场动画 */
+  .side-right.drawer {
+    animation: drawer-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  @keyframes drawer-in {
+    from {
+      transform: translateX(100%);
+    }
+    to {
+      transform: translateX(0);
+    }
+  }
+
+  .side-right.drawer h3 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 12px;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--ch-fg);
+  }
+
+  /* 抽屉里的设置项加大触摸区 */
+  .side-right.drawer .fld {
+    font-size: 12px;
+    margin: 14px 0 6px;
+  }
+
+  .side-right.drawer .inp,
+  .side-right.drawer select.inp {
+    height: 46px;
+    font-size: 16px;
+  }
+
+  .side-right.drawer .btn.wide {
+    height: 48px;
+    font-size: 14px;
+  }
+
+  .side-right.drawer .kv {
+    font-size: 13px;
+    padding: 6px 0;
+  }
+
+  .side-right.drawer .tip {
+    font-size: 12px;
+  }
+
+  /* 顶部拖拽提示条去掉（直角风格不留装饰） */
+  .side-right.drawer::before {
+    display: none;
+  }
+}
+
+@media (max-width: 860px) {
+  /* 设置抽屉与对话抽屉同宽，避免两个抽屉宽度不一致 */
+  .side-right.drawer {
+    width: min(86vw, 360px);
+    max-width: 360px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .side-right.drawer {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* 设置抽屉头部：标题 + 关闭键 */
+.drw-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.drw-head h3 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
+.drw-close {
+  display: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  color: var(--ch-fg-2);
+  background: transparent;
+  border: none;
+}
+
+.drw-close:active {
+  background: var(--ch-accent-weak);
+  color: var(--ch-accent);
+}
+
+@media (max-width: 1180px) {
+  .drw-close {
+    display: grid;
+  }
+}
+
+/* 图标互斥：手机端对话抽屉头部用返回箭头，桌面用 × */
+.sesspanel .ico-back {
+  display: none;
+}
+
+.sesspanel .ico-close {
+  display: block;
+}
+
+@media (max-width: 860px) {
+  .sesspanel .ico-close {
+    display: none;
+  }
+
+  .sesspanel .ico-back {
+    display: grid;
+  }
+}
+
+/* 对话抽屉最终定位：贴右边缘、宽度 86vw、左侧遮罩可点。
+   前面的 inset:0 会撑满全宽，这里用 top/bottom/left/right 显式覆盖。 */
+@media (max-width: 860px) {
+  .sesspanel,
+  .chat-shell .sesspanel {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: auto;
+    right: 0;
+    width: min(86vw, 360px);
+    max-width: 360px;
+    height: 100dvh;
+    inset: auto 0 0 auto;
+    border: none;
+    border-left: 1px solid var(--ch-line);
+    transform: translateX(100%);
+    visibility: hidden;
+    box-shadow: none;
+  }
+
+  .sesspanel.open {
+    transform: translateX(0);
+    visibility: visible;
+    box-shadow: -8px 0 32px rgba(0, 0, 0, 0.24);
+  }
+
+  /* 设置抽屉同样贴右、同宽 */
+  .side-right.drawer {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: auto;
+    right: 0;
+    width: min(86vw, 360px);
+    max-width: 360px;
+    height: 100dvh;
+    border: none;
+    border-left: 1px solid var(--ch-line);
+    box-shadow: -8px 0 32px rgba(0, 0, 0, 0.22);
+  }
+}

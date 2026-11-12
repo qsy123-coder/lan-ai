@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Nav from "./Nav";
+import SessionList from "./SessionList";
+import ThemeToggle, { ThemeSegments } from "./ThemeToggle";
 
 const MODELS = [
   { id: "x-apex-flux-0217-16k", label: "Flux 16K" },
@@ -415,14 +417,30 @@ export default function ChatClient({ card }) {
     setNote("已清空本会话");
   }, [card.id, save]);
 
-  const grouped = useMemo(() => {
+  // 从列表里彻底移除一个会话（消息体 + 索引条目），不影响其它卡
+  const dropSession = useCallback(
+    (cardId) => {
+      try {
+        localStorage.removeItem(mkey(cardId));
+        const next = readJSON(SKEY, []).filter((x) => String(x.cardId) !== String(cardId));
+        localStorage.setItem(SKEY, JSON.stringify(next));
+        setSessions(next);
+        if (String(cardId) === String(card.id)) {
+          setMsgs([]);
+          setNote("已删除本会话");
+        }
+      } catch {}
+    },
+    [card.id]
+  );
+
+  const groupedCount = useMemo(() => {
     const g = new Map();
     for (const s of sessions) {
       const k = groupLabel(s.lastAt);
-      if (!g.has(k)) g.set(k, []);
-      g.get(k).push(s);
+      g.set(k, (g.get(k) || 0) + 1);
     }
-    return [...g.entries()];
+    return g;
   }, [sessions]);
 
   const modelLabel = MODELS.find((m) => m.id === model)?.label || model;
@@ -434,66 +452,47 @@ export default function ChatClient({ card }) {
       <Nav />
 
       <div className={`chat-shell ${showPanel ? "" : "no-panel"}`}>
-        {showSess ? (
-          <div
-            className="drawer-mask sess-mask"
-            onClick={() => setShowSess(false)}
-            aria-hidden="true"
-          />
-        ) : null}
-        <aside
-          className={`side glass glass-tinted side-left${showSess ? " open" : ""}`}
-        >
-          <h3>会话</h3>
-          {sessions.length === 0 ? <div className="state">还没有对话</div> : null}
-          {grouped.map(([label, list]) => (
-            <div key={label} className="sess-group">
-              <div className="sess-label">{label}</div>
-              {list.map((s) => (
-                <Link
-                  key={s.cardId}
-                  href={`/chat?card=${s.cardId}`}
-                  className={`sess ${String(s.cardId) === String(card.id) ? "on" : ""}`}
-                  onClick={() => setShowSess(false)}
-                >
-                  {s.cover ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={s.cover} alt="" />
-                  ) : (
-                    <span className="ph" />
-                  )}
-                  <span className="t">
-                    <b>{s.name}</b>
-                    <span>{s.last || "开始新的对话"}</span>
-                  </span>
-                  <span className="time">{timeOf(s.lastAt)}</span>
-                </Link>
-              ))}
-            </div>
-          ))}
-          <div className="side-foot">
-            <Link href="/" className="mini-link">
-              ← 去挑新角色
-            </Link>
-          </div>
-        </aside>
+        <SessionList
+          open={showSess}
+          sessions={sessions}
+          currentId={card.id}
+          onClose={() => setShowSess(false)}
+          onDelete={dropSession}
+          onOpenSettings={() => {
+            setShowSess(false);
+            setShowPanel(true);
+          }}
+        />
 
         <main className="chat-main">
           <div className="chat-head">
-            {/* 手机端：汉堡展开会话抽屉 */}
+            {/* 手机端：打开对话抽屉 */}
             <button
               className="head-burger press"
               onClick={() => setShowSess((v) => !v)}
-              aria-label="会话列表"
+              aria-label="对话列表"
               aria-expanded={showSess}
             >
-              <span />
-              <span />
-              <span />
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path
+                  d="M4 7h16M4 12h16M4 17h10"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                />
+              </svg>
             </button>
-            {/* 手机端侧栏收起后，用这里回到角色列表；桌面端 display:none */}
-            <Link className="head-back press" href="/" aria-label="返回角色列表">
-              ‹
+            {/* 手机端：回到首页；桌面端隐藏 */}
+            <Link className="head-back press" href="/" aria-label="返回首页">
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path
+                  d="M14.5 5.5L8 12l6.5 6.5"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
             </Link>
             {card.cover ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -509,6 +508,7 @@ export default function ChatClient({ card }) {
                 池 {Number(pool.total).toFixed(1)}
               </span>
             ) : null}
+            <ThemeToggle className="head-theme" />
             <select
               className="model-pick"
               value={model}
@@ -531,6 +531,8 @@ export default function ChatClient({ card }) {
               ⚙
             </button>
           </div>
+
+          {note ? <div className="chat-note">{note}</div> : null}
 
           {pool && !pool.offline && pool.usable === 0 ? (
             <div className="pool-empty">
@@ -697,9 +699,29 @@ export default function ChatClient({ card }) {
               onClick={() => setShowPanel(false)}
               aria-hidden="true"
             />
-            <aside className="side glass glass-tinted side-right drawer">
-              <h3>本会话</h3>
+            <aside className="side glass glass-tinted side-right drawer" aria-label="会话设置">
+              <div className="drw-head">
+                <h3>本会话</h3>
+                <button
+                  type="button"
+                  className="drw-close press"
+                  onClick={() => setShowPanel(false)}
+                  aria-label="关闭设置"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path
+                      d="M6 6l12 12M18 6L6 18"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </button>
+              </div>
               <div className="panel-body">
+                <label className="fld">主题</label>
+                <ThemeSegments />
+
                 <label className="fld">模型</label>
                 <select
                   className="inp"

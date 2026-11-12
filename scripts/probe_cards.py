@@ -28,8 +28,9 @@ def save(name, data):
         json.dump(data, f, ensure_ascii=False, indent=1)
 
 
-for t in ("highest_rated_7d", "trending", "new", "popular"):
-    inp = {"type": t, "categoryName": None, "direction": "forward", "meta": None}
+# 入参只认 {"type": ...}。合法值见 notes/010 §1；多传字段会 400。
+for t in ("highest_rated_7d", "highest_rated_30d", "highest_rated_all", "games"):
+    inp = {"type": t}
     r = trpc_get("home.getCards", inp)
     print("home.getCards", t, r.status_code, len(r.text))
     if r.status_code == 200:

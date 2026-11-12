@@ -15,9 +15,16 @@ $ROOT  = $PSScriptRoot
 $SRC   = Join-Path $ROOT "site"
 $RT    = Join-Path $env:LOCALAPPDATA "dzmm-site"
 $CARDS = Join-Path $ROOT "captures\site\cards.json"
-$PY    = "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
-$NODE  = "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe"
-$PNPM  = "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\pnpm\bin\pnpm.mjs"
+$PY    = if ($env:LAN_PY) { $env:LAN_PY }
+         elseif (Test-Path "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe") { "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe" }
+         else { (Get-Command python -ErrorAction Stop).Source }
+$NODE  = if ($env:LAN_NODE) { $env:LAN_NODE }
+         elseif (Test-Path "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe") { "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe" }
+         else { (Get-Command node -ErrorAction Stop).Source }
+$PNPM  = if ($env:LAN_PNPM) { $env:LAN_PNPM }
+         elseif (Test-Path "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\pnpm\bin\pnpm.mjs") { "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\pnpm\bin\pnpm.mjs" }
+         elseif (Test-Path (Join-Path $env:APPDATA "npm\node_modules\pnpm\bin\pnpm.cjs")) { Join-Path $env:APPDATA "npm\node_modules\pnpm\bin\pnpm.cjs" }
+         else { throw "找不到 pnpm，请设置 LAN_PNPM" }
 
 function Test-Port([int]$p) {
   [bool](Get-NetTCPConnection -State Listen -LocalPort $p -ErrorAction SilentlyContinue)
@@ -46,20 +53,23 @@ robocopy $SRC $RT /E /XD node_modules .next /NFL /NDL /NJH /NJS /NP | Out-Null
 $needInstall = -not (Test-Path (Join-Path $RT "node_modules\next"))
 $needBuild = $Rebuild -or -not (Test-Path (Join-Path $RT ".next\BUILD_ID"))
 if (-not $needBuild) {
-  $newest = Get-ChildItem (Join-Path $RT "app") -Recurse -File |
+  # 只看 app/ 会漏掉 lib/ 与 components/ 的改动（cards.js 就栽在这），三处一起看。
+  $srcDirs = @("app", "lib", "components") | ForEach-Object { Join-Path $RT $_ } |
+             Where-Object { Test-Path $_ }
+  $newest = Get-ChildItem $srcDirs -Recurse -File |
             Sort-Object LastWriteTime -Descending | Select-Object -First 1
-  if ($newest.LastWriteTime -gt (Get-Item (Join-Path $RT ".next\BUILD_ID")).LastWriteTime) {
+  if ($newest -and $newest.LastWriteTime -gt (Get-Item (Join-Path $RT ".next\BUILD_ID")).LastWriteTime) {
     $needBuild = $true
   }
 }
 if ($needInstall) {
   Write-Host "  [0/3] 安装依赖…" -ForegroundColor Cyan
-  & $NODE $PNPM install --dir $RT 2>&1 | Select-Object -Last 3
+  & $NODE $PNPM install --dir $RT | Select-Object -Last 3
 }
 if ($needBuild) {
   Write-Host "  [0/3] 构建前台…" -ForegroundColor Cyan
   Push-Location $RT
-  & $NODE ".\node_modules\next\dist\bin\next" build 2>&1 | Select-Object -Last 4
+  & $NODE ".\node_modules\next\dist\bin\next" build | Select-Object -Last 4
   Pop-Location
 }
 

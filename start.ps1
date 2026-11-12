@@ -16,9 +16,16 @@ $ErrorActionPreference = "Stop"
 $ROOT  = $PSScriptRoot
 $SRC   = Join-Path $ROOT "web"
 $RT    = Join-Path $env:LOCALAPPDATA "dzmm-web"
-$PY    = "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
-$NODE  = "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe"
-$PNPM  = "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\pnpm\bin\pnpm.mjs"
+$PY    = if ($env:LAN_PY) { $env:LAN_PY }
+         elseif (Test-Path "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe") { "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe" }
+         else { (Get-Command python -ErrorAction Stop).Source }
+$NODE  = if ($env:LAN_NODE) { $env:LAN_NODE }
+         elseif (Test-Path "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe") { "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe" }
+         else { (Get-Command node -ErrorAction Stop).Source }
+$PNPM  = if ($env:LAN_PNPM) { $env:LAN_PNPM }
+         elseif (Test-Path "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\pnpm\bin\pnpm.mjs") { "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\pnpm\bin\pnpm.mjs" }
+         elseif (Test-Path (Join-Path $env:APPDATA "npm\node_modules\pnpm\bin\pnpm.cjs")) { Join-Path $env:APPDATA "npm\node_modules\pnpm\bin\pnpm.cjs" }
+         else { throw "找不到 pnpm，请设置 LAN_PNPM" }
 
 function Test-Port([int]$p) {
   [bool](Get-NetTCPConnection -State Listen -LocalPort $p -ErrorAction SilentlyContinue)
@@ -46,12 +53,12 @@ if (-not $needBuild) {
 
 if ($needInstall) {
   Write-Host "  [0/3] 安装依赖（首次，约 40s）…" -ForegroundColor Cyan
-  & $NODE $PNPM install --dir $RT 2>&1 | Select-Object -Last 4
+  & $NODE $PNPM install --dir $RT | Select-Object -Last 4
 }
 if ($needBuild) {
   Write-Host "  [0/3] 构建界面（约 20s）…" -ForegroundColor Cyan
   Push-Location $RT
-  & $NODE ".\node_modules\next\dist\bin\next" build 2>&1 | Select-Object -Last 6
+  & $NODE ".\node_modules\next\dist\bin\next" build | Select-Object -Last 6
   Pop-Location
 }
 

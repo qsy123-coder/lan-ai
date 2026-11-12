@@ -90,38 +90,20 @@ def harvest_ids(limit_pages=6):
             push(r.get("cardId"))
         print("awarded: %d" % len(ids))
 
-    # 首页卡片流：多 tab × 多页
-    tabs = ["latest", "forYou", "newbie", "hot", "greenFeatured"]
-    for tab in tabs:
-        for page in range(limit_pages):
-            if GATED["hit"]:
-                return ids
-            d = trpc("home.getCards", {"tab": tab, "limit": 40, "offset": page * 40})
-            batch = items_of(d)
-            before = len(ids)
-            for it in batch:
-                push(it.get("id") or it.get("cardId"))
-            print("home.getCards tab=%-14s page=%d -> +%d (total %d)" % (
-                tab, page, len(ids) - before, len(ids)))
-            if not batch:
-                break
-            time.sleep(1.6)
-
-    # 其他入口
-    for proc, payload in (
-        ("home.forYou", {"limit": 40}),
-        ("home.newbie", {"limit": 40}),
-        ("home.greenFeatured", {"limit": 40}),
-        ("home.greenFeaturedByTheme", {"limit": 40}),
-        ("home.greenFeaturedMore", {"limit": 40, "offset": 0}),
-    ):
+    # 首页卡片流。入参只认 {"type": ...}，多传 categoryName/direction/meta 一律 400。
+    # 合法值见 notes/010 §1（zod 报文泄出）。
+    types = ["newest", "highest_rated_1d", "highest_rated_7d",
+             "highest_rated_30d", "highest_rated_all", "games"]
+    for typ in types:
         if GATED["hit"]:
-            break
-        d = trpc(proc, payload)
+            return ids
+        d = trpc("home.getCards", {"type": typ})
+        batch = items_of(d)
         before = len(ids)
-        for it in items_of(d):
+        for it in batch:
             push(it.get("id") or it.get("cardId"))
-        print("%-26s -> +%d (total %d)" % (proc, len(ids) - before, len(ids)))
+        print("home.getCards type=%-20s -> +%d (total %d)" % (
+            typ, len(ids) - before, len(ids)))
         time.sleep(1.6)
 
     return ids

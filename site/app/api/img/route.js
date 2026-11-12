@@ -1,16 +1,127 @@
 import { NextResponse } from "next/server";
 import fs from "node:fs/promises";
 import path from "node:path";
+import os from "node:os";
 import crypto from "node:crypto";
+import http from "node:http";
+import https from "node:https";
+import tls from "node:tls";
 
 export const dynamic = "force-dynamic";
 
-const CACHE = process.env.IMG_CACHE || "/opt/lan/imgcache";
+// 默认落到本机临时目录；Linux 部署可用 IMG_CACHE 指到 /opt/lan/imgcache。
+const CACHE = process.env.IMG_CACHE || path.join(os.tmpdir(), "lan-imgcache");
+
 // 只允许代理这几个域名，避免被当成开放代理
 const ALLOWED_HOSTS = new Set(["pxlorbit.com", "assetora.net"]);
 
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+  "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
+
 function keyOf(src, w) {
   return crypto.createHash("sha1").update(`${w}|${src}`).digest("hex");
+}
+
+// 环境里的代理（curl 能通而 Node fetch 不通，就是因为 fetch 不读这些变量）
+function proxyUrl() {
+  const p =
+    process.env.HTTPS_PROXY || process.env.https_proxy ||
+    process.env.HTTP_PROXY || process.env.http_proxy || "";
+  try {
+    const u = new URL(p);
+    return u.protocol.startsWith("http") ? u : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 经 HTTP CONNECT 隧道取 https URL 的完整响应体。 */
+function fetchViaProxy(target, proxy, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const host = target.hostname;
+    const port = target.port || 443;
+    const auth = proxy.username
+      ? "Basic " + Buffer.from(
+          `${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`
+        ).toString("base64")
+      : undefined;
+
+    const creq = http.request({
+      host: proxy.hostname,
+      port: proxy.port || 80,
+      method: "CONNECT",
+      path: `${host}:${port}`,
+      headers: auth ? { "proxy-authorization": auth } : {},
+      timeout: timeoutMs,
+    });
+
+    creq.on("connect", (res, socket) => {
+      if (res.statusCode !== 200) {
+        socket.destroy();
+        return reject(new Error("proxy CONNECT " + res.statusCode));
+      }
+      const r = https.request(
+        {
+          host,
+          port,
+          path: target.pathname + target.search,
+          method: "GET",
+          headers: { host, referer: "https://www.dzmm.ai/", "user-agent": UA },
+          // @ts-ignore 复用已建立的隧道
+          createConnection: () => tls.connect({ socket, servername: host }),
+          timeout: timeoutMs,
+        },
+        (up) => {
+          const chunks = [];
+          up.on("data", (c) => chunks.push(c));
+          up.on("end", () =>
+            resolve({
+              status: up.statusCode || 0,
+              ctype: up.headers["content-type"] || "image/jpeg",
+              buf: Buffer.concat(chunks),
+            })
+          );
+          up.on("error", reject);
+        }
+      );
+      r.on("timeout", () => r.destroy(new Error("upstream timeout")));
+      r.on("error", reject);
+      r.end();
+    });
+
+    creq.on("timeout", () => creq.destroy(new Error("proxy timeout")));
+    creq.on("error", reject);
+    creq.end();
+  });
+}
+
+/** 直连 https（无代理时用）。 */
+function fetchDirect(target, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const r = https.get(
+      {
+        host: target.hostname,
+        port: target.port || 443,
+        path: target.pathname + target.search,
+        headers: { referer: "https://www.dzmm.ai/", "user-agent": UA },
+        timeout: timeoutMs,
+      },
+      (up) => {
+        const chunks = [];
+        up.on("data", (c) => chunks.push(c));
+        up.on("end", () =>
+          resolve({
+            status: up.statusCode || 0,
+            ctype: up.headers["content-type"] || "image/jpeg",
+            buf: Buffer.concat(chunks),
+          })
+        );
+        up.on("error", reject);
+      }
+    );
+    r.on("timeout", () => r.destroy(new Error("upstream timeout")));
+    r.on("error", reject);
+  });
 }
 
 export async function GET(req) {
@@ -45,20 +156,34 @@ export async function GET(req) {
     /* miss */
   }
 
-  // 2) 回源
-  let buf;
-  let ctype = "image/jpeg";
-  try {
-    const r = await fetch(target.href, {
-      headers: { referer: "https://www.dzmm.ai/", "user-agent": "Mozilla/5.0" },
-      signal: AbortSignal.timeout(20000),
-    });
-    if (!r.ok) return new NextResponse("upstream " + r.status, { status: 502 });
-    ctype = r.headers.get("content-type") || ctype;
-    buf = Buffer.from(await r.arrayBuffer());
-  } catch {
-    return new NextResponse("upstream error", { status: 502 });
+  // 2) 回源：优先走代理，失败再直连
+  const TIMEOUT = 45000;
+  const px = proxyUrl();
+  let got = null;
+  const errors = [];
+  if (px) {
+    try {
+      got = await fetchViaProxy(target, px, TIMEOUT);
+    } catch (e) {
+      errors.push("proxy: " + (e.message || e));
+    }
   }
+  if (!got || got.status !== 200) {
+    try {
+      got = await fetchDirect(target, TIMEOUT);
+    } catch (e) {
+      errors.push("direct: " + (e.message || e));
+    }
+  }
+  if (!got) {
+    return new NextResponse("upstream error: " + errors.join(" | "), { status: 502 });
+  }
+  if (got.status !== 200) {
+    return new NextResponse("upstream " + got.status, { status: 502 });
+  }
+
+  let buf = got.buf;
+  let ctype = got.ctype;
 
   // 3) 用 sharp 缩图（没装就原样返回，不影响可用性）
   if (w > 0) {

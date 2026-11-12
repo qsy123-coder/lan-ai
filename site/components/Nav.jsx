@@ -5,11 +5,12 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 // 主导航：照 dzmm —— 左「角色 消息 论坛 我的」／中「搜索」／右「加号 头像」
+// 还没实现的页面标 soon：渲染成禁用态，避免点了 404（悬停预取也会 404）。
 const NAV = [
   { href: "/", label: "角色", icon: "role" },
-  { href: "/messages", label: "消息", icon: "msg", badge: 9 },
-  { href: "/forum", label: "论坛", icon: "forum" },
-  { href: "/me", label: "我的", icon: "me" },
+  { href: "/messages", label: "消息", icon: "msg", soon: true },
+  { href: "/forum", label: "论坛", icon: "forum", soon: true },
+  { href: "/me", label: "我的", icon: "me", soon: true },
 ];
 
 function Icon({ name }) {
@@ -111,13 +112,25 @@ export default function Nav() {
           </Link>
 
           <div className="nav-tabs">
-            {NAV.map((t) => (
-              <Link key={t.href} href={t.href} className={`tab ${active(t.href) ? "active" : ""}`}>
-                <Icon name={t.icon} />
-                <span>{t.label}</span>
-                {t.badge ? <em className="tab-badge">{t.badge}</em> : null}
-              </Link>
-            ))}
+            {NAV.map((t) =>
+              t.soon ? (
+                <span
+                  key={t.href}
+                  className="tab tab-soon"
+                  title="即将上线"
+                  aria-disabled="true"
+                >
+                  <Icon name={t.icon} />
+                  <span>{t.label}</span>
+                  <em className="tab-soon-tag">即将</em>
+                </span>
+              ) : (
+                <Link key={t.href} href={t.href} className={`tab ${active(t.href) ? "active" : ""}`}>
+                  <Icon name={t.icon} />
+                  <span>{t.label}</span>
+                </Link>
+              )
+            )}
           </div>
         </div>
 
@@ -173,16 +186,21 @@ export default function Nav() {
             {theme === "dark" ? "☀" : "☾"}
           </button>
 
-          <button type="button" className="nav-plus" aria-label="新建" title="新建">
+          <button
+            type="button"
+            className="nav-plus"
+            aria-label="新建（即将上线）"
+            title="新建角色（即将上线）"
+            disabled
+          >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
             </svg>
           </button>
 
-          <Link href="/me" className="nav-avatar" aria-label="我的账号">
+          <span className="nav-avatar" title="我的账号（即将上线）" aria-disabled="true">
             <span className="nav-av-inner" />
-            <em className="nav-dot" />
-          </Link>
+          </span>
         </div>
       </nav>
     </div>

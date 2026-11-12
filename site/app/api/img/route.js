@@ -6,14 +6,29 @@ import crypto from "node:crypto";
 import http from "node:http";
 import https from "node:https";
 import tls from "node:tls";
+import dns from "node:dns";
 
 export const dynamic = "force-dynamic";
 
 // 默认落到本机临时目录；Linux 部署可用 IMG_CACHE 指到 /opt/lan/imgcache。
 const CACHE = process.env.IMG_CACHE || path.join(os.tmpdir(), "lan-imgcache");
 
-// 只允许代理这几个域名，避免被当成开放代理
-const ALLOWED_HOSTS = new Set(["pxlorbit.com", "assetora.net"]);
+// 只允许代理这些域名，避免被当成开放代理。
+// 卡片封面在 pxlorbit / assetora，但作者头像散落在 supabase 项目域名、
+// rls.* 与 dzmm.ai 默认头像上 —— 漏掉它们整片头像 403。
+const ALLOWED_HOSTS = new Set([
+  "pxlorbit.com",
+  "assetora.net",
+  "dzmm.ai",
+  "www.dzmm.ai",
+  "rls.dzmm.ai",
+]);
+const ALLOWED_SUFFIX = [".supabase.co", ".supabase.in"];
+
+function hostAllowed(host) {
+  if (ALLOWED_HOSTS.has(host)) return true;
+  return ALLOWED_SUFFIX.some((s) => host.endsWith(s));
+}
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
@@ -96,7 +111,7 @@ function fetchViaProxy(target, proxy, timeoutMs) {
 }
 
 /** 直连 https（无代理时用）。 */
-function fetchDirect(target, timeoutMs) {
+function fetchDirectOnce(target, timeoutMs) {
   return new Promise((resolve, reject) => {
     const r = https.get(
       {
@@ -112,6 +127,7 @@ function fetchDirect(target, timeoutMs) {
         up.on("end", () =>
           resolve({
             status: up.statusCode || 0,
+            location: up.headers.location,
             ctype: up.headers["content-type"] || "image/jpeg",
             buf: Buffer.concat(chunks),
           })
@@ -122,6 +138,20 @@ function fetchDirect(target, timeoutMs) {
     r.on("timeout", () => r.destroy(new Error("upstream timeout")));
     r.on("error", reject);
   });
+}
+
+/** 直连并跟随最多 3 次重定向（dzmm.ai/default-avatar.png 是 301）。 */
+async function fetchDirect(target, timeoutMs) {
+  let cur = target;
+  for (let i = 0; i < 4; i++) {
+    const r = await fetchDirectOnce(cur, timeoutMs);
+    if (r.status >= 300 && r.status < 400 && r.location) {
+      cur = new URL(r.location, cur);
+      continue;
+    }
+    return r;
+  }
+  return { status: 310, ctype: "text/plain", buf: Buffer.alloc(0) };
 }
 
 export async function GET(req) {
@@ -135,7 +165,7 @@ export async function GET(req) {
   } catch {
     return new NextResponse("bad url", { status: 400 });
   }
-  if (!/^https?:$/.test(target.protocol) || !ALLOWED_HOSTS.has(target.hostname)) {
+  if (!/^https?:$/.test(target.protocol) || !hostAllowed(target.hostname)) {
     return new NextResponse("forbidden host", { status: 403 });
   }
 
@@ -156,7 +186,13 @@ export async function GET(req) {
     /* miss */
   }
 
-  // 2) 回源：优先走代理，失败再直连
+  // 2) 回源：先确认域名能解析（已下线的 supabase 项目会白等 45s）
+  try {
+    await dns.promises.lookup(target.hostname);
+  } catch {
+    return new NextResponse("dns failed", { status: 404 });
+  }
+
   const TIMEOUT = 45000;
   const px = proxyUrl();
   let got = null;
@@ -170,7 +206,9 @@ export async function GET(req) {
   }
   if (!got || got.status !== 200) {
     try {
-      got = await fetchDirect(target, TIMEOUT);
+      const d = await fetchDirect(target, TIMEOUT);
+      // 直连拿到 301 时，代理那条多半也只是超时，用直连结果兜底
+      if (!got || d.status === 200) got = d;
     } catch (e) {
       errors.push("direct: " + (e.message || e));
     }
@@ -179,7 +217,9 @@ export async function GET(req) {
     return new NextResponse("upstream error: " + errors.join(" | "), { status: 502 });
   }
   if (got.status !== 200) {
-    return new NextResponse("upstream " + got.status, { status: 502 });
+    return new NextResponse("upstream " + got.status + " " + (got.location || ""), {
+      status: 502,
+    });
   }
 
   let buf = got.buf;

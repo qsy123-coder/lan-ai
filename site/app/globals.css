@@ -295,6 +295,28 @@ select {
   color: var(--focus);
 }
 
+/* 尚未上线的导航项：禁用态 + 角标，明确告诉用户不是坏了 */
+.tab-soon {
+  color: rgba(32, 41, 41, 0.34);
+  cursor: not-allowed;
+}
+
+.tab-soon:hover {
+  background: transparent;
+  color: rgba(32, 41, 41, 0.34);
+}
+
+.tab-soon-tag {
+  margin-left: 2px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: rgba(32, 41, 41, 0.06);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
 /* 搜索内输入 */
 .search input {
   flex: 1;
@@ -410,14 +432,21 @@ html[data-theme="dark"] .search input::placeholder {
 .home-wrap {
   position: relative;
   z-index: 1;
-  width: min(100% - 32px, 1248px);
+  /* 两侧留白随视口走，避免大屏下内容贴边；上限 1360 让 5 列卡不超 260px */
+  width: min(100% - 56px, 1360px);
   margin: 0 auto;
-  padding: 8px 0 88px;
+  padding: 4px 0 96px;
 }
 
-@media (min-width: 1536px) {
+@media (min-width: 1600px) {
   .home-wrap {
-    width: min(100% - 32px, 1504px);
+    width: min(100% - 72px, 1520px);
+  }
+}
+
+@media (min-width: 1900px) {
+  .home-wrap {
+    width: 1520px;
   }
 }
 
@@ -517,8 +546,9 @@ html[data-theme="dark"] .search input::placeholder {
 /* ---------- 网格：桌面 5 列 ---------- */
 .home-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 8px;
+  /* 固定 5 列会把卡压到 243px；用 auto-fill + 下限，宽屏自动多排一列 */
+  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
+  gap: 18px 16px;
 }
 
 /* ---------- 卡片 ---------- */
@@ -526,28 +556,43 @@ html[data-theme="dark"] .search input::placeholder {
   display: flex;
   flex-direction: column;
   gap: 0;
-  padding: 8px;
-  border-radius: 18px;
-  transition: background 0.18s ease, transform 0.18s ease;
+  padding: 0;
+  border-radius: 16px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
+  will-change: transform;
 }
 
+/* 悬停只抬升 + 投影，不再整块变白（白块会把封面糊掉） */
 .zc:hover {
-  background: rgba(255, 255, 255, 0.62);
-  transform: translateY(-2px);
+  transform: translateY(-4px);
+}
+
+.zc:hover .zc-cover {
+  box-shadow:
+    0 12px 28px rgba(19, 37, 41, 0.16),
+    0 2px 6px rgba(19, 37, 41, 0.08);
+}
+
+.zc:focus-visible {
+  outline: 2px solid var(--sage, #6f8f7d);
+  outline-offset: 3px;
 }
 
 .zc-cover {
   position: relative;
   width: 100%;
-  aspect-ratio: 1 / 1;
-  border-radius: 12px;
+  /* 3:4 竖版更贴合角色卡，也比 1:1 更有画报感 */
+  aspect-ratio: 3 / 4;
+  border-radius: 14px;
   overflow: hidden;
   background: linear-gradient(150deg, var(--mist), #d3e2dd);
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
+  box-shadow: 0 2px 8px rgba(19, 37, 41, 0.06);
+  transition: box-shadow 0.2s ease;
 }
 
 .zc-cover img {
@@ -627,11 +672,14 @@ html[data-theme="dark"] .search input::placeholder {
 /* 标题两行截断 */
 .zc-title {
   margin-top: 10px;
-  font-size: 15px;
+  padding: 0 2px;
+  font-size: 13.5px;
   font-weight: 600;
-  line-height: 1.5;
+  line-height: 1.45;
   color: var(--ink);
-  height: 45px;
+  /* 用 min-height 而非死高度，换行时不会把底栏顶飞 */
+  min-height: 39px;
+  max-height: 39px;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -644,7 +692,8 @@ html[data-theme="dark"] .search input::placeholder {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 8px;
+  margin-top: 6px;
+  padding: 0 2px;
   min-width: 0;
 }
 
@@ -817,12 +866,19 @@ html[data-theme="dark"] .search input::placeholder {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: 380px minmax(0, 1fr);
+  /* 封面列固定，信息列吃掉剩余宽度；上限与首页一致，切页不跳宽度 */
+  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
   align-items: start;
-  gap: 40px;
-  width: min(100% - 32px, 1180px);
+  gap: 48px;
+  width: min(100% - 56px, 1360px);
   margin: 0 auto;
-  padding: 36px 0 96px;
+  padding: 32px 0 96px;
+}
+
+@media (min-width: 1600px) {
+  .detail-wrap {
+    width: min(100% - 72px, 1520px);
+  }
 }
 
 /* ---------- 左：封面 ---------- */
@@ -1361,16 +1417,23 @@ html[data-theme="dark"] .notes-card .notes {
 
 .chat-shell {
   display: grid;
-  grid-template-columns: 272px minmax(0, 1fr) 264px;
-  gap: 16px;
-  padding: 20px;
-  width: min(1440px, 100%);
+  /* 三栏：会话列表 / 主对话 / 角色信息。宽度对齐首页与详情页 */
+  grid-template-columns: 268px minmax(0, 1fr) 280px;
+  gap: 18px;
+  padding: 18px 0 0;
+  width: min(100% - 56px, 1360px);
   margin: 0 auto;
-  height: calc(100vh - 92px);
+  height: calc(100vh - 68px);
+}
+
+@media (min-width: 1600px) {
+  .chat-shell {
+    width: min(100% - 72px, 1520px);
+  }
 }
 
 .chat-shell.no-panel {
-  grid-template-columns: 272px minmax(0, 1fr);
+  grid-template-columns: 268px minmax(0, 1fr);
 }
 
 @media (max-width: 1180px) {

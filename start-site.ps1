@@ -15,10 +15,16 @@ $ROOT  = $PSScriptRoot
 $SRC   = Join-Path $ROOT "site"
 $RT    = Join-Path $env:LOCALAPPDATA "dzmm-site"
 $CARDS = Join-Path $ROOT "captures\site\cards.json"
-$PY    = "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
-$NODE  = "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe"
-$PNPM  = "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\pnpm\bin\pnpm.mjs"
-
+$PY    = if ($env:LAN_PY) { $env:LAN_PY }
+         elseif (Test-Path "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe") { "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe" }
+         else { (Get-Command python -ErrorAction Stop).Source }
+$NODE  = if ($env:LAN_NODE) { $env:LAN_NODE }
+         elseif (Test-Path "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe") { "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe" }
+         else { (Get-Command node -ErrorAction Stop).Source }
+$PNPM  = if ($env:LAN_PNPM) { $env:LAN_PNPM }
+         elseif (Test-Path "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\pnpm\bin\pnpm.mjs") { "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\pnpm\bin\pnpm.mjs" }
+         elseif (Test-Path (Join-Path $env:APPDATA "npm\node_modules\pnpm\bin\pnpm.cjs")) { Join-Path $env:APPDATA "npm\node_modules\pnpm\bin\pnpm.cjs" }
+         else { throw "找不到 pnpm，请设置 LAN_PNPM" }
 function Test-Port([int]$p) {
   [bool](Get-NetTCPConnection -State Listen -LocalPort $p -ErrorAction SilentlyContinue)
 }
@@ -54,12 +60,12 @@ if (-not $needBuild) {
 }
 if ($needInstall) {
   Write-Host "  [0/3] 安装依赖…" -ForegroundColor Cyan
-  & $NODE $PNPM install --dir $RT 2>&1 | Select-Object -Last 3
+  & $NODE $PNPM install --dir $RT | Select-Object -Last 3
 }
 if ($needBuild) {
   Write-Host "  [0/3] 构建前台…" -ForegroundColor Cyan
   Push-Location $RT
-  & $NODE ".\node_modules\next\dist\bin\next" build 2>&1 | Select-Object -Last 4
+  & $NODE ".\node_modules\next\dist\bin\next" build | Select-Object -Last 4
   Pop-Location
 }
 
@@ -97,7 +103,9 @@ Write-Host ""
 if (-not $NoOpen) { Start-Process $url }
 
 if ($Tunnel) {
-  $cf = "C:\Users\dsh\cloudflared.exe"
+  $cf = if ($env:LAN_CLOUDFLARED) { $env:LAN_CLOUDFLARED }
+      elseif (Test-Path "C:\Users\dsh\cloudflared.exe") { "C:\Users\dsh\cloudflared.exe" }
+      else { (Get-Command cloudflared -ErrorAction SilentlyContinue).Source }
   if (-not (Test-Path $cf)) { Write-Host "  找不到 cloudflared，跳过隧道" -ForegroundColor Red; return }
   Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
   $log = Join-Path $ROOT "out\cf.log"

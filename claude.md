@@ -450,6 +450,29 @@ asyncio.run(main())
    建会话必须换卡片（`createByCard` 按 cardId 去重），部分卡片会报 `404 对话数据异常`；可用卡片清单见 `notes/005` §4。
    （notes/004 把 403 归因于“新会话不放行”，已作废。）
 14. **余额不足不是 402**：HTTP 仍是 200，SSE 里才抛 `upgrade_needed/credit`，且不扣费 —— 判断成功必须看到 `"type":"complete"`。
+15. **仓库名是 `qsy123-coder/lan-ai`**（不是 `qsyyq-coder`，后者 404）。`git remote -v` 为准。
+16. **`out/` 下的 `site_pass.txt` / `site_token.txt` 是每次生成的新随机值**。若前台进程是上一次跑起的
+    （`start-site.ps1` 只判断端口是否在听，`Test-Port` 为真就跳过重启），它的 `SITE_PASS` 还是旧值，
+    会导致 `/api/enter` 一律 `401 口令不对`、所有页面 `307 → /enter`。
+    **排查口诀**：比对「口令文件 mtime」与「:3100 进程 StartTime」，前者更晚就必须杀掉重起。
+17. **`/site/pool` 的 `credit` 读 `out/webstate.json`，不是 `accounts.json` 的 `last.credit`**。
+    新机器上 `webstate.json` 不存在 → 21 个号全 `credit=0`、`usable=0`。
+    必须先 `POST /refresh`（21 号约 66s）做体检把状态写进 `webstate.json`，`usable` 才会正常。
+    `GET /site/pool` 只读不体检，不会自己补。
+18. **引擎 SSE 用 `event:` 行表类型，不是 JSON 里带 `"type"`**。本站判成功的标准是
+    `event: complete` + 正文 + `credit` 字段（已结算后余额），**不是** `"type":"complete"`。
+    后者是上游 dzmm 原生 `/api/chat` 的格式，两套不同，别混用判据。
+19. **`/chat` 返回 307 不一定是登录拦截**。无 `card` 参数时会 307 到 `/chat?card=<默认卡>`，
+    这是正常路由行为；`/` 无 cookie 的 307 才是跳 `/enter`。看 `location` 头再下结论。
+20. **`/api/enter` 的字段名是 `p`**，不是 `pass` 也不是 `password`（`app/api/enter/route.js`）。
+21. **可移植性**：`start.ps1` / `start-site.ps1` 里的 `$PY/$NODE/$PNPM` 已改为三级探测
+    （`$env:LAN_*` → DSH 运行时 → `Get-Command`）。给别的机器时仍要确认 DSH 运行时是否存在，
+    否则靠 `Get-Command python/node`，系统没装会直接抛错。`$env:LAN_PY` / `LAN_NODE` / `LAN_PNPM` 可覆盖。
+    另：脚本里的 ` 2>&1` 已全部删除 —— PowerShell 5.1 会把原生命令的 stderr 当终止错误，
+    `git clone` / `next build` 正常输出 `Cloning into...` 也会让脚本崩。
+22. **首页广告位 `.zc-ad` 只有 CSS 没有 JSX**（globals.css L689 起 10 处样式，组件未实现）。
+    来源是上次重构。参考图里有广告位，属于待补项，不是本机搭建引入。
+
 
 ---
 

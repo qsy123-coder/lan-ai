@@ -12,8 +12,11 @@ const MODELS = [
 
 const TOKEN_MIN = 200;
 const TOKEN_MAX = 8000;
+// 续写轮数可选项（与引擎上限 8 对齐）
+const ROUND_OPTS = [1, 2, 3, 5, 8];
 const TOKEN_DEFAULT = 4000;
 const TKEY = "lg.maxtokens.v1";
+const RKEY = "lan.chat.rounds";
 
 function clampTokens(v) {
   const n = Math.floor(Number(v));
@@ -124,6 +127,8 @@ export default function ChatClient({ card }) {
   const [streaming, setStreaming] = useState("");
   const [model, setModel] = useState(MODELS[0].id);
   const [maxTokens, setMaxTokens] = useState(TOKEN_DEFAULT);
+  // 分段续写轮数：单轮输出有硬上限（约 4800~5600 字），想更长只能多轮接续
+  const [rounds, setRounds] = useState(1);
   const [sessions, setSessions] = useState([]);
   const [note, setNote] = useState("");
   const [showPanel, setShowPanel] = useState(true);
@@ -147,6 +152,18 @@ export default function ChatClient({ card }) {
       localStorage.setItem(TKEY, JSON.stringify(clampTokens(maxTokens)));
     } catch {}
   }, [maxTokens]);
+
+  // 续写轮数持久化
+  useEffect(() => {
+    const v = Number(readJSON(RKEY, 1));
+    setRounds(ROUND_OPTS.includes(v) ? v : 1);
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(RKEY, JSON.stringify(rounds));
+    } catch {}
+  }, [rounds]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return;
@@ -300,6 +317,7 @@ export default function ChatClient({ card }) {
             history,
             model,
             maxTokens: clampTokens(maxTokens),
+            rounds: Number(rounds) || 1,
             // 恢复的旧会话：告诉引擎用哪个 chatId / 哪个号，
             // 否则 createByCard 会新建一个空会话，历史接不上。
             chatId: chatIdRef.current || undefined,
@@ -358,7 +376,7 @@ export default function ChatClient({ card }) {
         taRef.current?.focus();
       }
     },
-    [input, busy, msgs, card.id, model, maxTokens, save]
+    [input, busy, msgs, card.id, model, maxTokens, rounds, save]
   );
 
   const stop = useCallback(() => {
@@ -724,6 +742,23 @@ export default function ChatClient({ card }) {
                   onChange={(e) => setMaxTokens(e.target.value)}
                   disabled={busy}
                 />
+                <div className="hint">
+                  这是上限，不是保证 —— 单段通常输出 4800~5600 字
+                </div>
+
+                <label className="fld">续写轮数</label>
+                <select
+                  className="inp"
+                  value={rounds}
+                  onChange={(e) => setRounds(Number(e.target.value))}
+                  disabled={busy}
+                >
+                  {ROUND_OPTS.map((n) => (
+                    <option key={n} value={n}>
+                      {n === 1 ? "1 段（最快）" : `${n} 段（约 ${(n * 5.2).toFixed(0)}k 字，越长越慢）`}
+                    </option>
+                  ))}
+                </select>
 
                 <div className="divider" />
 

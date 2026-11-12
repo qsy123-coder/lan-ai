@@ -2046,7 +2046,12 @@ html[data-theme="dark"] .notes-card .notes {
            .chat-main > .chat-head(固定) + .msgs(吃掉剩余) + .composer(贴底)
      两侧栏在手机上不参与栅格，改由底部抽屉承载。 */
 
-  .shell {
+  /* 这一段是「对话页」专用样式，但选择器原来写成裸 .shell，
+     会把首页/详情页的 .shell 也钉成 100dvh + overflow:hidden ——
+     首页 4669px、详情页 1669px 内容被整段裁掉且无法滚动。
+     用 .nav-hide-phone（只在 /chat 时加到 topnav-wrap）做限定。 */
+  .nav-hide-phone ~ .shell,
+  .shell:has(> .nav-hide-phone) {
     padding-top: 0;
     padding-bottom: 0;
     height: 100dvh;

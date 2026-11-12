@@ -1,0 +1,326 @@
+# CLAUDE.md - 项目上下文与工程规范
+
+## 项目概述
+
+- **项目名称**：WaveMod
+- **目标**：构建一个高性能、可维护、可扩展的现代化全栈应用
+
+## 技术栈
+
+- **前端**：Next.js 16 (App Router), TypeScript, Tailwind CSS, shadcn/ui, TanStack Query
+- **后端**：Server Actions + Route Handlers（无 tRPC / Prisma）
+- **数据库**：自建 PostgreSQL 17，原生 `pg` + 参数化 SQL（2026-11 从 Supabase 迁出，见 `docs/db-migration-selfhosted-pg-prd.md`）
+- **认证**：后台 `/admin` 站内登录页（`/admin/login`）换 30 天签名 Cookie，鉴权在 `src/proxy.ts`；curl 仍可用 Basic 头（凭据 `ADMIN_BASIC_AUTH_*`）
+- **状态管理**：React Context + TanStack Query
+- **部署**：Vercel hkg1 + 香港 nginx 反代 + 香港自建 PostgreSQL；Cloudflare Workers 流水线停用
+- **其他**：Zod, React Hook Form, ESLint
+
+## 架构原则 (必须严格遵守)
+
+1. **Clean Architecture + Feature-Sliced Design**
+   - 按功能/领域（features/）而不是按技术类型组织代码
+2. **Server-First**：能用 Server Component / Server Action 就不要用 Client Component
+3. **类型安全第一**：所有外部输入必须经过 Zod 校验
+4. **保持简单**：避免过度抽象，优先使用现有框架能力
+5. **单一职责**：一个文件只做一件事
+
+## 目录结构 (重要)
+
+src/
+├── app/ # Next.js App Router（页面 + Route Handlers）
+├── actions/ # Server Actions（admin / tutorial 等）
+├── components/ # 通用与业务组件
+├── config/ # 站点/游戏配置
+├── constants/ # 常量与静态数据
+├── features/ # 按游戏/领域组织的功能
+├── lib/ # 工具库（含 db/ 数据访问层）
+└── types/ # 全局类型定义（含 db.ts 数据库类型）
+
+## 编码规范
+
+- **TypeScript**：严格模式，`strict: true`，避免 `any`
+- **命名**：组件用 PascalCase，函数/变量用 camelCase，文件用 kebab-case
+- **组件**：Server Component 优先，Client Component 必须加 `'use client'`
+- **样式**：只允许 Tailwind + shadcn/ui，不允许全局 CSS
+- **API**：使用 Server Actions 或 Route Handlers；数据库访问只能经 `src/lib/db`，SQL 必须参数化
+- **错误处理**：统一使用 `try/catch + ZodError` 处理，错误信息不能暴露敏感信息
+
+## 测试策略
+
+- 单元测试：Vitest（重点测试 utils、hooks 与纯函数）
+- 组件测试：重点覆盖复杂组合组件
+- E2E：手工冒烟 + `curl`（当前未接 Playwright）
+- **TDD 优先**：新功能必须先写测试
+
+## Git 提交规范
+
+使用 Conventional Commits：
+
+- `feat:` 新功能
+- `fix:` Bug 修复
+- `refactor:` 重构
+- `chore:` 构建/依赖/配置
+- `docs:` 文档
+
+## Claude 工作要求（核心）
+
+1. **先理解再行动**：任何修改前必须先梳理受影响模块
+2. **逐步推进**：一次只做一个功能/重构，不要大范围改动
+3. **输出格式**：
+   - 先给出**变更计划**（受影响文件列表）
+   - 再给出**具体代码 diff**
+   - 最后给出**自检清单**（是否符合规范、类型安全、测试覆盖）
+4. **永远不要**：
+   - 随意删除已有代码
+   - 引入未在项目中使用的库
+   - 忽略现有架构原则
+   - 生成不带注释的复杂逻辑
+   - **未经用户明确允许，新建角色分类（character 值）**：站内角色分类由 `src/lib/mods-domain/public.ts` 的 `getAvailableCharacters` 从数据库 distinct `character` 动态生成——新增任何一个 character 值，前台角色分类页就会自动冒出新的分类。因此：
+     - 上传/写入任何 mod 前，`character` 必须归一化到站内已有的标准角色清单（`src/lib/constants/character-images.ts` 的 `characterImageMap`），不得直接采用文件名里带修饰的词（如 `千咲皮肤[蜜桃冰]` → `千咲`）。
+     - 标准角色名与别名映射见 `src/lib/mods-domain/sorting.ts` 的 `normalizeCharacterName`（`CHARACTER_ALIASES`）。新增映射必须先查库里/`characterImageMap` 是否已有该角色，**绝不能凭空新建**。
+     - 已有标准归类示例：`科考摩托` → `滑翔翼,翱翔翼,科考摩托`；`千咲皮肤[XX]` → `千咲`；`反虚化，ui界面，场景，葫芦，特效等` → `UI`。
+     - 若某 mod 的标题无法确定对应哪个已有角色，先列出候选并询问用户，确认后才写入。
+
+## 每日 Mod 上传流程（必须遵守）
+
+### 硬规则：文件夹里出现的每一种网盘都要传
+
+用户 2026-09-22 明确要求：**每天把日期文件夹里出现的每一种网盘都上传，不是只传夸克。**
+2026-09-22 那天只传了夸克、迅雷整批漏掉，用户是在前台发现卡片上没有迅雷按钮才知道的
+—— 漏网盘**完全静默**：入库不报错、快照也照常发。
+
+### 硬规则：每次上传都要出现在「每日更新」
+
+用户 2026-10-30 要求：**不管库里有没有这条，每次上传都要在每日更新里显示。**
+
+脚本对库内已存在的记录**不新增行**，而是把那一行的 `created_at` 推到该目录日期
+（只往前推，不会把更晚的日期挪回去）。`created_at` 在这个项目里一直是
+「归属哪天上架」的语义，每日更新页就是按它分组。dry-run 会单列
+「🔁 重新上架」清单，正式跑会真的写库。
+
+所以：**不要**为了让某条出现在每日更新里手动改 title、也不要另插一行 ——
+那会让去重键错位（见下方「事后改 character 会让去重失效」同款坑）。
+2026-10-29 的 `莫宁-月光幻影v3.4fix` 当时就是被当成重分享跳过，当天整条消失在每日更新里。
+
+### 数据源
+
+```
+D:\BaiduNetdiskDownload\MC-MOD整合包\wMOD全集-每日更新\A_每日更新\W-YYYY.M.D\
+  ├─ 分享结果导出-*.csv     → 夸克网盘（主盘，恒有）
+  ├─ 分享结果导出-*.xlsx    → 迅雷网盘
+  ├─ *.exe                  → mod 本体（刚下载时可能是 *.7z / *.zip / *.rar，见下方「Mod 重命名」）
+  └─ *.jpeg/.png/.jpg       → 预览图（顶层或「预览图」子目录）
+```
+
+**开工前先 `ls` 一遍日期目录**，确认没有第三种导出文件被漏掉。
+
+### Mod 重命名（收到裸文件名时先看这里，别再从贴图猜）
+
+用户刚丢进来的包常常是 `suoming_og_nsfw_switch_slot-fx_ver_.rar` / `lupa_fix_.7z` 这种裸英文名。
+**这一步要快**：2026-10-24 那次把时间全花在解包看 DDS 贴图上，其实 mod 页早就写着名字。
+
+**① 查来源（1 分钟）** —— 下载来的文件带 NTFS 备用数据流，里面记着原始 URL：
+
+```powershell
+Get-ChildItem -LiteralPath $dir -File | ForEach-Object {
+  Get-Item -LiteralPath $_.FullName -Stream * | Where-Object Stream -ne ':$DATA' |
+    ForEach-Object { "$($_.FileName) :: " + (Get-Content -LiteralPath $_.FileName -Stream $_.Stream) }
+}
+```
+
+图片多来自 `images.gamebanana.com/img/ss/mods/<id>.jpg`；压缩包本身没有 ADS，
+但**包名就是 GameBanana 的 `_sFile` 名**，一样能对。
+
+**② 用 GameBanana apiv11 反查（无需 key）**
+
+- 搜索：`Util/Search/Results?_sSearchString=<词>&_sModelName=Mod&_nPerpage=20`
+- 最新一批：`Game/20357/Subfeed?_nPage=1&_sSort=new`（鸣潮 game id = 20357，一天的新 mod 就在第一页）
+- 详情：`Mod/<id>/ProfilePage` → `_sName` / `_sVersion` / `_aSubmitter._sName` / `_sText`（热键说明）/ `_aFiles[]._sFile`
+- 命中判定：`_aPreviewMedia._aImages[]._sFile` 或 `_aFiles[]._sFile` 与本地文件名**逐字相同**，不靠猜。
+- 作者别名：`kongxinrumeng` = 空心入梦；`KatTheDev`、`akshhat tandavi` 这类英文昵称照抄。
+
+**③ 定名** `<角色>-<名称>[v版本]（切换键）by <作者>`
+
+- **title 一律原样使用文件夹里的文件名**（含 `角色-` 前缀），不再剥前缀、不再改写成库内旧写法。
+  用户 2026-10-30 原话：「以后严格用我每日更新文件夹里的文件名称和预览图」。
+  改写的后果是静默的：库里对不上 ⇒ 去重跳过 ⇒ 当天「每日更新」里根本没有这一条
+  （2026-10-29 的 `莫宁-月光幻影v3.4fix` 就是这么消失的）。
+  去重键 `character|title` 的两侧都会剥掉开头角色前缀（`dedupKey`），所以 title 带不带前缀
+  都能对上，不会重复入库 —— 但**展示**必须是文件名。
+- **预览图一律用文件夹里那张同名图**（用户给的促销图），不要沿用库内旧封面 / 占位图；
+  换图走 `scripts/reupload-mod-image.mjs --id=<行 id> --file=<新图>`。
+- 角色必须是站内既有值（`characterImageMap` / 库内 `character` distinct）；拿不准就查库，**不新建**。
+- 版本号紧贴名称（在切换键、`full`、`by 作者` 之前）；半角 `/` 一律换成全角 `／`（Windows 非法字符）。
+- 多图：主图无后缀，其余 `-1/-2`；`(2)` 这种会被当重名后缀丢掉。
+
+**④ 落地改名（一次做完，别分批）**
+
+- 文件夹 / 包 / 预览图**三者同名**：数据链是「文件夹名 = exe 名 = 分享名 = record.key」。
+- 顺手解包成同名目录（`build.ps1` 直接出 SFX），原始 7z/zip/rar 改名后保留。
+- 预览图放**日期目录顶层**，别新建 `预览图\` —— `build.ps1` 会把那个文件夹也打成 exe。
+- 包内自带的 `preview.jpg` 改名 `screenshot.jpg`，免得 `move_previews.ps1` 再搬一份重复图。
+
+**⑤ 必做自检（30 秒）**
+
+```bash
+node scripts/check-mod-keys.mjs              # 默认取最新 W-* 目录，也可 --dir=W-2026.10.24
+```
+
+打印每条的角色 / 标题 / 去重键，并标出**库里没有的角色**（有 ⚠️ 时退出码非 0）。
+出现 ⚠️ = 上传后会凭空多一个分类：把 key 归一化到既有角色，或在
+`EFFECT_BUCKET_PREFIXES`（非角色包，如 `隐藏座椅虚化`）／`CHARACTER_PREFIX_MAP`（角色包）
+加前缀规则，再跑一次直到 ✅ 全绿。规则改动和重命名一起 commit。
+
+### 一条命令
+
+```bash
+node scripts/upload-daily-by-date.mjs --dry-run --dates=2026.9.22   # 先看，不上传
+node scripts/upload-daily-by-date.mjs --dates=2026.9.22             # 正式上传
+node scripts/upload-daily-by-date.mjs                               # 全部日期目录
+```
+
+脚本会自己读同日目录里的 CSV + xlsx，**按 exe 文件名直接 join**，把当天所有网盘
+一起写进 `drive_links`，不需要再单独跑迅雷脚本。xlsx 解析调
+`scripts/parse-daily-xunlei-xlsx.ps1`（项目没有声明 zip 依赖，别在 Node 里自己解）。
+
+### 必看的验收输出
+
+```
+=== 网盘覆盖 ===
+   2026-9-22  夸克 8 / 迅雷 8（导出 8）
+```
+
+**逐日 `夸克 == 迅雷 == 导出`** 才算干净。任何 `⚠️` 都要当场查清：
+「该目录无迅雷导出」= 可能忘了导出；「有 N 条迅雷导出未匹配上」= 文件名对不上。
+
+同时注意「⚠️ 以下 N 条库内已存在，本次拿到的迅雷链接未写入」——那说明这些记录
+**早就入库了**，本次不会写链接，要另跑 `scripts/apply-daily-xunlei-by-date.mjs`
+（默认 dry-run，加 `--apply` 写库）。
+
+### 上传后
+
+**只要有新记录入库**，脚本自动发兜底快照到 COS + ping `/api/revalidate`，不用手动做
+（全部被去重跳过时不会发 —— 那是对的，缓存里本来就没变化）。
+验证用 `https://www.wave-mod.top/api/updates` 查对应日期分组的 `driveLinks`。
+（终端里中文显示乱码是控制台代码页问题，不是数据坏了。）
+
+### ⚠️ 事后改 `character` 会让去重失效
+
+去重键是 `character|title`。**事后把某批 mod 迁移到新分类，日期目录里的 key 没变，
+脚本会重新解析出旧的 character ⇒ 全量跑时把它们当新增再插一遍，且不报错。**
+
+已经踩过两次（2026-09-21「大卡 → 芙露德莉斯」）。所以：
+
+- 任何「把某角色某批 mod 改到新分类」的操作，**先想每日脚本的去重键会不会变**；
+  变了就在 `upload-daily-by-date.mjs` 的 `resolveCharacterAndTitle` 加对应分支，
+  规则写进 `scripts/daka-classify.mjs` 那样的纯模块并补单测。
+- 改完**必须**验证：`node scripts/upload-daily-by-date.mjs --dry-run`（**不带 `--dates`**），
+  「待上传」必须是 **0**。非 0 就是去重键错位了。
+
+## MCP 服务
+
+### 必须参考的文档
+
+"C:\Users\qsy123\Desktop\WaveMod\docs\Coding-Standards.md"
+"C:\Users\qsy123\Desktop\WaveMod\docs\AI-Interaction-Guidelines.md"
+
+### Context7 (实时文档)
+
+- **状态**：✔ Connected (`https://mcp.context7.com/mcp`)
+- **功能**：拉取最新版本库文档和代码示例，避免过时 API
+- **工具**：`resolve-library-id`（库名→ID）、`get-library-docs`（获取文档）
+- **使用**：遇到任何第三方库的 API 用法、配置、示例时自动调用 Context7 查文档
+
+---
+
+## 可用技能 (Skills)
+
+以下技能已安装在项目中，遇到相关场景时必须通过 `/skill-name` 调用：
+
+### 🗄️ 数据库
+
+- **`/prisma-postgres`** — Prisma Postgres 设置与运维（Console、CLI、API、SDK）。**触发场景**：创建 Prisma Postgres 数据库、配置连接、数据建模。
+- **`/prisma-database-setup`** — Prisma 多数据库配置指南（PostgreSQL/MySQL/SQLite/MongoDB）。**触发场景**：搭建新项目、切换数据库、排查连接问题。
+- **`/supabase-postgres-best-practices`** — PostgreSQL 性能优化和最佳实践。**触发场景**：优化查询、设计表结构、创建索引、调试慢查询。
+
+### ⚛️ 前端
+
+- **`/next-best-practices`** — Next.js 最佳实践全集。**触发场景**：创建路由/页面、Server/Client Component 边界、数据获取、metadata/SEO、错误处理、图片/字体优化、打包配置。
+  
+  <!-- - **`/ui-ux-pro-max`** — UI/UX 设计与交互最佳实践。**触发场景**：设计页面/组件、优化交互流程、解决 UX 问题、提升可访问性。 -->
+
+### 🧪 质量保证
+
+- **`/tdd`** — 测试驱动开发（Red-Green-Refactor）。**触发场景**：新增功能、修复 Bug、重构——先写测试再写代码。
+- **`/code-review`** — Diff 级别代码审查。**触发场景**：提交前审查变更、检查 correctness 和代码质量。
+- **`/verify`** — 验证代码变更是否生效。**触发场景**：改完代码后确认功能真的能用。
+- **`/security-review`** — 安全审查。**触发场景**：涉及认证/授权/支付等敏感逻辑时。
+
+### 📋 产品
+
+- **`/product-requirements`** — 交互式需求分析 + PRD 生成。**触发场景**：新功能需求不清晰、需要输出专业 PRD 文档。
+
+---
+
+## 常用命令
+
+```bash
+npm run dev          # 启动开发
+npm run build        # 构建检查
+npm run lint         # 代码检查
+npm run test         # 测试
+```
+
+## 本机网络与代理（必须知道）
+
+- **系统代理是关闭的**：Clash Verge 只开了混合端口 `127.0.0.1:7897`，git / npm / curl 默认**不会**走代理。
+  访问 GitHub 等外网时显式指定：
+
+  ```powershell
+  $env:HTTPS_PROXY='http://127.0.0.1:7897'; $env:HTTP_PROXY=$env:HTTPS_PROXY; git push origin main
+  curl.exe --proxy http://127.0.0.1:7897 -s https://api.github.com
+  ```
+
+- **节点可能挂了**：节点失效时代理口照样在监听，但会返回 `502` 或
+  `schannel: failed to receive handshake` —— 这不是网络断了，是当前节点不可用。直接切节点：
+
+  ```powershell
+  powershell -File scripts/local-proxy.ps1          # 列出可用节点（按延迟）
+  powershell -File scripts/local-proxy.ps1 -Best    # 自动切到最快节点
+  powershell -File scripts/local-proxy.ps1 -Verify  # 用 7897 实测 GitHub API
+  ```
+
+  原理：Clash Verge（Tauri 版）没开 TCP 外部控制器，只开命名管道 `\\.\pipe\verge-mihomo`，
+  脚本通过命名管道调 mihomo API（`/group/GLOBAL/delay` 测速、`PUT /proxies/GLOBAL` 切换）。
+  脚本本身是 UTF-8 **带 BOM** 保存的，PowerShell 5.1 才能正确读中文；改这个脚本时别把 BOM 弄丢了。
+
+- 直连国内站正常、GitHub 超时/握手失败 ⇒ 先怀疑节点，按上面切完再重试，不要反复重试原节点。
+
+## 质量检查策略（重要）
+
+- **提交前**：必须执行完整质量门禁（`npm run lint` + `npx tsc --noEmit` + `npm run build`）
+- **每次任务结束后**：只做必要检查——确认 `npm run build` 通过即可（保证网站能打开）。不要每次都跑 lint 和 tsc，浪费时间
+- **开发过程中**：改了代码后跑一次 `npm run build` 验证编译通过即可，不要每改一个文件就跑全量检查
+
+## 提交前质量门禁（强制）
+
+**每次提交/合并到 main 前必须执行以下检查，CI 必须绿：**
+
+1. **Lint 检查**: `npm run lint` — 零 error（warnings 可接受但不鼓励增加）
+2. **类型检查**: `npx tsc --noEmit` — 零错误
+3. **构建检查**: `npm run build` — 必须成功
+4. **CI 验证**: push 后等待 GitHub Actions `Quality Checks` workflow 通过
+
+**工作流**:
+
+```
+代码 → Lint → TypeCheck → 自检清单 → Commit → Push → 等待 CI 绿 → 合并 main
+```
+
+**Claude 执行规范**:
+
+- 每次 commit 前必须执行 `npm run lint` + `npx tsc --noEmit`，有 error 必须修复
+- 如果 lint error 来自**未修改**的文件，视为已有问题，必须一并修复
+- **已授权自行 commit / merge / push / 部署**（2026-10-18 用户原话：「以后提交部署别问我了，除非我告诉你不要提交部署」）。质量门禁通过后直接提交并推 main，不必先问；只有用户明说「先别提交 / 先别部署」，或涉及删数据、改库、动 `.env.production` 这类不可逆操作时，才停下来确认
+- push 需等待 CI 完成，确认 success 后才能部署并告知用户"完成"
+- CI 失败时必须查看日志、修复、重新 push，直到通过

@@ -14,6 +14,7 @@ import io
 import json
 import os
 import queue
+import re
 import sys
 import threading
 import time
@@ -537,6 +538,21 @@ def _tail_prompt(text, limit=1200):
     return t[-limit:] if len(t) > limit else t
 
 
+SUG_BLOCK_RE = re.compile(r"<sug>[\s\S]*?</sug>", re.I)
+SUG_STRAY_RE = re.compile(r"</?sug>", re.I)
+
+
+def _strip_sug(text):
+    """续写回灌前必须剥掉 <sug> 块。
+
+    上游模型看到 assistant 历史里有 <sug>...</sug>，会当成格式样板照抄，
+    于是每一轮都再产一个 sug 块；累积正文里就出现多个 sug，
+    前端删块后仍会露裸标签，正文也显得重复。首轮输出保持原样给前端解析。
+    """
+    t = SUG_BLOCK_RE.sub("", text or "")
+    return SUG_STRAY_RE.sub("", t).strip()
+
+
 def generate_long(cookie, chat_id, card_id, model, max_tokens, prompt, emit,
                   history=None, rounds=3):
     """
@@ -553,9 +569,12 @@ def generate_long(cookie, chat_id, card_id, model, max_tokens, prompt, emit,
             this_hist = hist
         else:
             this_prompt = CONTINUE_PROMPT
+            # 回灌的 assistant 正文要剥掉 <sug> 块，否则模型把它当格式样板照抄，
+            # 每轮再产一个 sug，累积后就出现裸标签与重复段落。
+            prev = _strip_sug(text)
             this_hist = hist + [
                 {"role": "user", "content": prompt},
-                {"role": "assistant", "content": _clean_surrogates(_tail_prompt(text, 6000))},
+                {"role": "assistant", "content": _clean_surrogates(_tail_prompt(prev, 6000))},
             ]
         emit("round", {"index": i + 1, "rounds": rounds, "chars": len(text)})
         try:
@@ -570,7 +589,9 @@ def generate_long(cookie, chat_id, card_id, model, max_tokens, prompt, emit,
             piece = (res.get("text") or "").strip()
             if piece:
                 if i > 0:
-                    text = (text.rstrip() + "\n\n" + piece).strip()
+                    # 只保留最后一轮的 <sug>：前面轮次里的 sug 块属于中途位置，
+                    # 拼进正文会让前端解析出重复选项、正文也显得重复。
+                    text = (_strip_sug(text).rstrip() + "\n\n" + piece).strip()
                     emit("delta", {"text": "\n\n" + piece})
                 else:
                     text = piece

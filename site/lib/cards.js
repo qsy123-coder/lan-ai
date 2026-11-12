@@ -1,6 +1,13 @@
 import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const FILE = process.env.CARDS_FILE || "Z:\\project\\captures\\site\\cards.json";
+// 默认按本仓库定位，别写死某台机器的盘符（原为 Z:\project\...，未挂载 Z: 时 statSync 抛错，
+// 被 catch 静默吞掉 → 首页空网格且无日志）。site/lib/cards.js -> 仓库根在上一级的上一级。
+// 部署或直接 next start 时用 CARDS_FILE 覆盖。
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const DEFAULT_FILE = path.join(HERE, "..", "..", "captures", "site", "cards.json");
+const FILE = process.env.CARDS_FILE || DEFAULT_FILE;
 
 let CACHE = null;
 let MTIME = 0;
@@ -14,7 +21,9 @@ function raw() {
     CACHE = Array.isArray(j) ? j : [];
     MTIME = st.mtimeMs;
     return CACHE;
-  } catch {
+  } catch (e) {
+    // 静默返回空数组会让「路径写错」表现成「首页没有卡」，排查成本极高。
+    if (!CACHE) console.error(`[cards] 读取失败 ${FILE}: ${e.code || e.message}`);
     return CACHE || [];
   }
 }

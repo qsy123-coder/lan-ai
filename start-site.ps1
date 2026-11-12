@@ -52,9 +52,12 @@ robocopy $SRC $RT /E /XD node_modules .next /NFL /NDL /NJH /NJS /NP | Out-Null
 $needInstall = -not (Test-Path (Join-Path $RT "node_modules\next"))
 $needBuild = $Rebuild -or -not (Test-Path (Join-Path $RT ".next\BUILD_ID"))
 if (-not $needBuild) {
-  $newest = Get-ChildItem (Join-Path $RT "app") -Recurse -File |
+  # 只扫 app/ 会漏掉 lib/ 与 components/ 的改动（cards.js 就栽在这），三处一起看。
+  $srcDirs = @("app", "lib", "components") | ForEach-Object { Join-Path $RT $_ } |
+             Where-Object { Test-Path $_ }
+  $newest = Get-ChildItem $srcDirs -Recurse -File |
             Sort-Object LastWriteTime -Descending | Select-Object -First 1
-  if ($newest.LastWriteTime -gt (Get-Item (Join-Path $RT ".next\BUILD_ID")).LastWriteTime) {
+  if ($newest -and $newest.LastWriteTime -gt (Get-Item (Join-Path $RT ".next\BUILD_ID")).LastWriteTime) {
     $needBuild = $true
   }
 }

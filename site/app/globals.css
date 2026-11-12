@@ -4956,3 +4956,15 @@ html[data-theme="dark"] .nd-switch > span {
   margin-top: 6px;
   text-decoration: none;
 }
+
+/* 会话为空时让空态在左栏垂直居中，避免下方留一大片死白 */
+.sp-body:has(> .sp-empty) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sp-body > .sp-empty {
+  width: 100%;
+  padding: 0 22px;
+}

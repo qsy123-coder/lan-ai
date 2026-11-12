@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import Nav from "../../../components/Nav";
+import SensitiveCover from "../../../components/SensitiveCover";
 import { getCard } from "../../../lib/cards";
 import { requirePass } from "../../../lib/gate";
 
@@ -38,12 +39,15 @@ export default async function CardPage({ params }) {
       <div className="scene" aria-hidden="true" />
       <Nav />
       <main className="detail-wrap">
-        {/* 左：封面 */}
+        {/* 左：封面（敏感卡跟随顶栏「隐藏敏感内容」开关） */}
         <div className="detail-media">
           <div className="big">
             {c.cover ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={imgSrc(c.cover, 720)} alt={c.name} />
+              <SensitiveCover
+                src={imgSrc(c.cover, 720)}
+                alt={c.name}
+                sensitive={!!c.isSensitive}
+              />
             ) : null}
             <div className="big-count">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">

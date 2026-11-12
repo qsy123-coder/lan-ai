@@ -55,9 +55,12 @@ export default function Nav() {
   const router = useRouter();
   const [theme, setTheme] = useState("light");
   const [q, setQ] = useState("");
+  // 敏感内容默认遮住；一键切换写 localStorage 并广播给 Card / 详情页
+  const [hideSensitive, setHideSensitive] = useState(true);
 
   useEffect(() => {
     setTheme(document.documentElement.dataset.theme || localStorage.getItem("theme") || "light");
+    setHideSensitive(localStorage.getItem("hideSensitive") !== "0");
   }, []);
 
   const toggleTheme = () => {
@@ -65,6 +68,14 @@ export default function Nav() {
     document.documentElement.dataset.theme = next;
     localStorage.setItem("theme", next);
     setTheme(next);
+  };
+
+  const toggleSensitive = () => {
+    const next = !hideSensitive;
+    localStorage.setItem("hideSensitive", next ? "1" : "0");
+    setHideSensitive(next);
+    // 同页组件靠自定义事件，其它标签页靠 storage 事件（Card.jsx 两个都监听）
+    window.dispatchEvent(new Event("hide-sensitive-change"));
   };
 
   const active = (href) =>
@@ -126,6 +137,32 @@ export default function Nav() {
 
         {/* 右：图标按钮 + 头像 */}
         <div className="nav-right">
+          <button
+            type="button"
+            className={"theme-btn sens-btn" + (hideSensitive ? " on" : "")}
+            onClick={toggleSensitive}
+            title={hideSensitive ? "当前隐藏敏感内容，点击显示" : "当前显示敏感内容，点击隐藏"}
+            aria-label={hideSensitive ? "显示敏感内容" : "隐藏敏感内容"}
+            aria-pressed={hideSensitive}
+          >
+            {hideSensitive ? (
+              // 眼睛带斜线：已隐藏
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M3 12s3.4-5.2 9-5.2S21 12 21 12s-3.4 5.2-9 5.2S3 12 3 12z"
+                  stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+                <circle cx="12" cy="12" r="2.6" stroke="currentColor" strokeWidth="1.7" />
+                <path d="M4 20L20 4" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+              </svg>
+            ) : (
+              // 睁眼：已显示
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M3 12s3.4-5.2 9-5.2S21 12 21 12s-3.4 5.2-9 5.2S3 12 3 12z"
+                  stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+                <circle cx="12" cy="12" r="2.6" stroke="currentColor" strokeWidth="1.7" />
+              </svg>
+            )}
+          </button>
+
           <button
             type="button"
             className="theme-btn"

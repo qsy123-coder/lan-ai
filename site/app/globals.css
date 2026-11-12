@@ -2994,3 +2994,52 @@ html[data-theme="dark"] .nav-plus:hover {
 html[data-theme="dark"] .nav-dot {
   box-shadow: 0 0 0 2px #0b1116;
 }
+
+/* ---------- 敏感内容一键隐藏 ---------- */
+/* 顶栏开关：隐藏态用主色描边提示「当前已遮蔽」 */
+.nav-right .sens-btn.on {
+  color: var(--sage, #6f8f7d);
+  border-color: color-mix(in srgb, var(--sage, #6f8f7d) 40%, transparent);
+}
+
+/* 详情页大图遮罩 */
+.detail-media .big {
+  position: relative;
+}
+
+.detail-media .big-blur {
+  filter: blur(26px) saturate(1.15) brightness(0.9);
+  transform: scale(1.06);
+}
+
+.big-mask {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  cursor: pointer;
+  color: var(--mist, #eef4f1);
+  background: linear-gradient(160deg, rgba(19, 37, 41, 0.42), rgba(19, 37, 41, 0.62));
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+  transition: background 0.18s ease;
+}
+
+.big-mask:hover {
+  background: linear-gradient(160deg, rgba(19, 37, 41, 0.34), rgba(19, 37, 41, 0.54));
+}
+
+.big-mask .zc-mask-t {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.big-mask .zc-mask-s {
+  font-size: 11px;
+  opacity: 0.78;
+}

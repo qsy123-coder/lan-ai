@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Nav from "./Nav";
 
 const MODELS = [
   { id: "x-apex-flux-0217-16k", label: "Flux 16K" },
@@ -429,28 +430,8 @@ export default function ChatClient({ card }) {
 
   return (
     <div className="shell">
-      {/* 手机端(<860px)整条导航隐藏，空间让给对话；关键信息并在 .chat-head 内 */}
-      <div className="topnav-wrap nav-desktop-only">
-        <nav className="topnav glass">
-          <Link href="/" className="brand">
-            <span className="dot" />
-            澜
-          </Link>
-          <Link href="/" className="tab">
-            角色
-          </Link>
-          <Link href="/chat" className="tab active">
-            对话
-          </Link>
-          <span className="spacer" />
-          {pool && !pool.offline ? (
-            <span className={`pool-badge ${pool.total < 3.4 ? "empty" : ""}`}>
-              池子 {Number(pool.total).toFixed(1)} · {pool.usable}/{pool.count} 号
-            </span>
-          ) : null}
-          <span className="nav-note">{note || (busy ? "生成中…" : "就绪")}</span>
-        </nav>
-      </div>
+      {/* 与首页/详情页共用同一条导航；池子与状态并进 .chat-head，不再自建一条 */}
+      <Nav />
 
       <div className={`chat-shell ${showPanel ? "" : "no-panel"}`}>
         {showSess ? (

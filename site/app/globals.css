@@ -1,11 +1,14 @@
 :root {
   /* 液态玻璃 · design.md */
-  --paper: #f3f2ed;
-  --ink: #202929;
+  /* 底色与玻璃层必须拉开对比：
+     原先 paper 是米黄 #f3f2ed、玻璃是灰绿 rgba(239,245,242,.86)，
+     两者色相接近、亮度只差一点，叠起来整页发灰发闷，文字也发虚。 */
+  --paper: #f7f8f6;
+  --ink: #1c2424;
   --scene: #25414a;
   --mist: #e4efeb;
   --glint: #ffffff;
-  --focus: #557b79;
+  --focus: #4e7573;
 
   --text-display: 56px;
   --text-heading-lg: 40px;
@@ -19,10 +22,11 @@
   --radius-sheet: 28px;
   --radius-pill: 999px;
 
-  --paper-canvas: #f3f2ed;
-  --clear-glass: rgba(255, 255, 255, 0.12);
-  --tinted-glass: rgba(239, 245, 242, 0.86);
-  --solid: #fcfcfa;
+  --paper-canvas: #f7f8f6;
+  --clear-glass: rgba(255, 255, 255, 0.16);
+  /* 玻璃层提到接近纯白，才在浅底上分得出层次 */
+  --tinted-glass: rgba(255, 255, 255, 0.92);
+  --solid: #ffffff;
 
   --elev-float: 0 8px 24px rgba(19, 37, 41, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.72);
   --elev-sheet: 0 16px 40px rgba(19, 37, 41, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.78);
@@ -75,20 +79,18 @@ select {
 
 /* ---------- 场景层：给玻璃提供可折射的细节 ---------- */
 .scene {
+  /* 原先是 360px 高的深色渐变（#25414a -> #3d6068）压在最上层，
+     渐变中段正好落在标题与筛选栏上，浅色文字压在深色交界处看不清。
+     改为与 body 同色的纯色，不再有可辨认的渐变边界。 */
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
-  height: 360px;
+  height: 160px;
   z-index: 0;
   pointer-events: none;
   overflow: hidden;
-  background:
-    radial-gradient(1200px 520px at 12% -10%, #35606c 0%, rgba(53, 96, 108, 0) 62%),
-    radial-gradient(900px 440px at 92% 0%, #2f5860 0%, rgba(47, 88, 96, 0) 58%),
-    linear-gradient(180deg, #25414a 0%, #2b4c56 60%, #3d6068 100%);
-  -webkit-mask-image: linear-gradient(180deg, #000 46%, transparent 100%);
-  mask-image: linear-gradient(180deg, #000 46%, transparent 100%);
+  background: var(--paper);
 }
 
 .scene svg {
@@ -99,12 +101,6 @@ select {
   opacity: 0.5;
 }
 
-.scene::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(180deg, rgba(243, 242, 237, 0) 0%, rgba(243, 242, 237, 0.16) 70%, rgba(243, 242, 237, 0.5) 100%);
-}
 
 /* ---------- 玻璃 ---------- */
 .glass {
@@ -193,11 +189,11 @@ select {
   gap: 16px;
   height: 68px;
   padding: 0 24px;
-  background: rgba(243, 242, 237, 0.82);
-  -webkit-backdrop-filter: blur(18px) saturate(160%);
-  backdrop-filter: blur(18px) saturate(160%);
-  border-bottom: 1px solid rgba(32, 41, 41, 0.08);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 6px 20px rgba(19, 37, 41, 0.06);
+  background: rgba(255, 255, 255, 0.86);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 1px solid rgba(28, 36, 36, 0.07);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset, 0 4px 16px rgba(19, 37, 41, 0.05);
 }
 
 /* 左段 */

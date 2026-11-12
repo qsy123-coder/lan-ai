@@ -438,6 +438,168 @@ asyncio.run(main())
 
 ---
 
+## 9.5 提交 · 推送 · 部署（2026-11-13 固化）
+
+> 这条流程是踩出来的：SSH 用错密钥、scp 被 `[id]` 当通配符、构建用完不重启、
+> 两份克隆共用 `%LOCALAPPDATA%\dzmm-site` 互相覆盖。按顺序做完再收工。
+
+### 9.5.1 事实
+
+| 项 | 值 |
+|---|---|
+| 服务器 | `ubuntu@43.135.10.175`（OpenSSH 8.9p1 Ubuntu） |
+| 私钥 | `~/.ssh/wavemod_server`（**不是** `lan_key.pem`，那台机器上没有） |
+| 站点目录 | `/opt/lan/site`（**不是 git 仓库**，靠 scp 单推） |
+| 服务 | `lan-site`（next start -p 3100）、`lan-engine`（python server.py --port 8787） |
+| 卡库 | `/opt/lan/cards.json`（`CARDS_FILE` 环境变量指向它） |
+| 缓存 | `/opt/lan/imgcache` |
+| 公网入口 | `https://43-135-10-175.sslip.io`，口令 `lan-4006` |
+
+> 服务器只认 publickey：`lan_key.pem` 与本机 `wavemod_hk` 都被拒，
+> **只有 `wavemod_server` 能登**。不要再换用户名试。
+
+### 9.5.2 提交
+
+```powershell
+cd C:\Users\WINDOWS11\Desktop\Xsdsh-purge-4.6.11-alpha\project
+
+# 身份（新克隆必做一次）
+git config user.name  "qsy123-coder"
+git config user.email "qsy123-coder@users.noreply.github.com"
+
+# 开分支（§8.1：不许在 main 上改）
+git checkout -b fix/your-slug
+
+# 提交前硬检查（路径匹配，别用子串）
+git ls-files | ForEach-Object {
+  if ($_ -match 'accounts\.json$|accounts\.md$|\.env$|\.(pem|key|p12|pfx)$|^captures/|^out/|node_modules/') { "!! $_" }
+}
+```
+
+提交信息用 `type: 中文一句话`，正文写清**改了什么 / 为什么 / 怎么验的**，末尾 `Refs: notes/NNN`。
+
+### 9.5.3 推送
+
+```powershell
+# GitHub 走代理；schannel 偶发握手失败就用 openssl 后端
+git -c http.proxy=http://127.0.0.1:7897 -c http.sslBackend=openssl push -u origin <branch>
+```
+
+> `schannel: failed to receive handshake` = TLS 后端问题，**不是节点坏了**。
+> 加 `-c http.sslBackend=openssl` 直接过。先 `curl --proxy ... https://github.com/` 确认出口是 200。
+
+### 9.5.4 部署（scp 单推 + 远端构建）
+
+**第一步：把文件复制成无特殊字符的名字**
+
+`site/app/card/[id]/page.js` 里的 `[id]` 会被 scp 当 glob 展开，必须绕开：
+
+```powershell
+$tmp = "$env:TEMP\lan-deploy"
+New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+Copy-Item -LiteralPath "...\site\app\card\[id]\page.js" "$tmp\card_page.js" -Force
+```
+
+**第二步：传**
+
+```powershell
+$K = "$env:USERPROFILE\.ssh\wavemod_server"
+$S = @("-i", $K, "-o", "BatchMode=yes", "-o", "ConnectTimeout=20")
+& scp @S "$tmp\card_page.js" "ubuntu@43.135.10.175:/tmp/card_page.js"
+& ssh @S ubuntu@43.135.10.175 "wc -c /tmp/card_page.js"   # 必须核对字节数
+```
+
+> scp 会**静默成功但传旧文件**（上一轮我撞过）。传完一定 `wc -c` 对本地大小，
+> 不一致就是没覆盖。
+
+**第三步：落位（写成脚本再跑，别在 PowerShell 里拼复杂引号）**
+
+```bash
+#!/bin/bash
+set -e
+cd /opt/lan/site
+BK=/opt/lan/backup-$(date +%Y%m%d%H%M%S)
+mkdir -p "$BK"
+cp app/globals.css "$BK/globals.css"          # 先备份
+cp /tmp/t_globals.css app/globals.css
+stat -c '%s %n' app/globals.css
+echo "open=$(tr -cd '{' < app/globals.css | wc -c) close=$(tr -cd '}' < app/globals.css | wc -c)"
+```
+
+> PowerShell 会把 `'` `"` `<` `$(` 吃掉，导致 `unexpected EOF` / `RedirectionNotSupported`。
+> **所有多行远端命令一律写 .sh 再 `bash /tmp/x.sh`。**
+
+**第四步：构建 + 重启**
+
+```bash
+cd /opt/lan/site
+npm run build 2>&1 | tail -20
+sudo systemctl restart lan-site
+sleep 5
+systemctl is-active lan-site
+```
+
+> `Can't resolve 'sharp'` 是既有告警，`api/img` 有回退路径，不影响构建与运行。
+
+**第五步：验收（缺一不可）**
+
+```bash
+C="lg_pass=lan-4006"; B="http://127.0.0.1:3100"
+for p in "/" "/card/430690" "/chat?card=430690" "/enter" "/about"; do
+  printf "  %-22s %s\n" "$p" "$(curl -s -o /dev/null -w '%{http_code}' -b "$C" "$B$p")"
+done
+curl -s -o /dev/null -w "img=%{http_code} size=%{size_download}\n" -b "$C" \
+  "$B/api/img?u=$(python3 -c 'import urllib.parse;print(urllib.parse.quote("https://pxlorbit.com/storage/v1/object/public/pub_card_images/dea54e41-34bb-46b0-a4e8-fb678c193545.png",safe=""))')&w=320"
+curl -s http://127.0.0.1:8787/site/pool | head -c 120
+```
+
+**改了 `engine/server.py` 还要单独重启引擎**：`sudo systemctl restart lan-engine`。
+
+### 9.5.5 本机构建（改前端后看效果）
+
+```powershell
+# 清运行副本源码，避免两工程共享目录互相踩（notes/032 记录的机制）
+$rt = Join-Path $env:LOCALAPPDATA "dzmm-site"
+Remove-Item "$rt\app","$rt\components","$rt\lib","$rt\public" -Recurse -Force -ErrorAction SilentlyContinue
+robocopy site $rt /E /XD node_modules .next /NFL /NDL /NJH /NJS /NP | Out-Null
+
+$env:LAN_PY=(Get-Command python).Source
+$env:LAN_NODE=(Get-Command node).Source
+$env:LAN_PNPM=(Join-Path $env:APPDATA "npm\node_modules\pnpm\bin\pnpm.cjs")
+powershell -ExecutionPolicy Bypass -File .\start-site.ps1 -NoOpen -Rebuild
+```
+
+> `robocopy /E` 只增不删 —— 不清目录就会把另一个工程的残留文件一起打包。
+> `exit=3` 是正常码（有文件被复制）。
+
+### 9.5.6 回滚
+
+```bash
+# 服务器：从备份还原后重建
+ls -dt /opt/lan/backup-* | head -1        # 找最近备份
+cp /opt/lan/backup-XXXX/app/globals.css /opt/lan/site/app/globals.css
+cd /opt/lan/site && npm run build && sudo systemctl restart lan-site
+```
+
+```powershell
+# 本机：撤销未提交改动
+git checkout -- <file>
+git revert <sha> --no-edit
+```
+
+### 9.5.7 高频坑
+
+| 现象 | 原因 | 解法 |
+|---|---|---|
+| `Permission denied (publickey)` | 用了 `lan_key.pem` 或 `wavemod_hk` | 只用 `~/.ssh/wavemod_server` |
+| `schannel: failed to receive handshake` | TLS 后端 | 加 `-c http.sslBackend=openssl` |
+| scp 成功但字节数没变 | 目标未覆盖 | 换新文件名重传，`wc -c` 核对 |
+| `unexpected EOF` / `RedirectionNotSupported` | PowerShell 吃了引号 | 写 `.sh` 再 `bash` |
+| `cp: cannot stat '/tmp/x'` | 上一步 scp 其实失败了 | 先 `wc -c` 确认再落位 |
+| 改完页面没变化 | 没 build 或没重启 | `npm run build && systemctl restart lan-site` |
+| 详情页空白且"滚不动" | 卡不在 `cards.json` 里 | 已加 `not-found.js` 明确提示 |
+| 两份工程改动互相覆盖 | 共用 `%LOCALAPPDATA%\dzmm-site` | 构建前清源码目录，或各自独立 `$RT` |
+
 ## 10. 验收判据表
 
 | 目标 | 观测点 | 通过标准 | 失败即改 |

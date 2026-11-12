@@ -330,7 +330,9 @@ export default function ChatClient({ card }) {
         await readSSE(res, (ev, d) => {
           if (ev === "delta") {
             acc += d.text || "";
-            setStreaming(acc);
+            // 多轮续写时每轮 delta 都带 <sug> 块，直接显示会让正文中途冒出
+            // 好几个 sug、段落也看着重复。这里先剥掉再渲染，只显示正文。
+            setStreaming(splitSug(acc).text);
           } else if (ev === "account") {
             setNote(`账号 ${d.name}`);
           } else if (ev === "complete") {

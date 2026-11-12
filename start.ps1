@@ -26,7 +26,6 @@ $PNPM  = if ($env:LAN_PNPM) { $env:LAN_PNPM }
          elseif (Test-Path "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\pnpm\bin\pnpm.mjs") { "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\pnpm\bin\pnpm.mjs" }
          elseif (Test-Path (Join-Path $env:APPDATA "npm\node_modules\pnpm\bin\pnpm.cjs")) { Join-Path $env:APPDATA "npm\node_modules\pnpm\bin\pnpm.cjs" }
          else { throw "找不到 pnpm，请设置 LAN_PNPM" }
-
 function Test-Port([int]$p) {
   [bool](Get-NetTCPConnection -State Listen -LocalPort $p -ErrorAction SilentlyContinue)
 }
@@ -44,9 +43,12 @@ foreach ($f in @("package.json", ".npmrc", "next.config.mjs")) {
 $needInstall = -not (Test-Path (Join-Path $RT "node_modules\next"))
 $needBuild = $Rebuild -or -not (Test-Path (Join-Path $RT ".next\BUILD_ID"))
 if (-not $needBuild) {
-  $newest = Get-ChildItem (Join-Path $RT "app") -Recurse -File |
+  # 只扫 app/ 会漏掉 lib/ 与 components/ 的改动，三处一起看。
+  $srcDirs = @("app", "lib", "components") | ForEach-Object { Join-Path $RT $_ } |
+             Where-Object { Test-Path $_ }
+  $newest = Get-ChildItem $srcDirs -Recurse -File |
             Sort-Object LastWriteTime -Descending | Select-Object -First 1
-  if ($newest.LastWriteTime -gt (Get-Item (Join-Path $RT ".next\BUILD_ID")).LastWriteTime) {
+  if ($newest -and $newest.LastWriteTime -gt (Get-Item (Join-Path $RT ".next\BUILD_ID")).LastWriteTime) {
     $needBuild = $true
   }
 }

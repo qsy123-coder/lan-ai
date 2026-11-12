@@ -42,3 +42,6 @@ out/*.jsonl
 deploy/data/
 *.bak
 新建文本文档.txt
+
+# 卡片库抓取产物（1.4MB），各机自行 seed 或从 data 拷
+cards.json

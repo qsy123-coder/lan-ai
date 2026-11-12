@@ -25,7 +25,6 @@ $PNPM  = if ($env:LAN_PNPM) { $env:LAN_PNPM }
          elseif (Test-Path "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\pnpm\bin\pnpm.mjs") { "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\pnpm\bin\pnpm.mjs" }
          elseif (Test-Path (Join-Path $env:APPDATA "npm\node_modules\pnpm\bin\pnpm.cjs")) { Join-Path $env:APPDATA "npm\node_modules\pnpm\bin\pnpm.cjs" }
          else { throw "找不到 pnpm，请设置 LAN_PNPM" }
-
 function Test-Port([int]$p) {
   [bool](Get-NetTCPConnection -State Listen -LocalPort $p -ErrorAction SilentlyContinue)
 }
@@ -53,7 +52,7 @@ robocopy $SRC $RT /E /XD node_modules .next /NFL /NDL /NJH /NJS /NP | Out-Null
 $needInstall = -not (Test-Path (Join-Path $RT "node_modules\next"))
 $needBuild = $Rebuild -or -not (Test-Path (Join-Path $RT ".next\BUILD_ID"))
 if (-not $needBuild) {
-  # 只看 app/ 会漏掉 lib/ 与 components/ 的改动（cards.js 就栽在这），三处一起看。
+  # 只扫 app/ 会漏掉 lib/ 与 components/ 的改动（cards.js 就栽在这），三处一起看。
   $srcDirs = @("app", "lib", "components") | ForEach-Object { Join-Path $RT $_ } |
              Where-Object { Test-Path $_ }
   $newest = Get-ChildItem $srcDirs -Recurse -File |
@@ -107,7 +106,9 @@ Write-Host ""
 if (-not $NoOpen) { Start-Process $url }
 
 if ($Tunnel) {
-  $cf = "C:\Users\dsh\cloudflared.exe"
+  $cf = if ($env:LAN_CLOUDFLARED) { $env:LAN_CLOUDFLARED }
+      elseif (Test-Path "C:\Users\dsh\cloudflared.exe") { "C:\Users\dsh\cloudflared.exe" }
+      else { (Get-Command cloudflared -ErrorAction SilentlyContinue).Source }
   if (-not (Test-Path $cf)) { Write-Host "  找不到 cloudflared，跳过隧道" -ForegroundColor Red; return }
   Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
   $log = Join-Path $ROOT "out\cf.log"

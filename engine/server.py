@@ -14,14 +14,19 @@ import io
 import json
 import os
 import queue
+import re
 import sys
 import threading
 import time
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import quote, urlparse
+from urllib.parse import parse_qs, quote, urlparse
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from curl_cffi import requests as creq
+
+import memory as memlib
 
 BASE = "https://www.dzmm.ai"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -35,13 +40,28 @@ CARDS = [3821218, 3856830, 3858435, 3859027, 3860041,
          3860611, 3861267, 3865272, 3867710,
          3856159, 3860761]
 
+# ctx = 上游模型上下文（chat.models 实测）。长对话优先选 32K 以上。
 MODELS = [
-    {"id": "x-apex-flux-0217-16k", "label": "Turbo", "hint": "默认档，≈2.1 credit/条"},
-    {"id": "nalang-medium-0826", "label": "Medium", "hint": "中档，免费号可用"},
-    {"id": "nalang-xl-0826-16k", "label": "XL", "hint": "长上下文，免费号可用"},
-    {"id": "nalang-max-0826", "label": "Max", "hint": "需 trial 名额，用尽即拒"},
+    {"id": "x-apex-surge-0505", "label": "Surge 32K", "ctx": 32000,
+     "hint": "默认档，稳定均衡"},
+    {"id": "x-apex-pulse-0731-128k", "label": "Pulse 128K", "ctx": 128000,
+     "hint": "长对话推荐，0.2 积分/1K"},
+    {"id": "x-apex-dash-0826-128k", "label": "Dash 128K", "ctx": 128000,
+     "hint": "128K，严格审核，可能拒 NSFW"},
+    {"id": "nalang-xl-0826", "label": "XL 32K", "ctx": 32000,
+     "hint": "32K，文风偏软"},
+    {"id": "nalang-medium-0826", "label": "Medium 32K", "ctx": 32000,
+     "hint": "32K，中档"},
+    {"id": "nalang-max-0826", "label": "Max 32K", "ctx": 32000,
+     "hint": "32K，智力档"},
+    {"id": "x-apex-flux-0217-16k", "label": "Flux 16K", "ctx": 16000,
+     "hint": "16K，短对话"},
+    {"id": "nalang-xl-0826-16k", "label": "XL 16K", "ctx": 16000,
+     "hint": "16K，短对话"},
 ]
-DEFAULT_MODEL = MODELS[0]["id"]
+DEFAULT_MODEL = "x-apex-surge-0505"
+SUMMARY_MODEL = os.environ.get("MEMORY_SUMMARY_MODEL", "x-apex-dash-0826-16k")
+MEMORY_MODEL_SUMMARY = os.environ.get("MEMORY_MODEL_SUMMARY", "1") != "0"
 
 ROOT = os.environ.get("DZMM_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ACCOUNTS = os.path.join(ROOT, "accounts.json")
@@ -177,12 +197,31 @@ def create_chat(cookie, card_id):
         return None, "%s: %s" % (type(e).__name__, str(e)[:80])
 
 
-MAX_HISTORY_MSGS = 48
-MAX_HISTORY_CHARS = 30000
+# 仅作硬上限；实际预算由 build_body 按模型 ctx 动态计算。
+MAX_HISTORY_MSGS = 200
+MAX_HISTORY_CHARS = 120000
 
 TOKEN_MIN = 200
-TOKEN_MAX = 32000
-TOKEN_DEFAULT = 8000
+TOKEN_MAX = 8000
+TOKEN_DEFAULT = 4000
+
+MEMORY_DIR = os.path.join(OUT_DIR, "memory")
+
+
+def model_ctx(model_id):
+    for m in MODELS:
+        if m["id"] == model_id:
+            return int(m.get("ctx") or 32000)
+    return 32000
+
+
+def default_tokens_for(ctx):
+    ctx = int(ctx or 32000)
+    if ctx <= 10000:
+        return 2500
+    if ctx <= 16000:
+        return 4000
+    return 6000
 
 
 def normalize_model(v):
@@ -191,8 +230,20 @@ def normalize_model(v):
     id_set = {m["id"] for m in MODELS}
     if model in id_set:
         return model
+    low = str(model).lower()
+    # 兼容旧前端：原来只有 turbo/medium/xl/max 四个 label
+    alias = {
+        "turbo": "x-apex-flux-0217-16k",
+        "medium": "nalang-medium-0826",
+        "xl": "nalang-xl-0826",
+        "max": "nalang-max-0826",
+        "surge": "x-apex-surge-0505",
+        "dash": "x-apex-dash-0826-128k",
+    }
+    if low in alias:
+        return alias[low]
     label_map = {m["label"].lower(): m["id"] for m in MODELS}
-    return label_map.get(str(model).lower(), DEFAULT_MODEL)
+    return label_map.get(low, DEFAULT_MODEL)
 
 
 
@@ -222,13 +273,16 @@ def _clean_surrogates(t):
     return "".join(out)
 
 
-def clamp_tokens(v):
-    """客户端传的 maxTokens 只做区间钳制，不再静默降级成小值。"""
+def clamp_tokens(v, ctx=None):
+    """按模型上下文钳制输出预留：ctx 越小，越要少预留，多留历史。"""
     try:
         n = int(v)
     except (TypeError, ValueError):
-        return TOKEN_DEFAULT
-    return max(TOKEN_MIN, min(TOKEN_MAX, n))
+        n = default_tokens_for(ctx)
+    hi = TOKEN_MAX
+    if ctx:
+        hi = min(hi, max(2000, int(ctx) // 4))
+    return max(TOKEN_MIN, min(hi, n))
 
 
 HEAD_ANCHOR_MSGS = 6          # 开场 user+assistant 两对：人设与开场白，永远不丢
@@ -236,7 +290,10 @@ HEAD_ANCHOR_CHARS = 14000      # 锚点自身的字数上限
 
 
 def normalize_history(history):
-    """把多轮历史裁成 prompts[]。策略：**保头 + 保尾**。
+    """legacy：build_body 已改用 memlib.compose_prompts（含记忆块）。
+
+    保留此函数供回滚与对照，不再参与主链路。
+    把多轮历史裁成 prompts[]。策略：**保头 + 保尾**。
 
     只从尾部回撤会在长对话里把开场整段丢掉，
     上游拿不到人设就会重新开场——这就是「上下文满了人物对话全重置」的根因。
@@ -304,11 +361,29 @@ def normalize_history(history):
     return merged
 
 
-def build_body(chat_id, card_id, model, max_tokens, prompt, history=None):
-    prompts = normalize_history(history)
+def build_body(chat_id, card_id, model, max_tokens, prompt, history=None, memory=None):
+    """head（卡片开场）→ 记忆块（锚点+摘要）→ 预算内 tail → 当前 user。
+
+    裁剪与注入统一在这里做，前端不再自己 head/tail。
+    """
+    ctx = model_ctx(model)
+    prompts, meta = memlib.compose_prompts(
+        history, memory, max_context=ctx, max_tokens=max_tokens)
     for m in prompts:
         m["content"] = _clean_surrogates(m["content"])
-    prompts.append({"role": "user", "content": _clean_surrogates(prompt)})
+    # 上游只认 content，记忆必须并进当前消息，否则不进模型视野。
+    content = _clean_surrogates(memlib.content_prefix(memory) + prompt)
+    prompts.append({"role": "user", "content": content})
+    # 调试：把本次真正发给模型的 content 落盘，便于核对记忆是否注入了
+    try:
+        os.makedirs(OUT_DIR, exist_ok=True)
+        with io.open(os.path.join(OUT_DIR, "last_content.txt"), "w",
+                     encoding="utf-8", newline="\n") as _f:
+            _f.write(content)
+    except Exception:
+        pass
+    log("prompt 组装：ctx=%d out=%d head=%d mem=%d tail=%d tailChars=%d"
+        % (ctx, max_tokens, meta["head"], meta["memory"], meta["tail"], meta["tailChars"]))
     return {
         "operation": "generate",
         "chatId": chat_id,
@@ -329,7 +404,7 @@ def build_body(chat_id, card_id, model, max_tokens, prompt, history=None):
         },
         "presetConfig": {"presetIds": []},
         "prompts": prompts,
-        "content": prompt,
+        "content": content,
         "chunkedHistory": True,
         "supportsSuggestions": True,
     }
@@ -358,12 +433,14 @@ def extract_text(obj):
     return ""
 
 
-def generate(cookie, chat_id, card_id, model, max_tokens, prompt, emit, history=None):
+def generate(cookie, chat_id, card_id, model, max_tokens, prompt, emit, history=None,
+             memory=None):
     """流式生成。返回 {status: ok|exhausted|card_error|auth_error|error, ...}"""
     url = BASE + "/api/chat"
     rid = "web-%d-%s" % (int(time.time() * 1000), os.urandom(3).hex())
     h = headers_of(cookie, referer=BASE + "/chat?c=" + chat_id, request_id=rid)
-    body = json.dumps(build_body(chat_id, card_id, model, max_tokens, prompt, history),
+    body = json.dumps(build_body(chat_id, card_id, model, max_tokens, prompt, history,
+                                 memory),
                       ensure_ascii=False).encode("utf-8", "replace")
 
     text_parts = []
@@ -534,6 +611,21 @@ CONTINUE_PROMPT = (
     "不要重新开头，保持同样的视角、人称与语气。"
 )
 
+SUG_BLOCK_RE = re.compile(r"<sug>[\s\S]*?</sug>", re.I)
+SUG_STRAY_RE = re.compile(r"</?sug>", re.I)
+
+
+def _strip_sug(text):
+    """续写回灌前必须剥掉 <sug> 块。
+
+    上游模型看到 assistant 历史里有 <sug>...</sug>，会当成格式样板照抄，
+    于是每一轮都再产一个 sug 块；累积正文里就出现多个 sug，
+    前端删块后仍会露裸标签，正文也显得重复。首轮输出保持原样给前端解析。
+    """
+    t = SUG_BLOCK_RE.sub("", text or "")
+    return SUG_STRAY_RE.sub("", t).strip()
+
+
 def _tail_prompt(text, limit=1200):
     """给续写轮次一点上下文锚点，避免跑题。"""
     t = (text or "").strip()
@@ -541,7 +633,7 @@ def _tail_prompt(text, limit=1200):
 
 
 def generate_long(cookie, chat_id, card_id, model, max_tokens, prompt, emit,
-                  history=None, rounds=3):
+                  history=None, rounds=3, memory=None):
     """
     多轮续写：首轮用原始 prompt，之后每轮把「累积正文」当 assistant 历史回灌。
     任一环节失败就带着已有正文返回 ok，不丢内容。
@@ -558,12 +650,12 @@ def generate_long(cookie, chat_id, card_id, model, max_tokens, prompt, emit,
             this_prompt = CONTINUE_PROMPT
             this_hist = hist + [
                 {"role": "user", "content": prompt},
-                {"role": "assistant", "content": _clean_surrogates(_tail_prompt(text, 6000))},
+                {"role": "assistant", "content": _clean_surrogates(_tail_prompt(_strip_sug(text), 6000))},
             ]
         emit("round", {"index": i + 1, "rounds": rounds, "chars": len(text)})
         try:
             res = generate(cookie, chat_id, card_id, model, max_tokens, this_prompt, emit,
-                           history=this_hist)
+                           history=this_hist, memory=memory)
         except Exception as e:
             log("round %d failed: %s" % (i + 1, repr(e)[:200]), "warn")
             if text:
@@ -599,6 +691,78 @@ def chat_id_ok(pool, name, chat_id):
         return False
 
 
+def start_summary(pool, name, card_id, mem, history):
+    """把摘要放到后台线程：不占 SSE 连接、不阻塞下一条消息。"""
+    def run():
+        try:
+            st2 = load_state()
+            maybe_summarize(pool, name, st2, card_id, mem, history)
+        except Exception as e:
+            log("后台摘要失败：%s" % str(e)[:160], "warn")
+
+    t = threading.Thread(target=run, name="memory-summary", daemon=True)
+    t.start()
+
+
+def maybe_summarize(pool, name, st, card_id, mem, history):
+    """压缩旧消息；失败降级为规则摘要，绝不阻塞主流程。"""
+    msgs = memlib.sanitize_history(history)
+    if not memlib.should_summarize(len(msgs), mem):
+        return mem
+    window, end = memlib.summary_window(msgs, mem)
+    if not window:
+        return mem
+
+    pins = [p.get("text", "") for p in (mem.get("pinned") or []) if p.get("text")]
+    recent = msgs[end:end + 2]
+    existing = mem.get("summary") or ""
+    chunks = memlib.chunk_messages(window, 6000)
+    if len(chunks) > 4:
+        # 段数过多时，前几段用规则摘要压一次，模型只处理最后 4 段，控制成本
+        head_msgs = [m for ch in chunks[:-4] for m in ch]
+        existing = memlib.rule_summary(head_msgs, existing, pins)
+        chunks = chunks[-4:]
+
+    text = ""
+    if MEMORY_MODEL_SUMMARY and name in pool and chunks:
+        try:
+            batch_cid, batch_card = ensure_chat(st, pool, name, lambda *a, **k: None)
+            if batch_cid:
+                running = existing
+                ok_all = True
+                for i, ch in enumerate(chunks):
+                    prompt = memlib.model_summary_prompt(
+                        ch, running, pins,
+                        recent=recent if i == len(chunks) - 1 else None)
+                    res = generate(pool[name]["cookie"], batch_cid, batch_card,
+                                   SUMMARY_MODEL, 800, prompt, lambda *a, **k: None)
+                    if res.get("status") != "ok":
+                        ok_all = False
+                        break
+                    piece = memlib.clean_summary(res.get("text"))
+                    if not piece:
+                        ok_all = False
+                        break
+                    running = piece
+                if ok_all:
+                    text = running
+        except Exception as e:
+            log("摘要生成失败，降级规则摘要：%s" % str(e)[:160], "warn")
+
+    if not text:
+        text = memlib.rule_summary(window, mem.get("summary"), pins)
+        log("摘要降级为规则摘要（%d 条）" % len(window), "warn")
+
+    if text:
+        # 重新读一次，避免覆盖这期间新写入的锚点
+        latest = memlib.load_memory(MEMORY_DIR, card_id)
+        latest["summary"] = text
+        latest["summarizedUpTo"] = max(int(latest.get("summarizedUpTo") or 0), end)
+        memlib.save_memory(MEMORY_DIR, latest)
+        mem.update(latest)
+    return mem
+
+
 def run_site_chat(payload, emit):
     """前台聊天：指定 cardId，自动挑号 → 建会话 → 流式生成 → 结算。"""
     pool = load_pool()
@@ -613,7 +777,22 @@ def run_site_chat(payload, emit):
         emit("end", {"reason": "bad_request", "message": "内容为空"})
         return
     model = normalize_model(payload.get("model"))
-    max_tokens = clamp_tokens(payload.get("maxTokens"))
+    ctx = model_ctx(model)
+    max_tokens = clamp_tokens(payload.get("maxTokens"), ctx)
+
+    history = payload.get("history")
+    # —— 长期记忆：磁盘为底，合并「历史 + 本轮新消息」里出现的设定
+    mem = memlib.load_memory(MEMORY_DIR, card_id)
+    before_ids = [p.get("id") for p in (mem.get("pinned") or [])]
+    pin_source = list(history or []) + [{"role": "user", "content": prompt}]
+    merged = memlib.merge_pins(mem.get("pinned"), memlib.extract_pins(pin_source))
+    if [p["id"] for p in merged] != before_ids:
+        mem["pinned"] = merged
+        memlib.save_memory(MEMORY_DIR, mem)
+        log("记忆锚点 +%d（共 %d 条）" % (len(merged) - len(before_ids), len(merged)))
+    emit("memory", {"pinned": mem.get("pinned") or [],
+                    "summary": mem.get("summary") or "",
+                    "summarizedUpTo": mem.get("summarizedUpTo") or 0})
 
     cands = []
     for name in pool:
@@ -678,10 +857,10 @@ def run_site_chat(payload, emit):
             rounds = 0
         if rounds <= 1:
             res = generate(pool[name]["cookie"], cid, card_id, model, max_tokens, prompt,
-                           emit, history=payload.get("history"))
+                           emit, history=history, memory=mem)
         else:
             res = generate_long(pool[name]["cookie"], cid, card_id, model, max_tokens,
-                                prompt, emit, history=payload.get("history"),
+                                prompt, emit, history=history, memory=mem,
                                 rounds=min(rounds, 8))
         if res.get("status") == "exhausted" and res.get("reason") == "internal":
             # classification=internal 不扣费；createByCard 幂等去重拿回同一 chatId，直接换号
@@ -695,6 +874,12 @@ def run_site_chat(payload, emit):
                 save_state(st)
             emit("complete", {"text": res["text"], "account": name, "chatId": cid,
                               "cardId": card_id, "credit": a.get("credit")})
+            # 用户已经拿到正文；摘要丢到后台，失败也不影响这次回复
+            try:
+                if memlib.should_summarize(len(memlib.sanitize_history(history)), mem):
+                    start_summary(pool, name, card_id, mem, history)
+            except Exception as e:
+                log("记忆更新失败：%s" % str(e)[:160], "warn")
             return
         if res["status"] == "exhausted":
             if res.get("reason") == "internal":
@@ -730,7 +915,7 @@ def run_job(payload, emit):
         return
 
     model = normalize_model(payload.get("model"))
-    max_tokens = clamp_tokens(payload.get("maxTokens"))
+    max_tokens = clamp_tokens(payload.get("maxTokens"), model_ctx(model))
     min_credit = float(payload.get("minCredit") or (MIN_PREPAY + 0.2))
     gap = float(payload.get("gap") if payload.get("gap") is not None else 2.0)
     mode = payload.get("mode") or "exhaust"          # exhaust=打到全部号见底
@@ -962,6 +1147,16 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             return self._json(200, {"results": rows[-200:][::-1]})
+        if path == "/site/memory":
+            qs = parse_qs(urlparse(self.path).query)
+            try:
+                card_id = int((qs.get("cardId") or ["0"])[0])
+            except (TypeError, ValueError):
+                card_id = 0
+            if not card_id:
+                return self._json(400, {"error": "cardId required"})
+            mem = memlib.load_memory(MEMORY_DIR, card_id)
+            return self._json(200, {"memory": mem})
         return self._json(404, {"error": "not found"})
 
     def do_POST(self):
@@ -1031,6 +1226,36 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 RUN_LOCK.release()
             return
+        if path == "/site/memory":
+            if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
+                return self._json(401, {"error": "bad token"})
+            payload = self._body()
+            try:
+                card_id = int(payload.get("cardId"))
+            except (TypeError, ValueError):
+                return self._json(400, {"error": "cardId required"})
+            mem = memlib.load_memory(MEMORY_DIR, card_id)
+            if payload.get("clear"):
+                mem = memlib.default_memory(card_id)
+                memlib.save_memory(MEMORY_DIR, mem)
+                return self._json(200, {"memory": mem})
+            if isinstance(payload.get("pinned"), list):
+                pins = []
+                for p in payload["pinned"]:
+                    if isinstance(p, str):
+                        pins.append({"text": p, "source": "manual"})
+                    elif isinstance(p, dict) and p.get("text"):
+                        pins.append({"text": p["text"], "source": "manual"})
+                mem["pinned"] = memlib.merge_pins([], pins)
+            if isinstance(payload.get("summary"), str):
+                mem["summary"] = memlib.clean_summary(payload["summary"])
+            if payload.get("summarizedUpTo") is not None:
+                try:
+                    mem["summarizedUpTo"] = int(payload["summarizedUpTo"])
+                except (TypeError, ValueError):
+                    pass
+            memlib.save_memory(MEMORY_DIR, mem)
+            return self._json(200, {"memory": mem})
         if path == "/site/chat":
             if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
                 return self._json(401, {"error": "bad token"})

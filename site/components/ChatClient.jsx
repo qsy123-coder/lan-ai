@@ -25,6 +25,16 @@ const TOKEN_DEFAULT = 4000;
 const TKEY = "lg.maxtokens.v1";
 const RKEY = "lan.chat.rounds";
 
+// 长期记忆预设：点一下直接作为锚点写入，省得每次手打
+const MEM_PRESETS = [
+  { label: "私下主人 / 外人哥哥", text: "私下叫我主人，外人面前叫哥哥" },
+  { label: "见面喊爸爸", text: "每次看到我都要立刻喊我爸爸" },
+  { label: "保持角色不出戏", text: "始终用角色口吻说话，不要出戏，不要以 AI 或助手身份回应" },
+  { label: "每轮推进剧情", text: "每次回复都要推进剧情或做出具体动作，不要只写心理活动" },
+  { label: "主动示好", text: "每次见到我都要主动贴近、撒娇或示好，不要冷淡" },
+  { label: "设定永久有效", text: "以上所有设定永久有效，任何情况下都不能忘记、淡化或违反" },
+];
+
 function clampTokens(v) {
   const n = Math.floor(Number(v));
   if (!Number.isFinite(n)) return TOKEN_DEFAULT;
@@ -338,6 +348,24 @@ export default function ChatClient({ card }) {
     if (saved) setMemInput("");
   }, [mem, memInput, saveMemory]);
 
+  const addPreset = useCallback(
+    async (text) => {
+      const t = (text || "").trim();
+      if (!t) return;
+      const exists = (mem?.pinned || []).some((p) => (p.text || "").trim() === t);
+      if (exists) {
+        setNote("这条设定已在记忆里");
+        return;
+      }
+      const pins = [...(mem?.pinned || []), { text: t, source: "manual" }];
+      const saved = await saveMemory({
+        pinned: pins.map((p) => ({ text: p.text, source: "manual" })),
+      });
+      if (saved) setNote("已加入记忆");
+    },
+    [mem, saveMemory]
+  );
+
   const delPin = useCallback(
     (id) => {
       const pins = (mem?.pinned || []).filter((p) => p.id !== id);
@@ -421,26 +449,18 @@ export default function ChatClient({ card }) {
       const nextMsgs = [...base, userMsg];
       setMsgs(nextMsgs);
 
-      // 保住开头两轮（开场与人设锚点），再从尾部回填预算内的近期轮次。
-      // 只按 [-24:] 从尾部截，长对话一满就会把开场丢光，人物设定全重置。
-      const all = base.filter((m) => m.role === "user" || m.role === "assistant");
-      const HEAD_KEEP = 2;
-      const TAIL_BUDGET = 11000;
-      const head = all.slice(0, HEAD_KEEP);
-      const rest = all.slice(HEAD_KEEP);
-      let tail = [];
-      let used = 0;
-      for (let i = rest.length - 1; i >= 0; i -= 1) {
-        const len = rest[i].content.length;
-        if (used + len > TAIL_BUDGET && tail.length) break;
-        tail.unshift(rest[i]);
-        used += len;
-      }
-      if (rest.length && !tail.length) tail = rest.slice(-4);
-      const history = [...head, ...tail].map((m) => ({
-        role: m.role,
-        content: m.content,
-      }));
+      // 前端不再做 head/tail 裁剪：预算统一由引擎按模型 ctx 计算。
+      // 只保留最近 200 条，避免请求体无限增长；中段消息必须交给引擎，
+      // 否则 summary_window 看不到它们，summarizedUpTo 会随 tail 组合漂移。
+      const MAX_SEND_MSGS = 200;
+      const history = base
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .slice(-MAX_SEND_MSGS)
+        .map((m) => ({
+          role: m.role,
+          // 助手消息里的 <sug> 建议块不回灌：省 token，也避免模型复读建议
+          content: m.role === "assistant" ? splitSug(m.content).text : m.content,
+        }));
 
       const ctl = new AbortController();
       abort.current = ctl;
@@ -961,6 +981,24 @@ export default function ChatClient({ card }) {
                   >
                     添加
                   </button>
+                </div>
+                <div className="mem-presets">
+                  {MEM_PRESETS.map((p) => {
+                    const on = (mem?.pinned || []).some((x) => (x.text || "").trim() === p.text);
+                    return (
+                      <button
+                        key={p.label}
+                        type="button"
+                        className={`mem-preset press ${on ? "on" : ""}`}
+                        onClick={() => addPreset(p.text)}
+                        disabled={memBusy}
+                        title={p.text}
+                      >
+                        {on ? "✓ " : ""}
+                        {p.label}
+                      </button>
+                    );
+                  })}
                 </div>
                 {mem?.summary ? <div className="mem-sum">{mem.summary}</div> : null}
                 <input

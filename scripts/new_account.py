@@ -114,9 +114,21 @@ def cookie_header(port):
 
 
 # ---------- 邮箱 ----------
-IMAP_HOST = os.environ.get("IMAP_HOST", "imap.gmail.com")
-IMAP_USER = os.environ.get("IMAP_USER", "")
-IMAP_PASS = os.environ.get("IMAP_PASS", "")
+def _load_imap_conf():
+    """优先 out/imap.json（{"host","user","pass"}），否则读环境变量。"""
+    p = os.path.join(ROOT, "out", "imap.json")
+    if os.path.exists(p):
+        try:
+            j = json.load(io.open(p, encoding="utf-8"))
+            if j.get("user") and j.get("pass"):
+                return (j.get("host") or "imap.gmail.com"), j["user"], j["pass"]
+        except Exception as e:
+            print("  [imap] out/imap.json 解析失败:", str(e)[:80])
+    return (os.environ.get("IMAP_HOST", "imap.gmail.com"),
+            os.environ.get("IMAP_USER", ""), os.environ.get("IMAP_PASS", ""))
+
+
+IMAP_HOST, IMAP_USER, IMAP_PASS = _load_imap_conf()
 
 
 def imap_code_for(addr, timeout=180):

@@ -19,6 +19,16 @@ class ExtractTest(unittest.TestCase):
     def test_ignores_question(self):
         self.assertEqual(m.extract_pins([{"role": "user", "content": "你在干什么呢？"}]), [])
 
+    def test_multi_sentence_probe_not_pin(self):
+        """「现在该怎么称呼我？我们约定了什么？」是追问，不是设定。"""
+        line = "现在该怎么称呼我？我们约定了什么？用一句话回答。"
+        self.assertEqual(m.extract_pins([{"role": "user", "content": line}]), [])
+
+    def test_question_with_setting_word_not_pin(self):
+        """问句里带「以后/约定」也不能当设定。"""
+        line = "以后的剧情会怎么走？我们约定过什么？"
+        self.assertEqual(m.extract_pins([{"role": "user", "content": line}]), [])
+
     def test_ignores_assistant(self):
         h = [{"role": "assistant", "content": "以后我都叫你主人。"}]
         self.assertEqual(m.extract_pins(h), [])
@@ -36,6 +46,48 @@ class ExtractTest(unittest.TestCase):
         self.assertLessEqual(len(merged), m.MAX_PINS)
         self.assertTrue(any(p["source"] == "manual" for p in merged))
         self.assertIn("手动规则", [p["text"] for p in merged])
+
+    def test_chatter_not_a_setting(self):
+        """日常台词里的「哥哥/主人」不是设定，不能落锚点。"""
+        for line in ["哥哥，我回来了。", "主人……抱抱我嘛。", "哥哥今天好帅。",
+                     "主人，我饿了。", "哥哥你别走。"]:
+            self.assertEqual(
+                m.extract_pins([{"role": "user", "content": line}]), [],
+                "误抽：%s" % line)
+
+    def test_weak_marker_with_directive_is_pin(self):
+        """没有强触发词，但「称呼指令」明确时仍要识别。"""
+        pins = m.extract_pins(
+            [{"role": "user", "content": "私下只有我们两人时，她叫我主人。"}])
+        self.assertEqual(len(pins), 1)
+        self.assertIn("叫我主人", pins[0]["text"])
+        self.assertEqual(pins[0]["weight"], 1)
+
+    def test_rule_survives_chatter(self):
+        """20 条不同的日常台词不能把最早的真规则挤出上限。"""
+        real = m.extract_pins(
+            [{"role": "user", "content": "以后私底下叫我主人，有别人在叫哥哥。"}])
+        chatter = [{"role": "user", "content": s} for s in [
+            "哥哥，我回来了。", "主人……抱抱我嘛。", "哥哥今天好帅。", "主人，我饿了。",
+            "哥哥你别走。", "主人最好了。", "哥哥，外面下雨了。", "主人，我想你了。",
+            "哥哥，你先吃。", "主人，晚安。", "哥哥，我冷。", "主人，亲一下。",
+            "哥哥，抱我。", "主人，你今天好凶。", "哥哥，看我。", "主人，我错了。",
+            "哥哥，陪着我。", "主人，别生气。", "哥哥，我害怕。", "主人，摸摸头。",
+        ] * 2]
+        merged = m.merge_pins(real, m.extract_pins(chatter))
+        self.assertTrue(any("以后私底下" in p["text"] for p in merged),
+                        "真规则被日常台词挤掉了")
+        self.assertLessEqual(len(merged), m.MAX_PINS)
+
+    def test_weak_pins_evicted_first(self):
+        """即使弱锚点已经存在，超限时也先淘汰弱、保住强规则。"""
+        weak = [{"text": "弱规则%d" % i, "source": "auto", "weight": 1,
+                 "id": m.pin_id("弱规则%d" % i)} for i in range(30)]
+        real = [{"text": "真规则", "source": "auto", "weight": 2,
+                 "id": m.pin_id("真规则")}]
+        merged = m.merge_pins(weak, real)
+        self.assertIn("真规则", [p["text"] for p in merged])
+        self.assertLessEqual(len(merged), m.MAX_PINS)
 
 
 class ComposeTest(unittest.TestCase):

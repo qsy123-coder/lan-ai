@@ -7,6 +7,7 @@
 # 用法:
 #   $env:IMAP_HOST="imap.gmail.com"; $env:IMAP_USER="qsy55882@gmail.com"; $env:IMAP_PASS="16位应用密码"
 #   python scripts/batch_signup.py --target 100 --domain aetouban.cn
+#   python scripts/batch_signup.py --target 29 --start 19 --mail-provider mailtm --domain fldubai.com
 #   python scripts/batch_signup.py --status
 #
 # 每个号：挑节点 → 换出口 → 探活 → 新 profile → 填表提交 → 等你拖一次（脚本会把窗口置顶并放大提示）
@@ -21,6 +22,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import new_account as na  # noqa: E402  复用 launch / cdp / cookie_header / me_of / add_pool / imap_code_for
+import signup_email as se  # noqa: E402  复用 mail.tm 建箱与收码（无 IMAP 场景）
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LEDGER = os.path.join(ROOT, "out", "ip_ledger.json")
@@ -86,7 +88,16 @@ def switch_node(node):
     return out
 
 
-def one_account(node, domain, idx, addr=""):
+def one_account(node, domain, idx, addr="", provider="imap"):
+    mail_token = None
+    if provider == "mailtm":
+        if not addr:
+            addr = "".join(random.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=12)) + "@" + domain
+        mt_pwd = "Dz" + "".join(random.choices("ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789", k=10)) + "!9"
+        mail_token = se.mk_mailbox(addr, mt_pwd)
+        if not mail_token:
+            print("  mail.tm 建箱失败（限流或域名失效）")
+            return "mailbox_fail"
     if not addr:
         addr = "".join(random.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=10)) + "@" + domain
     pwd = "Dz" + "".join(random.choices("ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789", k=10)) + "!9"
@@ -154,23 +165,33 @@ def one_account(node, domain, idx, addr=""):
 
     status = "timeout"
     t0 = time.time()
-    while time.time() - t0 < 75:
-        time.sleep(4)
-        st, _ = na.cdp(port, "JSON.stringify({u:location.search,t:(document.body.innerText||'').slice(0,200)})")
+    gate_seen = False
+    while time.time() - t0 < 300:
+        time.sleep(2)
+        st, _ = na.cdp(port, "JSON.stringify({u:location.search,"
+                             "ifr:[...document.querySelectorAll('iframe')].map(f=>f.src||''),"
+                             "t:(document.body.innerText||'').slice(0,240)})")
         if "s=otp" in st:
             status = "otp"
             break
-        if "REGISTER_RISK" in st or "暂时无法完成注册" in st:
+        if "REGISTER_RISK" in st:
             return "risk_429"
+        if "__captcha" in st:
+            if not gate_seen:
+                gate_seen = True
+                print("  ⚠️ 人机校验弹窗已出现 —— 请在窗口里拖一次（最多等 300 秒）")
+                na.cdp(port, "(()=>{window.focus();return 1})()")
+            continue
         if "暂不支持注册" in st:
             return "domain_reject"
-        if "轨迹" in st or "captcha" in st:
-            continue
+        if "暂时无法完成注册" in st:
+            print("  ✗ 服务端判定当前出口环境不可注册（captchaError）")
+            return "gate_failed"
     if status != "otp":
         return "timeout"
 
     print("  ✅ 验证码已发，等邮件…")
-    code = na.imap_code_for(addr, 180)
+    code = se.wait_code(mail_token, 180) if provider == "mailtm" else na.imap_code_for(addr, 180)
     if not code:
         return "no_code"
     print("  码:", code)
@@ -203,11 +224,17 @@ def main():
     ap.add_argument("--alias-pool", default="", help="out/aliases.json，从别名池取地址")
     ap.add_argument("--domain", default=os.environ.get("MAIL_DOMAIN", "aetouban.cn"),
                     help="可逗号分隔多个域名，每个号随机选一个")
+    ap.add_argument("--mail-provider", choices=["imap", "mailtm"], default="imap",
+                    help="imap=自有域名 catch-all 转发；mailtm=api.mail.tm 临时邮箱（不需要 IMAP 口令）")
+    ap.add_argument("--start", type=int, default=-1,
+                    help="从第几号继续编号（已有 b001-b019 时传 19，避免覆盖）")
     ap.add_argument("--status", action="store_true")
     args = ap.parse_args()
 
     ledger = load(LEDGER, {})
     state = load(STATE, {"done": 0, "started": int(time.time())})
+    if args.start >= 0:
+        state["done"] = args.start
 
     if args.status:
         print("已完成:", state.get("done", 0), "| 目标:", args.target)
@@ -218,8 +245,9 @@ def main():
                       time.strftime("%m-%d %H:%M", time.localtime(r["last_429"])) if r.get("last_429") else "-"))
         return 0
 
-    if not (os.environ.get("IMAP_USER") and os.environ.get("IMAP_PASS")):
-        print("缺 IMAP_USER / IMAP_PASS")
+    if args.mail_provider == "imap" and not (na.IMAP_USER and na.IMAP_PASS):
+        print("缺 IMAP 凭据：写 out/imap.json {\"host\":\"imap.gmail.com\",\"user\":\"...\",\"pass\":\"应用密码\"}，")
+        print("或设 IMAP_USER / IMAP_PASS 环境变量；不想用 IMAP 就加 --mail-provider mailtm")
         return 2
 
     idx = state.get("done", 0)
@@ -241,7 +269,7 @@ def main():
         idx += 1
         doms = [d.strip() for d in args.domain.split(",") if d.strip()]
         addr_from_pool = ""
-        if args.alias_pool:
+        if args.alias_pool and args.mail_provider == "imap":
             import io as _io
             pool = json.load(_io.open(args.alias_pool, encoding="utf-8"))
             free = [a for a in pool if not a.get("used")]
@@ -255,15 +283,17 @@ def main():
             json.dump(pool, _io.open(args.alias_pool, "w", encoding="utf-8", newline="\n"),
                       ensure_ascii=False, indent=1)
             print("取别名:", addr_from_pool)
-        res = one_account(node, random.choice(doms), idx, addr=addr_from_pool)
+        res = one_account(node, random.choice(doms), idx, addr=addr_from_pool,
+                          provider=args.mail_provider)
         rec = ledger.setdefault(node, {"uses": 0})
         # 只有真正提交到服务端（或触发风控）才消耗该 IP 的注册额度
-        if res in ("otp", "risk_429", "domain_reject", "no_code", "not_logged", "no_cookie", "ok"):
+        if res in ("otp", "risk_429", "domain_reject", "no_code", "not_logged",
+                   "no_cookie", "ok", "gate_failed"):
             rec["uses"] = rec.get("uses", 0) + 1
         rec["last"] = int(time.time())
         if res == "risk_429":
             rec["last_429"] = int(time.time())
-        if res == "timeout":
+        if res in ("timeout", "gate_failed"):
             rec["skip_until"] = int(time.time()) + 1800
         # 建号成功才真正消耗别名；失败退回池子
         if addr_from_pool and res == "ok":

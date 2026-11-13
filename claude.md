@@ -432,6 +432,7 @@ asyncio.run(main())
 |---|---|---|---|
 | 2026-11-13 | `feat/mobile-drawers` | 手机端三抽屉 + 去渐变 + 主题切换 | 开发中 |
 | 2026-11-13 | `chore/branch-policy` | 把「每次任务新建分支」写进 claude.md | 开发中 |
+| 2026-11-13 | `fix/memory-full-history` | 前端去 head/tail + 锚点精度 + 50 轮 E2E | 开发中 |
 
 > 规矩：分支从 `main` 切出；任务完成后 `git checkout main && git merge <branch>`，
 > 或推远端开 PR。**合并由用户决定**，不要自行合并到 `main`。

@@ -29,13 +29,19 @@ HEAD_CHARS = 14000
 RESERVE_TOKENS = 1200
 MAX_MSG_CHARS = 6000
 
-# 用户消息里出现这些词，才可能是「设定」而不是普通剧情
-PIN_RE = re.compile(
-    r"以后|从今以后|从现在起|接下来|记住|设定|规则|约定|称呼|叫我|"
-    r"主人|哥哥|姐姐|不许|必须|永远|一直|剧情都|每次都"
+# 用户消息里出现这些词，才可能是「设定」而不是普通剧情。
+# 强触发：明确在下达设定，命中即可成为锚点。
+STRONG_RE = re.compile(
+    r"以后|从今以后|从现在起|接下来|记住|设定|规则|约定|不许|必须|永远|一直|剧情都|每次都"
+)
+# 弱触发：日常台词里大量出现（「哥哥，我回来了」），必须与指令同句命中才算设定。
+WEAK_RE = re.compile(r"称呼|叫我|主人|哥哥|姐姐")
+DIRECTIVE_RE = re.compile(
+    r"叫我|称呼|必须|不许|记住|规则|约定|私下|只有|外人|别人|面前|时候|以后|每次"
 )
 QUESTION_END_RE = re.compile(r"[?？]\s*$")
-_SENT_SPLIT = re.compile(r"[。！？!?\n]+")
+# 保留分隔符：切句后仍能判断这一句是不是问句（「我们约定了什么？」不能被当成设定）
+_SENT_SPLIT = re.compile(r"([。！？!?\n]+)")
 
 SUMMARY_SYSTEM = (
     "你是剧情记录员。把下面这段角色扮演对话压缩成 300-500 字的前情摘要，按时间顺序保留：\n"
@@ -117,17 +123,27 @@ def extract_pins(history):
                 r"以后|记住|设定|规则|约定|不许|必须", raw):
             continue
         candidates = []
-        for sent in _SENT_SPLIT.split(raw):
-            sent = sent.strip()
-            if len(sent) < 4 or not PIN_RE.search(sent):
+        parts = _SENT_SPLIT.split(raw)
+        for idx in range(0, len(parts), 2):
+            sent = parts[idx].strip()
+            delim = parts[idx + 1] if idx + 1 < len(parts) else ""
+            if len(sent) < 4:
                 continue
-            if QUESTION_END_RE.search(sent):
+            strong = STRONG_RE.search(sent)
+            weak = WEAK_RE.search(sent)
+            if not strong and not (weak and DIRECTIVE_RE.search(sent)):
                 continue
-            candidates.append(sent[:PIN_ITEM_MAX])
-        if not candidates and PIN_RE.search(raw) and len(raw) <= PIN_ITEM_MAX:
-            candidates.append(raw)
+            if QUESTION_END_RE.search(sent + delim):
+                continue
+            candidates.append({"text": sent[:PIN_ITEM_MAX],
+                               "weight": 2 if strong else 1})
+        # 整条兜底只收「没有问号」的短消息，避免把追问当成设定
+        if not candidates and STRONG_RE.search(raw) and len(raw) <= PIN_ITEM_MAX \
+                and not re.search(r"[?？]", raw):
+            candidates.append({"text": raw, "weight": 2})
         for c in candidates:
-            found.append({"text": c, "source": "auto"})
+            found.append({"text": c["text"], "source": "auto",
+                          "weight": c["weight"]})
     return found
 
 
@@ -146,16 +162,25 @@ def merge_pins(existing, incoming):
             "id": pid,
             "text": text[:PIN_ITEM_MAX],
             "source": "manual" if p.get("source") == "manual" else "auto",
+            # 手动与强规则权重 2；弱规则 1。超限时先淘汰弱规则，
+            # 否则几百条日常台词会把最早下达的真规则挤出上限。
+            "weight": 2 if p.get("source") == "manual" else int(p.get("weight") or 2),
             "at": _as_int(p.get("at")) or int(time.time()),
         })
 
+    def drop_index(items):
+        weak = [i for i, x in enumerate(items)
+                if x["source"] == "auto" and int(x.get("weight") or 2) < 2]
+        if weak:
+            return weak[0]
+        auto = [i for i, x in enumerate(items) if x["source"] == "auto"]
+        return auto[0] if auto else 0
+
     def trim(items):
         while items and len(items) > MAX_PINS:
-            idx = next((i for i, x in enumerate(items) if x["source"] == "auto"), 0)
-            items.pop(idx)
+            items.pop(drop_index(items))
         while items and sum(len(x["text"]) for x in items) > MAX_PIN_CHARS:
-            idx = next((i for i, x in enumerate(items) if x["source"] == "auto"), 0)
-            items.pop(idx)
+            items.pop(drop_index(items))
         return items
 
     return trim(out)

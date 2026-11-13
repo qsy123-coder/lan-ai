@@ -88,12 +88,21 @@ export default function SessionList({
       <aside className={`sesspanel ${open ? "open" : ""}`} aria-label="对话列表">
         <header className="sp-head">
           <button className="sp-ico press" onClick={onClose} aria-label="关闭对话列表">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <svg className="ico-close" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path
                 d="M6 6l12 12M18 6L6 18"
                 stroke="currentColor"
                 strokeWidth="1.8"
                 strokeLinecap="round"
+              />
+            </svg>
+            <svg className="ico-back" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path
+                d="M14.5 5.5L8 12l6.5 6.5"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
               />
             </svg>
           </button>
@@ -203,11 +212,15 @@ export default function SessionList({
 
         <footer className="sp-foot">
           <Link href="/" className="sp-foot-link" onClick={onClose}>
-            ← 去挑新角色
+            去挑新角色
           </Link>
           <button className="sp-foot-link press" onClick={onOpenSettings}>
             会话设置
           </button>
+          <span className="sp-foot-gap" />
+          <Link href="/" className="sp-foot-link sp-foot-nav" onClick={onClose}>
+            导航
+          </Link>
         </footer>
       </aside>
     </>

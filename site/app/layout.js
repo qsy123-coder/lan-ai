@@ -23,8 +23,7 @@ export default function RootLayout({ children }) {
               `(function(){try{var p=localStorage.getItem('theme');` +
               `var d=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches;` +
               `var t=(p==='dark'||p==='light')?p:(d?'dark':'light');` +
-              `document.documentElement.dataset.theme=t;` +
-              `window.__tp=(p==='dark'||p==='light')?p:'auto';}catch(e){}}())`,
+              `document.documentElement.dataset.theme=t;}catch(e){}}())`,
           }}
         />
       </head>
@@ -54,7 +53,6 @@ export default function RootLayout({ children }) {
                 <stop offset="100%" stopColor="#9fd3c9" stopOpacity="0.05" />
               </linearGradient>
             </defs>
-            {/* 描边色走 CSS 变量，深色主题下换成低亮度青，不重建渐变 */}
             {Array.from({ length: 26 }).map((_, i) => (
               <path
                 key={i}

@@ -30,7 +30,7 @@ export default function Enter() {
       <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 20 }}>
         <div className="glass glass-tinted" style={{ width: "min(420px,100%)", borderRadius: 28, padding: 26 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-            <span className="dot" style={{ width: 26, height: 26, borderRadius: 9, background: "linear-gradient(150deg,#e9f6f2,#9fc9c2)" }} />
+            <span className="dot" style={{ width: 26, height: 26, borderRadius: 0, background: "#9fc9c2" }} />
             <b style={{ fontSize: 16 }}>澜 · 私有入口</b>
           </div>
           <p style={{ fontSize: 12.5, color: "rgba(32,41,41,.6)", margin: "0 0 18px", lineHeight: 1.6 }}>

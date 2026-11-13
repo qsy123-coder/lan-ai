@@ -30,20 +30,6 @@ function Test-Port([int]$p) {
   [bool](Get-NetTCPConnection -State Listen -LocalPort $p -ErrorAction SilentlyContinue)
 }
 
-# 账号池自检：accounts.json 在 .gitignore 内，换目录/换机器不会随代码走
-$POOL_FILE = Join-Path $ROOT "accounts.json"
-if (Test-Path $POOL_FILE) {
-  try {
-    $poolCount = @((Get-Content $POOL_FILE -Raw -Encoding UTF8 | ConvertFrom-Json).PSObject.Properties).Count
-    Write-Host "  账号池：$poolCount 个号（$POOL_FILE）" -ForegroundColor DarkGray
-  } catch {
-    Write-Host "  ⚠ accounts.json 解析失败：$POOL_FILE" -ForegroundColor Yellow
-  }
-} else {
-  Write-Host "  ⚠ 没有 accounts.json：$POOL_FILE" -ForegroundColor Yellow
-  Write-Host "    池子会是空的。换目录时要把 accounts.json 一起搬过来。" -ForegroundColor Yellow
-}
-
 Write-Host "`n  额度池 · 连续生成控制台" -ForegroundColor Magenta
 Write-Host "  ─────────────────────────────" -ForegroundColor DarkGray
 

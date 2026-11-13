@@ -2,15 +2,17 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Nav from "./Nav";
 import SessionList from "./SessionList";
 import ThemeToggle, { ThemeSegments } from "./ThemeToggle";
 
 const MODELS = [
   { id: "x-apex-surge-0505", label: "Surge 32K", ctx: 32000 },
   { id: "x-apex-pulse-0731-128k", label: "Pulse 128K", ctx: 128000 },
-  { id: "x-apex-dash-0826-128k", label: "Dash 128K（严格）", ctx: 128000 },
+  { id: "x-apex-dash-0826-128k", label: "Dash 128K", ctx: 128000 },
   { id: "nalang-xl-0826", label: "XL 32K", ctx: 32000 },
   { id: "nalang-medium-0826", label: "Medium 32K", ctx: 32000 },
+  { id: "nalang-max-0826", label: "Max 32K", ctx: 32000 },
   { id: "x-apex-flux-0217-16k", label: "Flux 16K", ctx: 16000 },
   { id: "nalang-xl-0826-16k", label: "XL 16K", ctx: 16000 },
 ];
@@ -22,7 +24,6 @@ const ROUND_OPTS = [1, 2, 3, 5, 8];
 const TOKEN_DEFAULT = 4000;
 const TKEY = "lg.maxtokens.v1";
 const RKEY = "lan.chat.rounds";
-const MKEY = "lg.model.v2";
 
 function clampTokens(v) {
   const n = Math.floor(Number(v));
@@ -31,6 +32,7 @@ function clampTokens(v) {
 }
 
 const SKEY = "lg.sessions.v2";
+const MKEY = "lg.model.v2";
 const mkey = (id) => `lg.msgs.v2.${id}`;
 const uid = () => Math.random().toString(36).slice(2, 9);
 
@@ -93,7 +95,6 @@ function groupLabel(ts) {
   if (d.toDateString() === now.toDateString()) return "今天";
   if (d.toDateString() === new Date(now.getTime() - 864e5).toDateString()) return "昨天";
   if (now - d < 7 * 864e5) return "本周";
-  if (now - d < 30 * 864e5) return "本月";
   return "更早";
 }
 
@@ -142,7 +143,7 @@ export default function ChatClient({ card }) {
   const [sessions, setSessions] = useState([]);
   const [note, setNote] = useState("");
   const [showPanel, setShowPanel] = useState(true);
-  // 手机端会话面板：与设置抽屉独立开关
+  // 手机端会话抽屉：与设置抽屉独立开关
   const [showSess, setShowSess] = useState(false);
   const [pool, setPool] = useState(null);
 
@@ -152,7 +153,7 @@ export default function ChatClient({ card }) {
   const importRef = useRef(null);
   const stick = useRef(true);
   const chatIdRef = useRef(null);   // 恢复的历史属于哪个上游会话
-  const seedAcctRef = useRef(null); // 该会话在哪个号下
+  const seedAcctRef = useRef(null);  // 该会话在哪个号下
 
   useEffect(() => {
     setMaxTokens(clampTokens(readJSON(TKEY, TOKEN_DEFAULT)));
@@ -164,6 +165,19 @@ export default function ChatClient({ card }) {
     } catch {}
   }, [maxTokens]);
 
+  // 续写轮数持久化
+  useEffect(() => {
+    const v = Number(readJSON(RKEY, 1));
+    setRounds(ROUND_OPTS.includes(v) ? v : 1);
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(RKEY, JSON.stringify(rounds));
+    } catch {}
+  }, [rounds]);
+
+  // 模型选择持久化
   useEffect(() => {
     const saved = readJSON(MKEY, MODELS[0].id);
     if (MODELS.some((m) => m.id === saved)) setModel(saved);
@@ -191,18 +205,6 @@ export default function ChatClient({ card }) {
     setMemInput("");
     loadMemory();
   }, [card.id, loadMemory]);
-
-  // 续写轮数持久化
-  useEffect(() => {
-    const v = Number(readJSON(RKEY, 1));
-    setRounds(ROUND_OPTS.includes(v) ? v : 1);
-  }, []);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(RKEY, JSON.stringify(rounds));
-    } catch {}
-  }, [rounds]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return;
@@ -251,7 +253,7 @@ export default function ChatClient({ card }) {
         last: prev?.last || "",
       },
       ...s.filter((x) => String(x.cardId) !== String(card.id)),
-    ].slice(0, 60);
+    ].slice(0, 40);
     localStorage.setItem(SKEY, JSON.stringify(next));
     setSessions(next);
   }, [card.id, card.name, card.cover]);
@@ -298,155 +300,12 @@ export default function ChatClient({ card }) {
           last: lastText ?? prev?.last ?? "",
         },
         ...s.filter((x) => String(x.cardId) !== String(card.id)),
-      ].slice(0, 60);
+      ].slice(0, 40);
       localStorage.setItem(SKEY, JSON.stringify(next));
       setSessions(next);
     },
     [card.id, card.name, card.cover]
   );
-
-  const send = useCallback(
-    async (textArg, historyArg) => {
-      const text = (textArg ?? input).trim();
-      if (!text || busy) return;
-      const base = historyArg ?? msgs;
-      if (!textArg) setInput("");
-      setBusy(true);
-      setStreaming("");
-      setNote("");
-      stick.current = true;
-
-      const userMsg = { id: uid(), role: "user", content: text, ts: Date.now() };
-      const nextMsgs = [...base, userMsg];
-      setMsgs(nextMsgs);
-
-      // 历史裁剪统一交给引擎（按模型 ctx + 锚点/摘要预算）。
-      // 这里只做 200 条安全上限，避免长会话把请求体撑爆。
-      const history = base
-        .filter((m) => m.role === "user" || m.role === "assistant")
-        .slice(-200)
-        .map((m) => ({
-          role: m.role,
-          // 助手消息里的 <sug> 建议块不回灌，省 token 也避免模型复读
-          content: m.role === "assistant" ? splitSug(m.content).text : m.content,
-        }));
-
-      const ctl = new AbortController();
-      abort.current = ctl;
-      let acc = "";
-      let finished = false;
-
-      try {
-        const res = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            cardId: card.id,
-            prompt: text,
-            history,
-            model,
-            maxTokens: clampTokens(maxTokens),
-            rounds: Number(rounds) || 1,
-            // 恢复的旧会话：告诉引擎用哪个 chatId / 哪个号，
-            // 否则 createByCard 会新建一个空会话，历史接不上。
-            chatId: chatIdRef.current || undefined,
-            account: seedAcctRef.current || undefined,
-          }),
-          signal: ctl.signal,
-        });
-        if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
-
-        await readSSE(res, (ev, d) => {
-          if (ev === "delta") {
-            acc += d.text || "";
-            setStreaming(acc);
-          } else if (ev === "account") {
-            setNote(`账号 ${d.name}`);
-          } else if (ev === "memory") {
-            setMem((cur) => ({ ...(cur || {}), ...d }));
-          } else if (ev === "memory_update") {
-            setMem((cur) => ({ ...(cur || {}), ...d }));
-            setNote("长期记忆已更新");
-          } else if (ev === "complete") {
-            finished = true;
-            const final = d.text || acc || "";
-            const list = [
-              ...nextMsgs,
-              { id: uid(), role: "assistant", content: final, ts: Date.now() },
-            ];
-            setMsgs(list);
-            setStreaming("");
-            save(list, final.slice(0, 42));
-            setNote(
-              d.credit != null
-                ? `完成 · ${d.account} · 余额 ${Number(d.credit).toFixed(2)}`
-                : "完成"
-            );
-            loadPool();
-            // 摘要在后台生成，分几次拉记忆面板（摘要通常 5~30s 完成）
-            [5000, 15000, 30000].forEach((ms) => setTimeout(() => loadMemory(), ms));
-          } else if (ev === "switch") {
-            setNote(d.reason === "credit" ? "余额见底，切换到下一个账号" : `切换：${d.reason}`);
-          } else if (ev === "end" && d.reason !== "stopped") {
-            setNote(
-              d.reason === "no_credit"
-                ? "池子暂时没有可用额度"
-                : d.message || "这次没成功，点重试再发一次"
-            );
-          }
-        });
-      } catch (e) {
-        if (e.name !== "AbortError") setNote(String(e.message || e));
-      } finally {
-        if (!finished && acc) {
-          const list = [
-            ...nextMsgs,
-            { id: uid(), role: "assistant", content: acc, ts: Date.now() },
-          ];
-          setMsgs(list);
-          save(list, acc.slice(0, 42));
-        }
-        setBusy(false);
-        setStreaming("");
-        abort.current = null;
-        taRef.current?.focus();
-      }
-    },
-    [input, busy, msgs, card.id, model, maxTokens, rounds, save, loadPool, loadMemory]
-  );
-
-  const stop = useCallback(() => {
-    abort.current?.abort();
-    setNote("已停止");
-  }, []);
-
-  const regenerate = useCallback(() => {
-    if (busy) return;
-    const idx = [...msgs].reverse().findIndex((m) => m.role === "user");
-    if (idx < 0) return;
-    const realIdx = msgs.length - 1 - idx;
-    const head = msgs.slice(0, realIdx);
-    setMsgs(head);
-    save(head, head[head.length - 1]?.content?.slice(0, 42) || "");
-    send(msgs[realIdx].content, head);
-  }, [busy, msgs, save, send]);
-
-  const del = useCallback(
-    (id) => {
-      const list = msgs.filter((m) => m.id !== id);
-      setMsgs(list);
-      const last = list.filter((m) => m.role === "assistant").at(-1);
-      save(list, last?.content?.slice(0, 42) || "");
-    },
-    [msgs, save]
-  );
-
-  const clear = useCallback(() => {
-    setMsgs([]);
-    localStorage.removeItem(mkey(card.id));
-    save([], "");
-    setNote("已清空本会话");
-  }, [card.id, save]);
 
   const saveMemory = useCallback(
     async (body) => {
@@ -547,6 +406,159 @@ export default function ChatClient({ card }) {
     [saveMemory]
   );
 
+  const send = useCallback(
+    async (textArg, historyArg) => {
+      const text = (textArg ?? input).trim();
+      if (!text || busy) return;
+      const base = historyArg ?? msgs;
+      if (!textArg) setInput("");
+      setBusy(true);
+      setStreaming("");
+      setNote("");
+      stick.current = true;
+
+      const userMsg = { id: uid(), role: "user", content: text, ts: Date.now() };
+      const nextMsgs = [...base, userMsg];
+      setMsgs(nextMsgs);
+
+      // 保住开头两轮（开场与人设锚点），再从尾部回填预算内的近期轮次。
+      // 只按 [-24:] 从尾部截，长对话一满就会把开场丢光，人物设定全重置。
+      const all = base.filter((m) => m.role === "user" || m.role === "assistant");
+      const HEAD_KEEP = 2;
+      const TAIL_BUDGET = 11000;
+      const head = all.slice(0, HEAD_KEEP);
+      const rest = all.slice(HEAD_KEEP);
+      let tail = [];
+      let used = 0;
+      for (let i = rest.length - 1; i >= 0; i -= 1) {
+        const len = rest[i].content.length;
+        if (used + len > TAIL_BUDGET && tail.length) break;
+        tail.unshift(rest[i]);
+        used += len;
+      }
+      if (rest.length && !tail.length) tail = rest.slice(-4);
+      const history = [...head, ...tail].map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
+
+      const ctl = new AbortController();
+      abort.current = ctl;
+      let acc = "";
+      let finished = false;
+
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            cardId: card.id,
+            prompt: text,
+            history,
+            model,
+            maxTokens: clampTokens(maxTokens),
+            rounds: Number(rounds) || 1,
+            // 恢复的旧会话：告诉引擎用哪个 chatId / 哪个号，
+            // 否则 createByCard 会新建一个空会话，历史接不上。
+            chatId: chatIdRef.current || undefined,
+            account: seedAcctRef.current || undefined,
+          }),
+          signal: ctl.signal,
+        });
+        if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+        await readSSE(res, (ev, d) => {
+          if (ev === "delta") {
+            acc += d.text || "";
+            // 多轮续写时每轮 delta 都带 <sug> 块，直接显示会让正文中途冒出
+            // 好几个 sug、段落也看着重复。这里先剥掉再渲染，只显示正文。
+            setStreaming(splitSug(acc).text);
+          } else if (ev === "account") {
+            setNote(`账号 ${d.name}`);
+          } else if (ev === "memory") {
+            setMem((cur) => ({ ...(cur || {}), ...d }));
+          } else if (ev === "memory_update") {
+            setMem((cur) => ({ ...(cur || {}), ...d }));
+            setNote("长期记忆已更新");
+          } else if (ev === "complete") {
+            finished = true;
+            const final = d.text || acc || "";
+            const list = [
+              ...nextMsgs,
+              { id: uid(), role: "assistant", content: final, ts: Date.now() },
+            ];
+            setMsgs(list);
+            setStreaming("");
+            save(list, final.slice(0, 42));
+            setNote(
+              d.credit != null
+                ? `完成 · ${d.account} · 余额 ${Number(d.credit).toFixed(2)}`
+                : "完成"
+            );
+            loadPool();
+          } else if (ev === "switch") {
+            setNote(d.reason === "credit" ? "余额见底，切换到下一个账号" : `切换：${d.reason}`);
+          } else if (ev === "end" && d.reason !== "stopped") {
+            setNote(
+              d.reason === "no_credit"
+                ? "池子暂时没有可用额度"
+                : d.message || "这次没成功，点重试再发一次"
+            );
+          }
+        });
+      } catch (e) {
+        if (e.name !== "AbortError") setNote(String(e.message || e));
+      } finally {
+        if (!finished && acc) {
+          const list = [
+            ...nextMsgs,
+            { id: uid(), role: "assistant", content: acc, ts: Date.now() },
+          ];
+          setMsgs(list);
+          save(list, acc.slice(0, 42));
+        }
+        setBusy(false);
+        setStreaming("");
+        abort.current = null;
+        taRef.current?.focus();
+      }
+    },
+    [input, busy, msgs, card.id, model, maxTokens, rounds, save]
+  );
+
+  const stop = useCallback(() => {
+    abort.current?.abort();
+    setNote("已停止");
+  }, []);
+
+  const regenerate = useCallback(() => {
+    if (busy) return;
+    const idx = [...msgs].reverse().findIndex((m) => m.role === "user");
+    if (idx < 0) return;
+    const realIdx = msgs.length - 1 - idx;
+    const head = msgs.slice(0, realIdx);
+    setMsgs(head);
+    save(head, head[head.length - 1]?.content?.slice(0, 42) || "");
+    send(msgs[realIdx].content, head);
+  }, [busy, msgs, save, send]);
+
+  const del = useCallback(
+    (id) => {
+      const list = msgs.filter((m) => m.id !== id);
+      setMsgs(list);
+      const last = list.filter((m) => m.role === "assistant").at(-1);
+      save(list, last?.content?.slice(0, 42) || "");
+    },
+    [msgs, save]
+  );
+
+  const clear = useCallback(() => {
+    setMsgs([]);
+    localStorage.removeItem(mkey(card.id));
+    save([], "");
+    setNote("已清空本会话");
+  }, [card.id, save]);
+
   // 从列表里彻底移除一个会话（消息体 + 索引条目），不影响其它卡
   const dropSession = useCallback(
     (cardId) => {
@@ -580,30 +592,9 @@ export default function ChatClient({ card }) {
   const turns = msgs.filter((m) => m.role === "user").length;
 
   return (
-    <div className="shell chat-shell-wrap">
-      {/* 手机端(<860px)整条导航隐藏，空间让给对话；关键信息并在 .chat-head 内 */}
-      <div className="topnav-wrap nav-desktop-only">
-        <nav className="topnav">
-          <Link href="/" className="brand">
-            <span className="dot" />
-            澜
-          </Link>
-          <Link href="/" className="tab">
-            角色
-          </Link>
-          <Link href="/chat" className="tab active">
-            对话
-          </Link>
-          <span className="spacer" />
-          {pool && !pool.offline ? (
-            <span className={`pool-badge ${pool.total < 3.4 ? "empty" : ""}`}>
-              池子 {Number(pool.total).toFixed(1)} · {pool.usable}/{pool.count} 号
-            </span>
-          ) : null}
-          <span className="nav-note">{note || (busy ? "生成中…" : "就绪")}</span>
-          <ThemeToggle />
-        </nav>
-      </div>
+    <div className="shell">
+      {/* 与首页/详情页共用同一条导航；池子与状态并进 .chat-head，不再自建一条 */}
+      <Nav />
 
       <div className={`chat-shell ${showPanel ? "" : "no-panel"}`}>
         <SessionList
@@ -620,10 +611,10 @@ export default function ChatClient({ card }) {
 
         <main className="chat-main">
           <div className="chat-head">
-            {/* 手机端：展开对话列表 */}
+            {/* 手机端：打开对话抽屉 */}
             <button
-              className="head-ico head-burger press"
-              onClick={() => setShowSess(true)}
+              className="head-burger press"
+              onClick={() => setShowSess((v) => !v)}
               aria-label="对话列表"
               aria-expanded={showSess}
             >
@@ -636,8 +627,8 @@ export default function ChatClient({ card }) {
                 />
               </svg>
             </button>
-            {/* 手机端回到角色列表；桌面端隐藏 */}
-            <Link className="head-ico head-back press" href="/" aria-label="返回角色列表">
+            {/* 手机端：回到首页；桌面端隐藏 */}
+            <Link className="head-back press" href="/" aria-label="返回首页">
               <svg width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path
                   d="M14.5 5.5L8 12l6.5 6.5"
@@ -654,10 +645,7 @@ export default function ChatClient({ card }) {
             ) : null}
             <div className="who">
               <b>{card.name}</b>
-              <span>
-                {(card.tags || []).slice(0, 2).join(" · ") || "角色卡"}
-                {msgs.length ? ` · ${turns} 轮` : ""}
-              </span>
+              <span>{(card.tags || []).slice(0, 3).join(" · ") || "角色卡"}</span>
             </div>
             <span className="spacer" />
             {pool && !pool.offline ? (
@@ -666,21 +654,26 @@ export default function ChatClient({ card }) {
               </span>
             ) : null}
             <ThemeToggle className="head-theme" />
-            <button
-              className="head-ico press"
-              onClick={() => setShowPanel((v) => !v)}
-              aria-label="会话设置"
-              aria-expanded={showPanel}
+            <select
+              className="model-pick"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              disabled={busy}
+              aria-label="模型"
             >
-              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.7" />
-                <path
-                  d="M12 3.2v2.1M12 18.7v2.1M4.6 7.9l1.8 1.1M17.6 15l1.8 1.1M19.4 7.9l-1.8 1.1M6.4 15l-1.8 1.1"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                />
-              </svg>
+              {MODELS.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+            <button
+              className="icon-btn press"
+              onClick={() => setShowPanel((v) => !v)}
+              aria-label="设置"
+              title="设置"
+            >
+              ⚙
             </button>
           </div>
 
@@ -802,7 +795,11 @@ export default function ChatClient({ card }) {
                   setInput(e.target.value);
                   const el = e.target;
                   el.style.height = "auto";
-                  el.style.height = Math.min(180, el.scrollHeight) + "px";
+                  // 清空后 scrollHeight 仍含 padding，不会自动回到一行；
+                  // 空值时显式用 scrollHeight 与最小高度取小，才能缩回去。
+                  const min = 24; // 一行 16px*1.45 ≈ 23.2
+                  el.style.height =
+                    (e.target.value ? Math.min(180, el.scrollHeight) : min) + "px";
                 }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
@@ -811,7 +808,7 @@ export default function ChatClient({ card }) {
                   }
                   if (e.key === "Escape" && busy) stop();
                 }}
-                placeholder={`和「${card.name}」说点什么…  Enter 发送 · Shift+Enter 换行`}
+                placeholder="说点什么…"
                 rows={1}
                 enterKeyHint="send"
                 autoComplete="off"
@@ -819,7 +816,7 @@ export default function ChatClient({ card }) {
               />
               {busy ? (
                 <button className="send stop press" onClick={stop} aria-label="停止">
-                  <span className="sq" />
+                  ■
                 </button>
               ) : (
                 <button
@@ -828,30 +825,18 @@ export default function ChatClient({ card }) {
                   disabled={!input.trim()}
                   aria-label="发送"
                 >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path
-                      d="M12 19V5M6 11l6-6 6 6"
-                      stroke="currentColor"
-                      strokeWidth="1.9"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
+                  ↑
                 </button>
               )}
             </div>
             <div className="hint">
               <span>{input.length} 字</span>
-              <span className="hint-dot">·</span>
+              <span>·</span>
               <span>{modelLabel}</span>
-              <span className="hint-turns">
-                <span className="hint-dot">·</span>
-                {turns} 轮
-              </span>
+              <span>·</span>
+              <span>{turns} 轮</span>
               <span className="spacer" />
-              <span className="hint-ctx">
-                锚点 {memCount} 条 · 摘要 {memChars} 字 · 窗口 {Math.round(modelCtx / 1000)}K
-              </span>
+              <span>自动带上最近 24 条上下文</span>
             </div>
           </div>
         </main>
@@ -863,8 +848,25 @@ export default function ChatClient({ card }) {
               onClick={() => setShowPanel(false)}
               aria-hidden="true"
             />
-            <aside className="side side-right drawer" aria-label="会话设置">
-              <h3>本会话</h3>
+            <aside className="side glass glass-tinted side-right drawer" aria-label="会话设置">
+              <div className="drw-head">
+                <h3>本会话</h3>
+                <button
+                  type="button"
+                  className="drw-close press"
+                  onClick={() => setShowPanel(false)}
+                  aria-label="关闭设置"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path
+                      d="M6 6l12 12M18 6L6 18"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </button>
+              </div>
               <div className="panel-body">
                 <label className="fld">主题</label>
                 <ThemeSegments />
@@ -894,7 +896,9 @@ export default function ChatClient({ card }) {
                   onChange={(e) => setMaxTokens(e.target.value)}
                   disabled={busy}
                 />
-                <div className="hint">这是上限，不是保证 —— 单段通常输出 4800~5600 字</div>
+                <div className="hint">
+                  这是上限，不是保证 —— 单段通常输出 4800~5600 字
+                </div>
 
                 <label className="fld">续写轮数</label>
                 <select
@@ -1000,14 +1004,6 @@ export default function ChatClient({ card }) {
                 <div className="kv">
                   <span>字数</span>
                   <b>{msgs.reduce((n, m) => n + m.content.length, 0)}</b>
-                </div>
-                <div className="kv">
-                  <span>号池</span>
-                  <b>{pool && !pool.offline ? `${Number(pool.total).toFixed(1)} · ${pool.usable}/${pool.count}` : "—"}</b>
-                </div>
-                <div className="kv">
-                  <span>会话分组</span>
-                  <b>{[...groupedCount.entries()].map(([k, v]) => `${k} ${v}`).join(" · ") || "—"}</b>
                 </div>
 
                 <button

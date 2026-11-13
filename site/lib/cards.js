@@ -2,9 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-// 默认按本仓库定位，别写死某台机器的盘符（原为 Z:\project\...，换机后静默读空 → 首页无卡）。
-// site/lib/cards.js -> 仓库根在上一级的上一级。
-// 服务器上构建产物不在仓库内，用 CARDS_FILE 覆盖指向数据目录。
+// 默认按本仓库定位，别写死某台机器的盘符（原为 Z:\project\...，未挂载 Z: 时 statSync 抛错，
+// 被 catch 静默吞掉 → 首页空网格且无日志）。site/lib/cards.js -> 仓库根在上一级的上一级。
+// 部署或直接 next start 时用 CARDS_FILE 覆盖。
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_FILE = path.join(HERE, "..", "..", "captures", "site", "cards.json");
 const FILE = process.env.CARDS_FILE || DEFAULT_FILE;
@@ -46,17 +46,10 @@ export function loadCards() {
   return raw();
 }
 
-// 部分卡片的 tags 极长（实测一张 140 个），全量会撑爆 HTML 且把顶部标签栏冲成稀有词。
-// 列表页只用 tags 做筛选与计数，取前 6 个足够；详情页走 getCard() 拿全量。
-const LIGHT_TAGS = 6;
-
 export function lightCards() {
   return raw().map((c) => {
     const o = {};
-    for (const k of LIGHT) {
-      if (c[k] === undefined) continue;
-      o[k] = k === "tags" && Array.isArray(c[k]) ? c[k].slice(0, LIGHT_TAGS) : c[k];
-    }
+    for (const k of LIGHT) if (c[k] !== undefined) o[k] = c[k];
     return o;
   });
 }

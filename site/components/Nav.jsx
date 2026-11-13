@@ -9,9 +9,10 @@ import ThemeToggle from "./ThemeToggle";
 // 还没实现的页面标 soon：渲染成禁用态，避免点了 404（悬停预取也会 404）。
 const NAV = [
   { href: "/", label: "角色", icon: "role" },
-  { href: "/messages", label: "消息", icon: "msg", soon: true },
+  // 消息就是 /chat：三栏 + 会话抽屉已经在 ChatClient 里，不再单独做 /messages。
+  { href: "/chat", label: "消息", icon: "msg" },
   { href: "/forum", label: "论坛", icon: "forum", soon: true },
-  { href: "/me", label: "我的", icon: "me", soon: true },
+  { href: "/me", label: "我的", icon: "me" },
 ];
 
 function Icon({ name, size = 17 }) {
@@ -229,9 +230,9 @@ export default function Nav() {
             </svg>
           </button>
 
-          <span className="nav-avatar" title="我的账号（即将上线）" aria-disabled="true">
+          <Link href="/me" className="nav-avatar" title="我的" aria-label="我的">
             <span className="nav-av-inner" />
-          </span>
+          </Link>
         </div>
       </nav>
 

@@ -1046,6 +1046,8 @@ def run_job(payload, emit):
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "dzmm-engine/1.0"
+    # TCP_NODELAY：SSE 每包都很小，关掉 Nagle 免得几十毫秒的粘包/延迟 ACK 造成「一顿一顿」
+    disable_nagle_algorithm = True
 
     def log_message(self, fmt, *args):
         pass
@@ -1075,6 +1077,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("x-accel-buffering", "no")
         self.end_headers()
         self.close_connection = True
+        # 立刻发一个注释心跳并 flush，强制响应头/首包马上出网（降低 TTFT 的协议层等待）
+        try:
+            self.wfile.write(b": ping\n\n")
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
 
     def _emit(self, event, data):
         s = json.dumps(data, ensure_ascii=False)

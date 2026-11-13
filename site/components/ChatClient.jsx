@@ -164,6 +164,13 @@ export default function ChatClient({ card }) {
   const stick = useRef(true);
   const chatIdRef = useRef(null);   // 恢复的历史属于哪个上游会话
   const seedAcctRef = useRef(null);  // 该会话在哪个号下
+  // 流式平滑渲染：上游按 ~80ms 一包吐出，直接渲染会「一顿一顿」。
+  // 这里把累积文本放进 ref，用 rAF 以稳定节奏逐字揭示（追平 backlog），
+  // 让画面连续，而不是按上游包的节奏跳动。
+  const accRef = useRef("");
+  const shownRef = useRef(0);
+  const rafRef = useRef(0);
+  const streamingRef = useRef(false);
 
   useEffect(() => {
     setMaxTokens(clampTokens(readJSON(TKEY, TOKEN_DEFAULT)));
@@ -434,6 +441,35 @@ export default function ChatClient({ card }) {
     [saveMemory]
   );
 
+  // rAF 平滑揭示：每帧追平 25% backlog（至少 1 字），把上游的「一坨一坨」
+  // 摊成连续字符流；流式结束（streamingRef=false）后把剩余一次性出完再停。
+  const revealTick = useCallback(() => {
+    rafRef.current = 0;
+    const clean = splitSug(accRef.current).text;
+    const target = clean.length;
+    if (shownRef.current < target) {
+      const remain = target - shownRef.current;
+      const step = Math.max(1, Math.ceil(remain * 0.25));
+      shownRef.current = Math.min(target, shownRef.current + step);
+    }
+    setStreaming(clean.slice(0, shownRef.current));
+    if (shownRef.current < target || streamingRef.current) {
+      rafRef.current = requestAnimationFrame(revealTick);
+    }
+  }, []);
+
+  const kickReveal = useCallback(() => {
+    if (!rafRef.current) rafRef.current = requestAnimationFrame(revealTick);
+  }, [revealTick]);
+
+  const stopReveal = useCallback(() => {
+    streamingRef.current = false;
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
+    }
+  }, []);
+
   const send = useCallback(
     async (textArg, historyArg) => {
       const text = (textArg ?? input).trim();
@@ -464,8 +500,15 @@ export default function ChatClient({ card }) {
 
       const ctl = new AbortController();
       abort.current = ctl;
-      let acc = "";
       let finished = false;
+      // 新一轮：清空揭示缓冲
+      accRef.current = "";
+      shownRef.current = 0;
+      streamingRef.current = true;
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = 0;
+      }
 
       try {
         const res = await fetch("/api/chat", {
@@ -489,10 +532,9 @@ export default function ChatClient({ card }) {
 
         await readSSE(res, (ev, d) => {
           if (ev === "delta") {
-            acc += d.text || "";
-            // 多轮续写时每轮 delta 都带 <sug> 块，直接显示会让正文中途冒出
-            // 好几个 sug、段落也看着重复。这里先剥掉再渲染，只显示正文。
-            setStreaming(splitSug(acc).text);
+            accRef.current += d.text || "";
+            // 不再每包重算整段 splitSug + setState：累到 ref，交给 rAF 平滑揭示
+            kickReveal();
           } else if (ev === "account") {
             setNote(`账号 ${d.name}`);
           } else if (ev === "memory") {
@@ -502,7 +544,8 @@ export default function ChatClient({ card }) {
             setNote("长期记忆已更新");
           } else if (ev === "complete") {
             finished = true;
-            const final = d.text || acc || "";
+            stopReveal();
+            const final = d.text || accRef.current || "";
             const list = [
               ...nextMsgs,
               { id: uid(), role: "assistant", content: final, ts: Date.now() },
@@ -529,13 +572,14 @@ export default function ChatClient({ card }) {
       } catch (e) {
         if (e.name !== "AbortError") setNote(String(e.message || e));
       } finally {
-        if (!finished && acc) {
+        stopReveal();
+        if (!finished && accRef.current) {
           const list = [
             ...nextMsgs,
-            { id: uid(), role: "assistant", content: acc, ts: Date.now() },
+            { id: uid(), role: "assistant", content: accRef.current, ts: Date.now() },
           ];
           setMsgs(list);
-          save(list, acc.slice(0, 42));
+          save(list, accRef.current.slice(0, 42));
         }
         setBusy(false);
         setStreaming("");
@@ -543,7 +587,7 @@ export default function ChatClient({ card }) {
         taRef.current?.focus();
       }
     },
-    [input, busy, msgs, card.id, model, maxTokens, rounds, save]
+    [input, busy, msgs, card.id, model, maxTokens, rounds, save, kickReveal, stopReveal]
   );
 
   const stop = useCallback(() => {

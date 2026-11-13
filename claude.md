@@ -32,7 +32,8 @@
 | Cookie | `chosen_language`、`_geo`；登录态另有签名 cookie |
 | 埋点 | PostHog（bundle 内 `quota_limited` / feature flags） |
 | 风控 | 418 `{"error":"captcha_required","location":"/__captcha/"}`；响应头 `x-request-id`、`Vary: Cookie, Authorization` |
-| 注册风控 | `POST /api/auth/sign-up` 恒定 `428 {"code":"human_check_required"}`（11-13 起）；前端弹 `/__captcha/?src=ratelimit` iframe，过闸后自动重试 `[0,2000,2000,2500]ms`，否则 toast `当前环境暂时无法完成注册`。`x-dzmm-client: mobile-app/expo` 只变 418，无豁免；是否需人工拖取决于出口 IP（台湾/德国直接放行，瑞士超时/429）。见 notes/033 |
+| 注册风控 | 两段式：先 `428 {"code":"human_check_required"}` 要求过 `/__captcha/`；**过闸后服务端二次裁决**，失败回 `429 {"code":"REGISTER_RISK_BLOCKED","error":"当前环境暂时无法完成注册，请稍后再试"}`（带请求 ID）。**11-14 实测：`aetouban.cn` 已标记，过闸也 429；`fldubai.com`（mail.tm）可过；每个出口 IP 约只放行 1 个注册**。香港腾讯云 `43.135.10.175` + fldubai + 人工拖 = 成功（b047）；台湾家宽、AWS 段、同 IP 第二次均 429。`x-dzmm-client: mobile-app/expo` 只把 428 变 418，无豁免。见 notes/034 |
+| 注册邮件 | 验证码邮件发件人 `noreply@send.dianzimeimo.com`（**不是** dzmm 域），标题「你的魔法链接」，基本进 **Gmail 垃圾邮件**；IMAP 按 `TO <别名>` 搜不到，要 `FROM dianzimeimo` 取最新一条。Gmail 加号别名会被规范化成主邮箱 → 变成「登录已有账号」而非注册 |
 | 出口依赖 | 同一站点换节点即可脱离 418：`🇯🇵 日本-hy2 02` 出口正常返回 401；新加坡出口已被锁（见 notes/002） |
 | 生成接口 | `POST /api/chat`（SSE）：`{operation, chatId, cardId, chatSettings{model,maxTokens,...}, prompts[], content, parentGenerationId}`，**model / maxTokens 完全由客户端指定** |
 | 计费 | **预扣式**：每条先预扣 3.2 credit，不足则 SSE 返 `{"classification":"upgrade_needed","upgradeReason":"credit"}` 且不扣费；完成后按实际 token 结算（≈2.1/条）。quotas 全程不变。预扣原子，**并发无法超发** |
@@ -436,6 +437,8 @@ asyncio.run(main())
 | 2026-11-13 | `fix/memory-full-history` | 前端去 head/tail + 锚点精度 + 50 轮 E2E | 已完成（50 轮 E2E 通过） |
 | 2026-11-13 | `docs/e2e-50-acceptance` | 回填 50 轮验收结果 + 模型/降级验证 + PRD 勾选 | 已完成 |
 | 2026-11-13 | `feat/pool-expand-imap` | 号池扩容：IMAP 代理隧道 + /__captcha/ 等待 + no_code 待补落盘；b020→b029（8 成 1 败） | 已入池，待合并 |
+| 2026-11-14 | `feat/pool-expand-imap` | 注册风控摸清：域名标记 / 单 IP 额度 / 出口矩阵 / 验证码邮件；b047 入池（服务器 IP + fldubai + 人工拖） | 已入池并同步线上 |
+| 2026-11-13 | `fix/sug-replies` | 建议回复消失：默认模型换 Surge 后上游不 armed sug；补格式要求 + 未命中时短生成兜底（`notes/018`） | 已部署生产 |
 | 2026-11-13 | `feat/me-and-pricing` | 我的 + 会员与价格（notes/008 §2.4/§5）；消息 tab 接到 /chat | 已完成 |
 | 2026-11-13 | `feat/account-ledger` | 邮箱登录 + 用户积分账本（notes/008 §7）；注册 100、生成扣 2.1、演示充值 | 已完成 |
 | 2026-11-13 | `feat/checkin-vip` | 每日签到 + VIP 等级（notes/008 §7 运营）；签到 +5/第7天 +20，VIP 按 30 天充值 | 已完成 |

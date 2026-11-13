@@ -2,12 +2,17 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import SessionList from "./SessionList";
+import ThemeToggle, { ThemeSegments } from "./ThemeToggle";
 
 const MODELS = [
-  { id: "x-apex-flux-0217-16k", label: "Flux 16K" },
-  { id: "x-apex-surge-0505", label: "Surge 32K" },
-  { id: "nalang-xl-0826-16k", label: "XL 16K" },
-  { id: "nalang-medium-0826", label: "Medium" },
+  { id: "x-apex-surge-0505", label: "Surge 32K", ctx: 32000 },
+  { id: "x-apex-pulse-0731-128k", label: "Pulse 128K", ctx: 128000 },
+  { id: "x-apex-dash-0826-128k", label: "Dash 128K（严格）", ctx: 128000 },
+  { id: "nalang-xl-0826", label: "XL 32K", ctx: 32000 },
+  { id: "nalang-medium-0826", label: "Medium 32K", ctx: 32000 },
+  { id: "x-apex-flux-0217-16k", label: "Flux 16K", ctx: 16000 },
+  { id: "nalang-xl-0826-16k", label: "XL 16K", ctx: 16000 },
 ];
 
 const TOKEN_MIN = 200;
@@ -17,6 +22,7 @@ const ROUND_OPTS = [1, 2, 3, 5, 8];
 const TOKEN_DEFAULT = 4000;
 const TKEY = "lg.maxtokens.v1";
 const RKEY = "lan.chat.rounds";
+const MKEY = "lg.model.v2";
 
 function clampTokens(v) {
   const n = Math.floor(Number(v));
@@ -87,6 +93,7 @@ function groupLabel(ts) {
   if (d.toDateString() === now.toDateString()) return "今天";
   if (d.toDateString() === new Date(now.getTime() - 864e5).toDateString()) return "昨天";
   if (now - d < 7 * 864e5) return "本周";
+  if (now - d < 30 * 864e5) return "本月";
   return "更早";
 }
 
@@ -127,21 +134,25 @@ export default function ChatClient({ card }) {
   const [streaming, setStreaming] = useState("");
   const [model, setModel] = useState(MODELS[0].id);
   const [maxTokens, setMaxTokens] = useState(TOKEN_DEFAULT);
+  const [mem, setMem] = useState(null);
+  const [memInput, setMemInput] = useState("");
+  const [memBusy, setMemBusy] = useState(false);
   // 分段续写轮数：单轮输出有硬上限（约 4800~5600 字），想更长只能多轮接续
   const [rounds, setRounds] = useState(1);
   const [sessions, setSessions] = useState([]);
   const [note, setNote] = useState("");
   const [showPanel, setShowPanel] = useState(true);
-  // 手机端会话抽屉：与设置抽屉独立开关
+  // 手机端会话面板：与设置抽屉独立开关
   const [showSess, setShowSess] = useState(false);
   const [pool, setPool] = useState(null);
 
   const box = useRef(null);
   const taRef = useRef(null);
   const abort = useRef(null);
+  const importRef = useRef(null);
   const stick = useRef(true);
   const chatIdRef = useRef(null);   // 恢复的历史属于哪个上游会话
-  const seedAcctRef = useRef(null);  // 该会话在哪个号下
+  const seedAcctRef = useRef(null); // 该会话在哪个号下
 
   useEffect(() => {
     setMaxTokens(clampTokens(readJSON(TKEY, TOKEN_DEFAULT)));
@@ -152,6 +163,34 @@ export default function ChatClient({ card }) {
       localStorage.setItem(TKEY, JSON.stringify(clampTokens(maxTokens)));
     } catch {}
   }, [maxTokens]);
+
+  useEffect(() => {
+    const saved = readJSON(MKEY, MODELS[0].id);
+    if (MODELS.some((m) => m.id === saved)) setModel(saved);
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(MKEY, JSON.stringify(model));
+    } catch {}
+  }, [model]);
+
+  const loadMemory = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/memory?cardId=${encodeURIComponent(card.id)}`, {
+        cache: "no-store",
+      });
+      if (!r.ok) return;
+      const j = await r.json();
+      if (j?.memory) setMem(j.memory);
+    } catch {}
+  }, [card.id]);
+
+  useEffect(() => {
+    setMem(null);
+    setMemInput("");
+    loadMemory();
+  }, [card.id, loadMemory]);
 
   // 续写轮数持久化
   useEffect(() => {
@@ -212,7 +251,7 @@ export default function ChatClient({ card }) {
         last: prev?.last || "",
       },
       ...s.filter((x) => String(x.cardId) !== String(card.id)),
-    ].slice(0, 40);
+    ].slice(0, 60);
     localStorage.setItem(SKEY, JSON.stringify(next));
     setSessions(next);
   }, [card.id, card.name, card.cover]);
@@ -259,7 +298,7 @@ export default function ChatClient({ card }) {
           last: lastText ?? prev?.last ?? "",
         },
         ...s.filter((x) => String(x.cardId) !== String(card.id)),
-      ].slice(0, 40);
+      ].slice(0, 60);
       localStorage.setItem(SKEY, JSON.stringify(next));
       setSessions(next);
     },
@@ -281,26 +320,16 @@ export default function ChatClient({ card }) {
       const nextMsgs = [...base, userMsg];
       setMsgs(nextMsgs);
 
-      // 保住开头两轮（开场与人设锚点），再从尾部回填预算内的近期轮次。
-      // 只按 [-24:] 从尾部截，长对话一满就会把开场丢光，人物设定全重置。
-      const all = base.filter((m) => m.role === "user" || m.role === "assistant");
-      const HEAD_KEEP = 2;
-      const TAIL_BUDGET = 11000;
-      const head = all.slice(0, HEAD_KEEP);
-      const rest = all.slice(HEAD_KEEP);
-      let tail = [];
-      let used = 0;
-      for (let i = rest.length - 1; i >= 0; i -= 1) {
-        const len = rest[i].content.length;
-        if (used + len > TAIL_BUDGET && tail.length) break;
-        tail.unshift(rest[i]);
-        used += len;
-      }
-      if (rest.length && !tail.length) tail = rest.slice(-4);
-      const history = [...head, ...tail].map((m) => ({
-        role: m.role,
-        content: m.content,
-      }));
+      // 历史裁剪统一交给引擎（按模型 ctx + 锚点/摘要预算）。
+      // 这里只做 200 条安全上限，避免长会话把请求体撑爆。
+      const history = base
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .slice(-200)
+        .map((m) => ({
+          role: m.role,
+          // 助手消息里的 <sug> 建议块不回灌，省 token 也避免模型复读
+          content: m.role === "assistant" ? splitSug(m.content).text : m.content,
+        }));
 
       const ctl = new AbortController();
       abort.current = ctl;
@@ -333,6 +362,11 @@ export default function ChatClient({ card }) {
             setStreaming(acc);
           } else if (ev === "account") {
             setNote(`账号 ${d.name}`);
+          } else if (ev === "memory") {
+            setMem((cur) => ({ ...(cur || {}), ...d }));
+          } else if (ev === "memory_update") {
+            setMem((cur) => ({ ...(cur || {}), ...d }));
+            setNote("长期记忆已更新");
           } else if (ev === "complete") {
             finished = true;
             const final = d.text || acc || "";
@@ -349,6 +383,8 @@ export default function ChatClient({ card }) {
                 : "完成"
             );
             loadPool();
+            // 摘要在后台生成，分几次拉记忆面板（摘要通常 5~30s 完成）
+            [5000, 15000, 30000].forEach((ms) => setTimeout(() => loadMemory(), ms));
           } else if (ev === "switch") {
             setNote(d.reason === "credit" ? "余额见底，切换到下一个账号" : `切换：${d.reason}`);
           } else if (ev === "end" && d.reason !== "stopped") {
@@ -376,7 +412,7 @@ export default function ChatClient({ card }) {
         taRef.current?.focus();
       }
     },
-    [input, busy, msgs, card.id, model, maxTokens, rounds, save]
+    [input, busy, msgs, card.id, model, maxTokens, rounds, save, loadPool, loadMemory]
   );
 
   const stop = useCallback(() => {
@@ -412,24 +448,142 @@ export default function ChatClient({ card }) {
     setNote("已清空本会话");
   }, [card.id, save]);
 
-  const grouped = useMemo(() => {
+  const saveMemory = useCallback(
+    async (body) => {
+      setMemBusy(true);
+      try {
+        const r = await fetch("/api/memory", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ cardId: card.id, ...body }),
+        });
+        const j = await r.json().catch(() => null);
+        if (j?.memory) setMem(j.memory);
+        return j?.memory || null;
+      } catch {
+        return null;
+      } finally {
+        setMemBusy(false);
+      }
+    },
+    [card.id]
+  );
+
+  const addPin = useCallback(async () => {
+    const text = memInput.trim();
+    if (!text) return;
+    const pins = [...(mem?.pinned || []), { text, source: "manual" }];
+    const saved = await saveMemory({
+      pinned: pins.map((p) => ({ text: p.text, source: "manual" })),
+    });
+    if (saved) setMemInput("");
+  }, [mem, memInput, saveMemory]);
+
+  const delPin = useCallback(
+    (id) => {
+      const pins = (mem?.pinned || []).filter((p) => p.id !== id);
+      saveMemory({ pinned: pins.map((p) => ({ text: p.text, source: "manual" })) });
+    },
+    [mem, saveMemory]
+  );
+
+  const clearMemory = useCallback(() => {
+    saveMemory({ clear: true });
+    setMem({ pinned: [], summary: "", summarizedUpTo: 0 });
+    setNote("长期记忆已清空");
+  }, [saveMemory]);
+
+  const regenSummary = useCallback(() => {
+    saveMemory({ summary: "", summarizedUpTo: 0 });
+    setMem((cur) => ({ ...(cur || {}), summary: "", summarizedUpTo: 0 }));
+    setNote("摘要已清空，下一轮会重新生成");
+  }, [saveMemory]);
+
+  const exportMemory = useCallback(() => {
+    const data = {
+      version: 1,
+      cardId: card.id,
+      pinned: (mem?.pinned || []).map((p) => ({
+        text: p.text,
+        source: p.source || "manual",
+      })),
+      summary: mem?.summary || "",
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `memory-${card.id}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setNote("记忆已导出");
+  }, [card.id, mem]);
+
+  const importMemory = useCallback(
+    async (file) => {
+      if (!file) return;
+      try {
+        const data = JSON.parse(await file.text());
+        const body = {};
+        if (Array.isArray(data.pinned)) {
+          body.pinned = data.pinned
+            .map((p) => (typeof p === "string" ? p : p?.text))
+            .filter(Boolean)
+            .slice(0, 20)
+            .map((text) => ({ text: String(text).slice(0, 200), source: "manual" }));
+        }
+        if (typeof data.summary === "string") {
+          body.summary = data.summary.slice(0, 600);
+          body.summarizedUpTo = 0;
+        }
+        const saved = await saveMemory(body);
+        setNote(saved ? "记忆已导入" : "导入失败：引擎未响应");
+      } catch {
+        setNote("导入失败：不是有效的记忆 JSON");
+      }
+    },
+    [saveMemory]
+  );
+
+  // 从列表里彻底移除一个会话（消息体 + 索引条目），不影响其它卡
+  const dropSession = useCallback(
+    (cardId) => {
+      try {
+        localStorage.removeItem(mkey(cardId));
+        const next = readJSON(SKEY, []).filter((x) => String(x.cardId) !== String(cardId));
+        localStorage.setItem(SKEY, JSON.stringify(next));
+        setSessions(next);
+        if (String(cardId) === String(card.id)) {
+          setMsgs([]);
+          setNote("已删除本会话");
+        }
+      } catch {}
+    },
+    [card.id]
+  );
+
+  const groupedCount = useMemo(() => {
     const g = new Map();
     for (const s of sessions) {
       const k = groupLabel(s.lastAt);
-      if (!g.has(k)) g.set(k, []);
-      g.get(k).push(s);
+      g.set(k, (g.get(k) || 0) + 1);
     }
-    return [...g.entries()];
+    return g;
   }, [sessions]);
 
   const modelLabel = MODELS.find((m) => m.id === model)?.label || model;
+  const modelCtx = MODELS.find((m) => m.id === model)?.ctx || 0;
+  const memCount = mem?.pinned?.length || 0;
+  const memChars = (mem?.summary || "").length;
   const turns = msgs.filter((m) => m.role === "user").length;
 
   return (
-    <div className="shell">
+    <div className="shell chat-shell-wrap">
       {/* 手机端(<860px)整条导航隐藏，空间让给对话；关键信息并在 .chat-head 内 */}
       <div className="topnav-wrap nav-desktop-only">
-        <nav className="topnav glass">
+        <nav className="topnav">
           <Link href="/" className="brand">
             <span className="dot" />
             澜
@@ -447,70 +601,52 @@ export default function ChatClient({ card }) {
             </span>
           ) : null}
           <span className="nav-note">{note || (busy ? "生成中…" : "就绪")}</span>
+          <ThemeToggle />
         </nav>
       </div>
 
       <div className={`chat-shell ${showPanel ? "" : "no-panel"}`}>
-        {showSess ? (
-          <div
-            className="drawer-mask sess-mask"
-            onClick={() => setShowSess(false)}
-            aria-hidden="true"
-          />
-        ) : null}
-        <aside
-          className={`side glass glass-tinted side-left${showSess ? " open" : ""}`}
-        >
-          <h3>会话</h3>
-          {sessions.length === 0 ? <div className="state">还没有对话</div> : null}
-          {grouped.map(([label, list]) => (
-            <div key={label} className="sess-group">
-              <div className="sess-label">{label}</div>
-              {list.map((s) => (
-                <Link
-                  key={s.cardId}
-                  href={`/chat?card=${s.cardId}`}
-                  className={`sess ${String(s.cardId) === String(card.id) ? "on" : ""}`}
-                  onClick={() => setShowSess(false)}
-                >
-                  {s.cover ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={s.cover} alt="" />
-                  ) : (
-                    <span className="ph" />
-                  )}
-                  <span className="t">
-                    <b>{s.name}</b>
-                    <span>{s.last || "开始新的对话"}</span>
-                  </span>
-                  <span className="time">{timeOf(s.lastAt)}</span>
-                </Link>
-              ))}
-            </div>
-          ))}
-          <div className="side-foot">
-            <Link href="/" className="mini-link">
-              ← 去挑新角色
-            </Link>
-          </div>
-        </aside>
+        <SessionList
+          open={showSess}
+          sessions={sessions}
+          currentId={card.id}
+          onClose={() => setShowSess(false)}
+          onDelete={dropSession}
+          onOpenSettings={() => {
+            setShowSess(false);
+            setShowPanel(true);
+          }}
+        />
 
         <main className="chat-main">
           <div className="chat-head">
-            {/* 手机端：汉堡展开会话抽屉 */}
+            {/* 手机端：展开对话列表 */}
             <button
-              className="head-burger press"
-              onClick={() => setShowSess((v) => !v)}
-              aria-label="会话列表"
+              className="head-ico head-burger press"
+              onClick={() => setShowSess(true)}
+              aria-label="对话列表"
               aria-expanded={showSess}
             >
-              <span />
-              <span />
-              <span />
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path
+                  d="M4 7h16M4 12h16M4 17h10"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                />
+              </svg>
             </button>
-            {/* 手机端侧栏收起后，用这里回到角色列表；桌面端 display:none */}
-            <Link className="head-back press" href="/" aria-label="返回角色列表">
-              ‹
+            {/* 手机端回到角色列表；桌面端隐藏 */}
+            <Link className="head-ico head-back press" href="/" aria-label="返回角色列表">
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path
+                  d="M14.5 5.5L8 12l6.5 6.5"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
             </Link>
             {card.cover ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -518,7 +654,10 @@ export default function ChatClient({ card }) {
             ) : null}
             <div className="who">
               <b>{card.name}</b>
-              <span>{(card.tags || []).slice(0, 3).join(" · ") || "角色卡"}</span>
+              <span>
+                {(card.tags || []).slice(0, 2).join(" · ") || "角色卡"}
+                {msgs.length ? ` · ${turns} 轮` : ""}
+              </span>
             </div>
             <span className="spacer" />
             {pool && !pool.offline ? (
@@ -526,28 +665,26 @@ export default function ChatClient({ card }) {
                 池 {Number(pool.total).toFixed(1)}
               </span>
             ) : null}
-            <select
-              className="model-pick"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              disabled={busy}
-              aria-label="模型"
-            >
-              {MODELS.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
+            <ThemeToggle className="head-theme" />
             <button
-              className="icon-btn press"
+              className="head-ico press"
               onClick={() => setShowPanel((v) => !v)}
-              aria-label="设置"
-              title="设置"
+              aria-label="会话设置"
+              aria-expanded={showPanel}
             >
-              ⚙
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.7" />
+                <path
+                  d="M12 3.2v2.1M12 18.7v2.1M4.6 7.9l1.8 1.1M17.6 15l1.8 1.1M19.4 7.9l-1.8 1.1M6.4 15l-1.8 1.1"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                />
+              </svg>
             </button>
           </div>
+
+          {note ? <div className="chat-note">{note}</div> : null}
 
           {pool && !pool.offline && pool.usable === 0 ? (
             <div className="pool-empty">
@@ -682,7 +819,7 @@ export default function ChatClient({ card }) {
               />
               {busy ? (
                 <button className="send stop press" onClick={stop} aria-label="停止">
-                  ■
+                  <span className="sq" />
                 </button>
               ) : (
                 <button
@@ -691,18 +828,30 @@ export default function ChatClient({ card }) {
                   disabled={!input.trim()}
                   aria-label="发送"
                 >
-                  ↑
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path
+                      d="M12 19V5M6 11l6-6 6 6"
+                      stroke="currentColor"
+                      strokeWidth="1.9"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
                 </button>
               )}
             </div>
             <div className="hint">
               <span>{input.length} 字</span>
-              <span>·</span>
+              <span className="hint-dot">·</span>
               <span>{modelLabel}</span>
-              <span>·</span>
-              <span>{turns} 轮</span>
+              <span className="hint-turns">
+                <span className="hint-dot">·</span>
+                {turns} 轮
+              </span>
               <span className="spacer" />
-              <span>自动带上最近 24 条上下文</span>
+              <span className="hint-ctx">
+                锚点 {memCount} 条 · 摘要 {memChars} 字 · 窗口 {Math.round(modelCtx / 1000)}K
+              </span>
             </div>
           </div>
         </main>
@@ -714,9 +863,12 @@ export default function ChatClient({ card }) {
               onClick={() => setShowPanel(false)}
               aria-hidden="true"
             />
-            <aside className="side glass glass-tinted side-right drawer">
+            <aside className="side side-right drawer" aria-label="会话设置">
               <h3>本会话</h3>
               <div className="panel-body">
+                <label className="fld">主题</label>
+                <ThemeSegments />
+
                 <label className="fld">模型</label>
                 <select
                   className="inp"
@@ -742,9 +894,7 @@ export default function ChatClient({ card }) {
                   onChange={(e) => setMaxTokens(e.target.value)}
                   disabled={busy}
                 />
-                <div className="hint">
-                  这是上限，不是保证 —— 单段通常输出 4800~5600 字
-                </div>
+                <div className="hint">这是上限，不是保证 —— 单段通常输出 4800~5600 字</div>
 
                 <label className="fld">续写轮数</label>
                 <select
@@ -761,6 +911,87 @@ export default function ChatClient({ card }) {
                 </select>
 
                 <div className="divider" />
+                <label className="fld">长期记忆</label>
+                <div className="hint">
+                  {memCount} 条锚点 · 摘要 {memChars} 字 · 窗口 {Math.round(modelCtx / 1000)}K
+                </div>
+                <div className="mem-list">
+                  {(mem?.pinned || []).map((p) => (
+                    <div className="mem-item" key={p.id || p.text}>
+                      <span>{p.text}</span>
+                      <button
+                        type="button"
+                        className="mem-del"
+                        onClick={() => delPin(p.id)}
+                        disabled={memBusy}
+                        aria-label="删除这条设定"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                  {!memCount ? (
+                    <div className="tip">
+                      还没有锚点。你中途说的「以后 / 记住 / 称呼……」会自动记下，也可以手动加。
+                    </div>
+                  ) : null}
+                </div>
+                <div className="mem-add">
+                  <input
+                    className="inp"
+                    value={memInput}
+                    onChange={(e) => setMemInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addPin();
+                      }
+                    }}
+                    placeholder="例如：私下叫主人，外人面前叫哥哥"
+                    maxLength={200}
+                  />
+                  <button
+                    className="btn btn-ghost press"
+                    onClick={addPin}
+                    disabled={memBusy || !memInput.trim()}
+                  >
+                    添加
+                  </button>
+                </div>
+                {mem?.summary ? <div className="mem-sum">{mem.summary}</div> : null}
+                <input
+                  ref={importRef}
+                  type="file"
+                  accept="application/json,.json"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    importMemory(e.target.files?.[0]);
+                    e.target.value = "";
+                  }}
+                />
+                <div className="mem-ops">
+                  <button className="btn btn-ghost press" onClick={regenSummary} disabled={memBusy}>
+                    重生成摘要
+                  </button>
+                  <button className="btn btn-ghost press" onClick={exportMemory}>
+                    导出
+                  </button>
+                  <button
+                    className="btn btn-ghost press"
+                    onClick={() => importRef.current?.click()}
+                    disabled={memBusy}
+                  >
+                    导入
+                  </button>
+                  <button className="btn btn-ghost press" onClick={clearMemory} disabled={memBusy}>
+                    清空记忆
+                  </button>
+                </div>
+                <div className="tip">
+                  记忆按卡片存在引擎侧：换号、换模型、刷新都还在；清空本会话不会清记忆。
+                </div>
+
+                <div className="divider" />
 
                 <div className="kv">
                   <span>消息</span>
@@ -769,6 +1000,14 @@ export default function ChatClient({ card }) {
                 <div className="kv">
                   <span>字数</span>
                   <b>{msgs.reduce((n, m) => n + m.content.length, 0)}</b>
+                </div>
+                <div className="kv">
+                  <span>号池</span>
+                  <b>{pool && !pool.offline ? `${Number(pool.total).toFixed(1)} · ${pool.usable}/${pool.count}` : "—"}</b>
+                </div>
+                <div className="kv">
+                  <span>会话分组</span>
+                  <b>{[...groupedCount.entries()].map(([k, v]) => `${k} ${v}`).join(" · ") || "—"}</b>
                 </div>
 
                 <button

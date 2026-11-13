@@ -21,14 +21,15 @@
 ## 引擎接口
 
 ```
-POST /site/chat    { cardId, prompt, model, maxTokens, history? }  -> SSE
-POST /site/pool    账号池状态
-POST /site/enter   入池 / 切换默认号
+GET  /site/pool                          账号池状态 {total, usable, count, accounts[]}
+POST /site/chat  {cardId,prompt,model,maxTokens,history?}  -> SSE
+GET  /site/memory?cardId=<id>            读记忆
+POST /site/memory                        写记忆
 ```
 
 轮换逻辑：体检 → 按 credit 升序挑号 → `chat.createByCard` 扫卡片（坏的自动拉黑）→ 流式生成 →
 `user.getMe` 结算 → 余额不足或 `upgrade_needed/credit` 即换号。会话按「号 × 卡」缓存 chatId，
-多轮历史由引擎 `normalize_history()` 裁剪（24 条 / 16k 字）。
+多轮历史由 `engine/memory.py` 的 `compose_prompts()` 组装（锚点 + 摘要 + 尾巴），前端发送前另做 head/tail 裁剪。
 
 ## 启动
 

@@ -1,4 +1,4 @@
-# 开发规范执行清单（claude.md §8 落地版）
+# 开发规范执行清单（claude.md §7 / §9 落地版）
 
 > 每次改动前后过一遍。违反任一条，改动不算完成。
 
@@ -42,11 +42,11 @@ $S = "-i $k -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=yes"
 
 ## 1. 开工前（30 秒）
 
-1. 读 `claude.md` §1 —— 当前结论必须能指回一次真实抓包
+1. 读 `claude.md` §13 —— 当前结论必须能指回一次真实抓包
 2. `git status --short` —— 工作区必须干净，没夹带上一轮的改动
-3. 明确这一轮打哪条攻击面（A–G），写进 commit message
+3. 明确这一轮打哪条攻击面（A–H），写进 commit message
 
-## 2. 禁止事项（claude.md §8.4）
+## 2. 禁止事项（claude.md §7.4）
 
 - 用截图/记忆替代 `trpc.jsonl` 原始记录
 - 没跑 `--dry-run` 就批量写库、批量注册、批量发请求
@@ -178,7 +178,7 @@ $GIT  = "C:\Program Files\Git\cmd\git.exe"     # 2.56.1，全局已配代理 789
 - **别动 `aetouban.cn`**（占 :3000 的 `ae-headline.service`）
 - Next.js 无法在 `Z:` (UNC) 构建 —— 必须在服务器上 build
 
-## 9. 占位符表（claude.md §12）
+## 9. 占位符表（claude.md §16）
 
 | 占位符 | 含义 | 取值 |
 |---|---|---|

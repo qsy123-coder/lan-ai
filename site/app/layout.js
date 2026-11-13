@@ -15,11 +15,16 @@ export default function RootLayout({ children }) {
   return (
     <html lang="zh-CN" suppressHydrationWarning>
       <head>
-        {/* 首屏防闪白：HTML 渲染前就把 data-theme 写进去，
-            否则阴色用户会先看到一帧浅色。 */}
+        {/* 首屏防闪：HTML 渲染前就写 data-theme。
+            localStorage 没有值时跟随系统 prefers-color-scheme。 */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `try{var t=localStorage.getItem('theme');if(t==='dark'||t==='light'){document.documentElement.dataset.theme=t;}}catch(e){}`,
+            __html:
+              `(function(){try{var p=localStorage.getItem('theme');` +
+              `var d=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches;` +
+              `var t=(p==='dark'||p==='light')?p:(d?'dark':'light');` +
+              `document.documentElement.dataset.theme=t;` +
+              `window.__tp=(p==='dark'||p==='light')?p:'auto';}catch(e){}}())`,
           }}
         />
       </head>
@@ -49,6 +54,7 @@ export default function RootLayout({ children }) {
                 <stop offset="100%" stopColor="#9fd3c9" stopOpacity="0.05" />
               </linearGradient>
             </defs>
+            {/* 描边色走 CSS 变量，深色主题下换成低亮度青，不重建渐变 */}
             {Array.from({ length: 26 }).map((_, i) => (
               <path
                 key={i}

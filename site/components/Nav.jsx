@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import ThemeToggle from "./ThemeToggle";
 
 // 主导航：照 dzmm —— 左「角色 消息 论坛 我的」／中「搜索」／右「加号 头像」
 const NAV = [
@@ -53,19 +54,7 @@ function Icon({ name }) {
 export default function Nav() {
   const p = usePathname() || "/";
   const router = useRouter();
-  const [theme, setTheme] = useState("light");
   const [q, setQ] = useState("");
-
-  useEffect(() => {
-    setTheme(document.documentElement.dataset.theme || localStorage.getItem("theme") || "light");
-  }, []);
-
-  const toggleTheme = () => {
-    const next = (document.documentElement.dataset.theme || "light") === "dark" ? "light" : "dark";
-    document.documentElement.dataset.theme = next;
-    localStorage.setItem("theme", next);
-    setTheme(next);
-  };
 
   const active = (href) =>
     href === "/" ? p === "/" || p.startsWith("/card") : p.startsWith(href);
@@ -126,15 +115,7 @@ export default function Nav() {
 
         {/* 右：图标按钮 + 头像 */}
         <div className="nav-right">
-          <button
-            type="button"
-            className="theme-btn"
-            onClick={toggleTheme}
-            title={theme === "dark" ? "切到浅色" : "切到深色"}
-            aria-label={theme === "dark" ? "切到浅色" : "切到深色"}
-          >
-            {theme === "dark" ? "☀" : "☾"}
-          </button>
+          <ThemeToggle />
 
           <button type="button" className="nav-plus" aria-label="新建" title="新建">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import Nav from "../../components/Nav";
 import LogoutButton from "../../components/LogoutButton";
+import CheckinButton from "../../components/CheckinButton";
 import { requirePass } from "../../lib/gate";
 import { getPool } from "../../lib/pool";
 import { engineJson } from "../../lib/engine";
@@ -14,6 +15,7 @@ const TYPE = {
   grant: "注册赠礼",
   charge: "生成扣费",
   recharge: "充值",
+  checkin: "每日签到",
   prepay: "预扣",
   settle: "结算",
   refund: "退款",
@@ -67,6 +69,7 @@ export default async function MePage() {
 
   let user = null;
   let entries = [];
+  let checkin = null;
   if (token) {
     const me = await engineJson(`/site/user/me?token=${encodeURIComponent(token)}`);
     if (me.status === 200 && me.data && me.data.user) {
@@ -76,6 +79,13 @@ export default async function MePage() {
       );
       if (lg.status === 200 && lg.data && Array.isArray(lg.data.entries)) {
         entries = lg.data.entries;
+      }
+      const ck = await engineJson(
+        `/site/credits/checkin?token=${encodeURIComponent(token)}`
+      );
+      if (ck.status === 200 && ck.data) {
+        if (ck.data.user) user = ck.data.user;
+        checkin = ck.data.checkin || null;
       }
     }
   }
@@ -106,6 +116,9 @@ export default async function MePage() {
                 <p className="acct-big">{Number(user.credit).toFixed(2)}</p>
                 <p className="acct-hint">
                   {user.name} · {user.email}
+                  <span className={`vip-badge${user.vip > 0 ? " on" : ""}`}>
+                    {user.vip > 0 ? `VIP${user.vip}` : "普通用户"}
+                  </span>
                 </p>
               </div>
               <div className="me-actions">
@@ -113,11 +126,48 @@ export default async function MePage() {
                 <LogoutButton />
               </div>
             </div>
+            <div className="checkin-row">
+              <div>
+                <p className="acct-label">每日签到</p>
+                <p className="checkin-sub">
+                  {checkin && checkin.checkedToday
+                    ? `今天已签到 · 连续 ${checkin.streak} 天`
+                    : `连续 ${(checkin && checkin.streak) || 0} 天 · 今日 +${(checkin && checkin.rewardNext) || 5}`}
+                </p>
+              </div>
+              <CheckinButton
+                checked={!!(checkin && checkin.checkedToday)}
+                reward={(checkin && checkin.rewardNext) || 5}
+              />
+            </div>
             <div className="ledger-head">
               <h2>最近记录</h2>
               <span>{entries.length} 条</span>
             </div>
             <Ledger entries={entries} />
+            <div className="task-block">
+              <div className="ledger-head">
+                <h2>任务</h2>
+                <span>运营</span>
+              </div>
+              <ul className="task-list">
+                <li>
+                  <span>每日签到</span>
+                  <em>
+                    {checkin && checkin.checkedToday ? "已完成" : "待完成"} · +
+                    {(checkin && checkin.rewardNext) || 5}
+                  </em>
+                </li>
+                <li>
+                  <span>注册赠礼</span>
+                  <em>已完成 · +100</em>
+                </li>
+                <li>
+                  <span>邀请好友</span>
+                  <em className="off">即将上线</em>
+                </li>
+              </ul>
+            </div>
           </section>
         ) : (
           <section className="me-guest">

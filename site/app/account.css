@@ -586,6 +586,80 @@
   font-size: 12px;
 }
 
+.vip-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  vertical-align: middle;
+  background: rgba(32, 41, 41, 0.08);
+  color: rgba(32, 41, 41, 0.6);
+}
+
+.vip-badge.on {
+  background: rgba(85, 123, 121, 0.16);
+  color: #2f5450;
+}
+
+.checkin-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(32, 41, 41, 0.06);
+}
+
+.checkin-sub {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: rgba(32, 41, 41, 0.62);
+}
+
+.checkin-act {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.checkin-note {
+  font-size: 12px;
+  color: var(--focus);
+}
+
+.task-block {
+  margin-top: 22px;
+}
+
+.task-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.task-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid rgba(32, 41, 41, 0.06);
+  font-size: 14px;
+}
+
+.task-list em {
+  font-style: normal;
+  font-size: 12px;
+  color: var(--focus);
+}
+
+.task-list em.off {
+  color: rgba(32, 41, 41, 0.45);
+}
+
 /* ---------- pricing ---------- */
 .price-section {
   margin-top: 36px;
@@ -819,6 +893,34 @@ html[data-theme="dark"] .me-divider {
 html[data-theme="dark"] .me-divider::before,
 html[data-theme="dark"] .me-divider::after {
   background: rgba(255, 255, 255, 0.12);
+}
+
+html[data-theme="dark"] .vip-badge {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(230, 234, 243, 0.6);
+}
+
+html[data-theme="dark"] .vip-badge.on {
+  background: rgba(159, 201, 194, 0.16);
+  color: #9fc9c2;
+}
+
+html[data-theme="dark"] .checkin-row,
+html[data-theme="dark"] .task-list li {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+html[data-theme="dark"] .checkin-sub {
+  color: rgba(230, 234, 243, 0.62);
+}
+
+html[data-theme="dark"] .checkin-note,
+html[data-theme="dark"] .task-list em {
+  color: #9fc9c2;
+}
+
+html[data-theme="dark"] .task-list em.off {
+  color: rgba(230, 234, 243, 0.45);
 }
 
 html[data-theme="dark"] .me-btn.ghost {

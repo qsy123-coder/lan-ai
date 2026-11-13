@@ -1,3 +1,4 @@
+import datetime
 import os
 import sys
 import tempfile
@@ -76,6 +77,51 @@ class UserTest(unittest.TestCase):
         self.assertIsNotNone(u.session_user(self.path, token))
         u.logout(self.path, token)
         self.assertIsNone(u.session_user(self.path, token))
+
+    def test_vip_levels(self):
+        user, token, _ = u.register(self.path, "a@b.com", "password123")
+        self.assertEqual(user["vip"], 0)
+        u1, _, err = u.recharge(self.path, token, 137)
+        self.assertIsNone(err)
+        self.assertEqual(u1["vip"], 1)
+        u2, _, _ = u.recharge(self.path, token, 2055)
+        self.assertEqual(u2["vip"], 2)
+        u3, _, _ = u.recharge(self.path, token, 10958)
+        self.assertEqual(u3["vip"], 3)
+
+    def test_checkin_once_per_day(self):
+        _, token, _ = u.register(self.path, "a@b.com", "password123")
+        user, entry, err, streak = u.checkin(self.path, token)
+        self.assertIsNone(err)
+        self.assertEqual(streak, 1)
+        self.assertEqual(entry["amount"], 5.0)
+        self.assertEqual(entry["type"], "checkin")
+        self.assertEqual(user["credit"], 105.0)
+        user2, entry2, err2, streak2 = u.checkin(self.path, token)
+        self.assertIsNone(user2)
+        self.assertIn("已经签到", err2)
+        self.assertEqual(streak2, 1)
+        user3, state = u.checkin_status(self.path, token)
+        self.assertTrue(state["checkedToday"])
+        self.assertEqual(state["streak"], 1)
+
+    def test_checkin_seventh_day_bonus(self):
+        user, token, _ = u.register(self.path, "a@b.com", "password123")
+        data = u.load(self.path)
+        today = datetime.date.fromisoformat(u._today())
+        for i in range(1, 7):
+            day = (today - datetime.timedelta(days=i)).isoformat()
+            u._add_entry(data, user["id"], "checkin", 5, "第%d天" % (7 - i), day=day)
+        u.save(self.path, data)
+        _, state = u.checkin_status(self.path, token)
+        self.assertFalse(state["checkedToday"])
+        self.assertEqual(state["streak"], 6)
+        self.assertEqual(state["rewardNext"], 25.0)
+        user2, entry, err, streak = u.checkin(self.path, token)
+        self.assertIsNone(err)
+        self.assertEqual(streak, 7)
+        self.assertEqual(entry["amount"], 25.0)
+        self.assertEqual(user2["credit"], 100.0 + 30.0 + 25.0)
 
 
 if __name__ == "__main__":

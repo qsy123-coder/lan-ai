@@ -49,7 +49,10 @@ export default async function PricingPage() {
             <b>不提供真实充值、提现或退款</b>，档位只用于说明计费规则。
           </p>
           {user ? (
-            <p className="price-hint">当前登录：{user.name} · 积分 {Number(user.credit).toFixed(2)}</p>
+            <p className="price-hint">
+              当前登录：{user.name} · 积分 {Number(user.credit).toFixed(2)} ·{" "}
+              {user.vip > 0 ? `VIP${user.vip}` : "普通用户"}（近 30 天充值累计决定等级）
+            </p>
           ) : null}
         </header>
 

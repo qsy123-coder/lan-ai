@@ -1215,6 +1215,15 @@ class Handler(BaseHTTPRequestHandler):
             if not user:
                 return self._json(401, {"error": "unauthorized"})
             return self._json(200, {"user": user, "entries": rows})
+        if path == "/site/credits/checkin":
+            if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
+                return self._json(401, {"error": "bad token"})
+            qs = parse_qs(urlparse(self.path).query)
+            token = (qs.get("token") or [""])[0]
+            user, state = userslib.checkin_status(USERS_PATH, token)
+            if not user:
+                return self._json(401, {"error": "unauthorized"})
+            return self._json(200, {"user": user, "checkin": state})
         return self._json(404, {"error": "not found"})
 
     def do_POST(self):
@@ -1348,6 +1357,15 @@ class Handler(BaseHTTPRequestHandler):
             if err:
                 return self._json(401 if "登录" in err else 400, {"error": err})
             return self._json(200, {"user": user, "entry": entry})
+        if path == "/site/credits/checkin":
+            if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
+                return self._json(401, {"error": "bad token"})
+            payload = self._body()
+            user, entry, err, streak = userslib.checkin(
+                USERS_PATH, payload.get("token"))
+            if err:
+                return self._json(401 if "登录" in err else 400, {"error": err})
+            return self._json(200, {"user": user, "entry": entry, "streak": streak})
         if path == "/site/chat":
             if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
                 return self._json(401, {"error": "bad token"})

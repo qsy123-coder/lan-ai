@@ -11,6 +11,7 @@
 只依赖标准库。注册送 100 credit；生成按预扣 3.2 / 结算 2.1 记账。
 """
 
+import datetime
 import hashlib
 import hmac
 import io
@@ -27,11 +28,27 @@ SESSION_TTL = 30 * 24 * 3600
 LEDGER_KEEP = 200
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
+# 北京时间固定 UTC+8（不依赖 tzdata，Windows 也能跑）
+TZ = datetime.timezone(datetime.timedelta(hours=8))
+VIP_LEVELS = ((10958.0, 3), (2055.0, 2), (1.0, 1))
+CHECKIN_BASE = 5.0
+CHECKIN_BONUS = 20.0
+
 LOCK = threading.RLock()
 
 
 def _now():
     return int(time.time())
+
+
+def _today(now=None):
+    if now is None:
+        dt = datetime.datetime.now(TZ)
+    elif isinstance(now, (int, float)):
+        dt = datetime.datetime.fromtimestamp(now, TZ)
+    else:
+        dt = now
+    return dt.date().isoformat()
 
 
 def _empty():
@@ -63,14 +80,46 @@ def save(path, data):
     os.replace(tmp, path)
 
 
-def _public(user):
+def _public(user, vip=0):
     return {
         "id": user["id"],
         "email": user["email"],
         "name": user.get("name") or user["email"].split("@")[0],
         "credit": round(float(user.get("credit") or 0), 2),
+        "vip": int(vip),
         "createdAt": int(user.get("createdAt") or 0),
     }
+
+
+def vip_level(data, uid, now=None):
+    """近 30 天累计充值（credit）决定 VIP：>0 VIP1，≥2055 VIP2，≥10958 VIP3。"""
+    cutoff = (now if isinstance(now, (int, float)) else _now()) - 30 * 24 * 3600
+    total = 0.0
+    for e in data["ledger"].get(uid, []):
+        if e.get("type") != "recharge":
+            continue
+        if int(e.get("ts") or 0) < cutoff:
+            continue
+        total += float(e.get("amount") or 0)
+    for need, level in VIP_LEVELS:
+        if total >= need:
+            return level
+    return 0
+
+
+def _checkin_days(data, uid):
+    return {e.get("day") for e in data["ledger"].get(uid, [])
+            if e.get("type") == "checkin" and e.get("day")}
+
+
+def _streak_ending(days, end_day):
+    """从 end_day 往前数连续签到天数。"""
+    n = 0
+    d = datetime.date.fromisoformat(end_day)
+    while d.isoformat() in days:
+        n += 1
+        d -= datetime.timedelta(days=1)
+    return n
 
 
 def _hash(password, salt):
@@ -78,7 +127,7 @@ def _hash(password, salt):
                           n=2 ** 14, r=8, p=1, dklen=32).hex()
 
 
-def _add_entry(data, uid, kind, amount, note=""):
+def _add_entry(data, uid, kind, amount, note="", day=None):
     user = data["users"].get(uid)
     if not user:
         return None
@@ -90,6 +139,8 @@ def _add_entry(data, uid, kind, amount, note=""):
         "balance": user["credit"],
         "note": (note or "")[:120],
     }
+    if day:
+        entry["day"] = day
     rows = data["ledger"].setdefault(uid, [])
     rows.append(entry)
     if len(rows) > LEDGER_KEEP:
@@ -138,7 +189,7 @@ def register(path, email, password, name=""):
         _add_entry(data, uid, "grant", INITIAL_CREDIT, "注册赠礼")
         token = _make_session(data, uid)
         save(path, data)
-        return _public(user), token, None
+        return _public(user, 0), token, None
 
 
 def login(path, email, password):
@@ -158,7 +209,7 @@ def login(path, email, password):
             return None, None, "邮箱或密码不对"
         token = _make_session(data, user["id"])
         save(path, data)
-        return _public(user), token, None
+        return _public(user, vip_level(data, user["id"])), token, None
 
 
 def session_user(path, token):
@@ -173,7 +224,7 @@ def session_user(path, token):
             return None
         user = data["users"].get(s.get("uid"))
         save(path, data)
-        return _public(user) if user else None
+        return _public(user, vip_level(data, user["id"])) if user else None
 
 
 def logout(path, token):
@@ -189,7 +240,7 @@ def get_user(path, uid):
     with LOCK:
         data = load(path)
         user = data["users"].get(uid)
-        return _public(user) if user else None
+        return _public(user, vip_level(data, uid)) if user else None
 
 
 def ledger(path, token, limit=50):
@@ -204,7 +255,7 @@ def ledger(path, token, limit=50):
             return None, None
         rows = list(data["ledger"].get(user["id"]) or [])[-max(1, min(200, int(limit))):]
         rows.reverse()
-        return _public(user), rows
+        return _public(user, vip_level(data, user["id"])), rows
 
 
 def recharge(path, token, amount, note="演示充值"):
@@ -225,7 +276,7 @@ def recharge(path, token, amount, note="演示充值"):
             return None, None, "请先登录"
         entry = _add_entry(data, user["id"], "recharge", amount, note)
         save(path, data)
-        return _public(user), entry, None
+        return _public(user, vip_level(data, user["id"])), entry, None
 
 
 def charge(path, uid, amount, note="生成扣费"):
@@ -238,7 +289,7 @@ def charge(path, uid, amount, note="生成扣费"):
             return None
         _add_entry(data, uid, "charge", -amount, note)
         save(path, data)
-        return _public(user)
+        return _public(user, vip_level(data, uid))
 
 
 def prepay(path, uid, amount, note="生成预扣"):
@@ -267,7 +318,7 @@ def settle(path, uid, reserved, actual, note="生成结算"):
             _add_entry(data, uid, "settle", diff, note)
             save(path, data)
         user = data["users"].get(uid)
-        return _public(user) if user else None
+        return _public(user, vip_level(data, uid)) if user else None
 
 
 def refund(path, uid, amount, note="生成失败退款"):
@@ -280,4 +331,65 @@ def refund(path, uid, amount, note="生成失败退款"):
             _add_entry(data, uid, "refund", amount, note)
             save(path, data)
         user = data["users"].get(uid)
-        return _public(user) if user else None
+        return _public(user, vip_level(data, uid)) if user else None
+
+
+def checkin(path, token, now=None):
+    """每日签到（北京时间）：基础 5 credit，连续第 7 天额外 +20。
+
+    返回 (user, entry, error, streak)。
+    """
+    today = _today(now)
+    with LOCK:
+        data = load(path)
+        _prune_sessions(data)
+        s = data["sessions"].get(token)
+        if not s:
+            return None, None, "请先登录", 0
+        user = data["users"].get(s.get("uid"))
+        if not user:
+            return None, None, "请先登录", 0
+        uid = user["id"]
+        days = _checkin_days(data, uid)
+        if today in days:
+            return None, None, "今天已经签到", _streak_ending(days, today)
+        yesterday = (datetime.date.fromisoformat(today)
+                     - datetime.timedelta(days=1)).isoformat()
+        streak = _streak_ending(days, yesterday) + 1
+        reward = CHECKIN_BASE + (CHECKIN_BONUS if streak % 7 == 0 else 0)
+        entry = _add_entry(data, uid, "checkin", reward,
+                           "每日签到 · 第%d天" % streak, day=today)
+        save(path, data)
+        return _public(user, vip_level(data, uid)), entry, None, streak
+
+
+def checkin_status(path, token, now=None):
+    """返回 (user, {today, checkedToday, streak, rewardNext}) 或 (None, None)。"""
+    today = _today(now)
+    with LOCK:
+        data = load(path)
+        _prune_sessions(data)
+        s = data["sessions"].get(token)
+        if not s:
+            return None, None
+        user = data["users"].get(s.get("uid"))
+        if not user:
+            return None, None
+        uid = user["id"]
+        days = _checkin_days(data, uid)
+        checked = today in days
+        if checked:
+            streak = _streak_ending(days, today)
+            reward = CHECKIN_BASE
+        else:
+            yesterday = (datetime.date.fromisoformat(today)
+                         - datetime.timedelta(days=1)).isoformat()
+            streak = _streak_ending(days, yesterday)
+            nxt = streak + 1
+            reward = CHECKIN_BASE + (CHECKIN_BONUS if nxt % 7 == 0 else 0)
+        return _public(user, vip_level(data, uid)), {
+            "today": today,
+            "checkedToday": checked,
+            "streak": streak,
+            "rewardNext": round(reward, 2),
+        }

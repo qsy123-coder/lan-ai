@@ -438,6 +438,7 @@ asyncio.run(main())
 | 2026-11-13 | `feat/pool-expand-imap` | 号池扩容：IMAP 代理隧道 + /__captcha/ 等待 + no_code 待补落盘；b020→b029（8 成 1 败） | 已入池，待合并 |
 | 2026-11-13 | `feat/me-and-pricing` | 我的 + 会员与价格（notes/008 §2.4/§5）；消息 tab 接到 /chat | 已完成 |
 | 2026-11-13 | `feat/account-ledger` | 邮箱登录 + 用户积分账本（notes/008 §7）；注册 100、生成扣 2.1、演示充值 | 已完成 |
+| 2026-11-13 | `feat/checkin-vip` | 每日签到 + VIP 等级（notes/008 §7 运营）；签到 +5/第7天 +20，VIP 按 30 天充值 | 已完成 |
 
 > 规矩：分支从 `main` 切出；任务完成后 `git checkout main && git merge <branch>`，
 > 或推远端开 PR。**合并由用户决定**，不要自行合并到 `main`。

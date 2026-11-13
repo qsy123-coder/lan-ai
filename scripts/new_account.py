@@ -34,7 +34,7 @@ CLASH = os.path.join(ROOT, "scripts", "clash.ps1")
 CDP = os.path.join(ROOT, "scripts", "cdp.mjs")
 STATE = os.path.join(ROOT, "out", "signup_state.json")
 POOL = os.path.join(ROOT, "accounts.json")
-PROXY = "http://127.0.0.1:7897"
+PROXY = os.environ.get("DZMM_PROXY", "http://127.0.0.1:7897")
 
 NODES = ["🇯🇵 日本Anytls 03", "🇨🇬 刚果", "🇨🇭 瑞士 01", "🇭🇰 香港Anytls 05",
          "🇨🇳 台湾Hinet-03", "🇯🇵 日本Anytls 02", "🇸🇬 新加坡Anytls 01"]
@@ -84,11 +84,19 @@ def pick_node(state):
 
 
 # ---------- 浏览器 ----------
-def launch(port, profile, url):
+def launch(port, profile, url, use_proxy=True):
     os.makedirs(profile, exist_ok=True)
-    subprocess.Popen([EDGE, "--proxy-server=http://127.0.0.1:7897", "--user-data-dir=" + profile,
-                      "--ignore-certificate-errors", "--remote-debugging-port=%d" % port,
-                      "--no-first-run", "--no-default-browser-check", url])
+    args = [EDGE]
+    if use_proxy:
+        args.append("--proxy-server=" + PROXY)
+    else:
+        # 系统代理可能是开的（HKCU ProxyEnable=1 → 7897），必须显式关掉才算真直连
+        args.append("--no-proxy-server")
+    args += ["--user-data-dir=" + profile,
+             "--remote-debugging-port=%d" % port,
+             "--disable-blink-features=AutomationControlled",
+             "--no-first-run", "--no-default-browser-check", url]
+    subprocess.Popen(args)
     for _ in range(30):
         try:
             creq.get("http://127.0.0.1:%d/json/version" % port, timeout=2)

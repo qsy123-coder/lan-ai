@@ -37,9 +37,15 @@ NODES = [
     "🇺🇸 美国Anytls 04", "🇺🇸 美国Anytls 05", "🇩🇪 德国 01", "🇩🇪 德国 02",
     "🇫🇷 法国 01", "🇫🇷 法国 02", "🇬🇧 英国 Anytls 02", "🇹🇷 土耳其 Anytls",
     "🇨🇭 瑞士 02", "🇨🇳 台湾Hinet-02",
+    # 11-13 夜间补：老节点被按 IP 限流后启用的一批干净出口
+    "🇭🇰 香港Anytls 02", "🇭🇰 香港Anytls 03", "🇨🇳 台湾Hinet-01", "🇯🇵 日本Anytls 01",
+    "🇯🇵 日本IPV6 06", "🇯🇵 日本-Hy2", "🇸🇬 新加坡Anytls 02", "🇸🇬 新加坡Anytls 03",
+    "🇸🇬 新加坡Anytls 04", "🇸🇬 新加坡Anytls 05", "🇸🇬 新加坡Anytls 06",
+    "🇺🇸 美国Anytls 01", "🇬🇧 英国 Anytls 01",
 ]
 COOLDOWN_H = 3.0          # 一个节点打过 429 后冷却多少小时
-MAX_PER_IP = 4            # 单个 IP 最多尝试几次（含失败）
+GATE_COOLDOWN_H = 6.0     # 被判「环境不可注册」后冷却多少小时（IP 级限流，降得太快会白撞）
+MAX_PER_IP = 2            # 单个 IP 最多尝试几次（含失败）
 
 
 def probe():
@@ -101,7 +107,7 @@ def switch_node(node):
     return out
 
 
-def one_account(node, domain, idx, addr="", provider="imap"):
+def one_account(node, domain, idx, addr="", provider="imap", use_proxy=True):
     mail_token = None
     if provider == "mailtm":
         if not addr:
@@ -118,7 +124,7 @@ def one_account(node, domain, idx, addr="", provider="imap"):
 
     port = random.randint(9400, 9599)
     profile = os.path.join(os.environ.get("TEMP", "."), "dzmm-b%d" % port)
-    if not na.launch(port, profile, na.BASE + "/sign-in?s=signup"):
+    if not na.launch(port, profile, na.BASE + "/sign-in?s=signup", use_proxy=use_proxy):
         return "launch_fail"
     time.sleep(3)
 
@@ -179,7 +185,8 @@ def one_account(node, domain, idx, addr="", provider="imap"):
     status = "timeout"
     t0 = time.time()
     gate_seen = False
-    while time.time() - t0 < 300:
+    gate_t0 = time.time()
+    while time.time() - t0 < 600:
         time.sleep(2)
         st, _ = na.cdp(port, "JSON.stringify({u:location.search,"
                              "ifr:[...document.querySelectorAll('iframe')].map(f=>f.src||''),"
@@ -192,8 +199,15 @@ def one_account(node, domain, idx, addr="", provider="imap"):
         if "__captcha" in st:
             if not gate_seen:
                 gate_seen = True
+                gate_t0 = time.time()
                 print("  ⚠️ 人机校验弹窗已出现 —— 请在窗口里拖一次（最多等 300 秒）")
                 na.cdp(port, "(()=>{window.focus();return 1})()")
+            # 站点闸门有 onLoad 竞态：iframe 加载快过 React 挂 onLoad，父组件 8 秒后判 unavailable。
+            # 前 6 秒内强制重载一次 iframe，把 load 事件补上；之后别再动，免得重置用户拖拽。
+            if time.time() - gate_t0 < 6:
+                na.cdp(port, "(()=>{const f=document.querySelector('iframe[src*=\"__captcha\"]');"
+                             "if(!f)return 'no';try{f.contentWindow.location.reload();return 'reload'}"
+                             "catch(e){f.src=f.src;return 'resrc'}})()")
             continue
         if "暂不支持注册" in st:
             return "domain_reject"
@@ -244,6 +258,10 @@ def main():
                     help="imap=自有域名 catch-all 转发；mailtm=api.mail.tm 临时邮箱（不需要 IMAP 口令）")
     ap.add_argument("--start", type=int, default=-1,
                     help="从第几号继续编号（已有 b001-b019 时传 19，避免覆盖）")
+    ap.add_argument("--no-proxy", action="store_true",
+                    help="浏览器直连（用本机 IP 注册），IMAP 仍走 7897 隧道")
+    ap.add_argument("--node", default="",
+                    help="固定节点（热点等受限网络下只有个别节点可用时，跳过账本排序）")
     ap.add_argument("--status", action="store_true")
     args = ap.parse_args()
 
@@ -268,16 +286,22 @@ def main():
 
     idx = state.get("done", 0)
     while idx < args.target:
-        node = pick_node(ledger)
-        if not node:
-            print("\n所有节点都在冷却（每个 IP 上限 %d 次，冷却 %.1fh）" % (MAX_PER_IP, COOLDOWN_H))
-            print("等 %.1f 小时后再跑，或加新节点" % COOLDOWN_H)
-            return 0
+        if args.node:
+            node = args.node
+        else:
+            node = pick_node(ledger)
+            if not node:
+                print("\n所有节点都在冷却（每个 IP 上限 %d 次，冷却 %.1fh）" % (MAX_PER_IP, COOLDOWN_H))
+                print("等 %.1f 小时后再跑，或加新节点" % COOLDOWN_H)
+                return 0
         switch_node(node)
         time.sleep(3)
         code = probe()
         print("\n=== 节点 %s (probe=%s) ===" % (node, code))
         if code not in (404, 401, 418):
+            if args.node:
+                print("  固定节点不可用（probe=%s），换节点或等网络恢复" % code)
+                return 3
             ledger.setdefault(node, {})["uses"] = MAX_PER_IP
             save(LEDGER, ledger)
             continue
@@ -287,6 +311,9 @@ def main():
             print("  IMAP 经该节点不可达 —— 跳过 30 分钟")
             ledger.setdefault(node, {})["skip_until"] = int(time.time()) + 1800
             save(LEDGER, ledger)
+            if args.node:
+                print("  固定节点 IMAP 不通，换节点再试")
+                return 4
             continue
 
         idx += 1
@@ -307,7 +334,7 @@ def main():
                       ensure_ascii=False, indent=1)
             print("取别名:", addr_from_pool)
         res = one_account(node, random.choice(doms), idx, addr=addr_from_pool,
-                          provider=args.mail_provider)
+                          provider=args.mail_provider, use_proxy=not args.no_proxy)
         rec = ledger.setdefault(node, {"uses": 0})
         # 只有真正提交到服务端（或触发风控）才消耗该 IP 的注册额度
         if res in ("otp", "risk_429", "domain_reject", "no_code", "not_logged",
@@ -316,8 +343,10 @@ def main():
         rec["last"] = int(time.time())
         if res == "risk_429":
             rec["last_429"] = int(time.time())
-        if res in ("timeout", "gate_failed"):
+        if res == "timeout":
             rec["skip_until"] = int(time.time()) + 1800
+        if res == "gate_failed":
+            rec["skip_until"] = int(time.time()) + int(GATE_COOLDOWN_H * 3600)
         # 建号成功才真正消耗别名；失败退回池子
         if addr_from_pool and res == "ok":
             import io as _io

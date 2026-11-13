@@ -302,14 +302,14 @@ tail_budget = budget_in - mem_chars - head_chars
 
 ## 7. 验收标准（逐条勾选）
 
-- [ ] 选 32K+ 模型，连续 50 轮后问「现在该怎么称呼我？我们约定了什么？」，回答正确（示例：私下主人 / 外人哥哥）。
-- [ ] 50 轮内不出现“初次见面 / 重新自我介绍 / 重新开场”。
+- [x] 选 32K+ 模型，连续 50 轮后问「现在该怎么称呼我？我们约定了什么？」，回答正确（示例：私下主人 / 外人哥哥）。`notes/016`
+- [x] 50 轮内不出现“初次见面 / 重新自我介绍 / 重新开场”。`notes/016`
 - [ ] 设置面板可见锚点条数、摘要字数，锚点可增删改，改动下一轮生效。
-- [ ] `out/memory/<cardId>.json` 存在，`summary` ≤ 600 字，`summarizedUpTo` 单调递增。
+- [x] `out/memory/<cardId>.json` 存在，`summary` ≤ 600 字，`summarizedUpTo` 单调递增。`notes/016`
 - [ ] 断网/无额度时摘要降级，主对话仍返回 `complete`。
 - [ ] 单轮输入估算 ≤ `maxContext - maxTokens - 1200`。
 - [ ] 原 4 个模型仍可选、可生成；新增 Pulse 128K / Dash 128K / XL 32K / Max 32K 可选、可生成。
-- [ ] 不修改 `captures/`，不写 `accounts.json`，不新增 npm 依赖。
+- [x] 不修改 `captures/`，不写 `accounts.json`，不新增 npm 依赖。`notes/016`
 
 ---
 

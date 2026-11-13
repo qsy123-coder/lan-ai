@@ -69,7 +69,27 @@ round 11-12 summary 163→600 字，summarizedUpTo=6，无回退
 
 ## 50 轮验收结果
 
-（见下方，脚本跑完后回填）
+命令（2026-11-13 20:37–20:44，卡 `3821218`，真打上游）：
+
+```powershell
+python -I scripts\e2e_memory_50.py --card 3821218 --rounds 50 --reset --max-tokens 200 --delay 0.5
+```
+
+```text
+exit 0 · failures=[] · elapsed 438s
+round 05  下发「以后私底下叫我主人…」        → pins=1
+round 08  下发「接下来剧情走海边旅行」        → pins=2
+round 10/20/30/40/50  追问「现在该怎么称呼我？」 → 5/5 PROBE PASS
+全程未出现「初次见面 / 第一次见 / 重新介绍 / 重新开场」
+跨号 b009→b010→b011→b012→b014→b016 记忆仍生效
+summary 600 字封顶；summarizedUpTo 0→6→…→86 单调不减
+最终 pins 仅 2 条（真规则 + 剧情线），追问没有落锚点
+```
+
+结论：前端去裁剪后，引擎终于能看到完整中段；摘要从第 9 轮开始滚动，
+跨 6 个账号仍保持同一套锚点与摘要，50 轮追问全部正确。
+
+原始记录：`out/e2e_memory_50.jsonl`（`out/` 不入 git）。
 
 ## 回滚
 

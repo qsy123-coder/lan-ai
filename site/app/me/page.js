@@ -1,20 +1,85 @@
 import Link from "next/link";
 import Nav from "../../components/Nav";
+import LogoutButton from "../../components/LogoutButton";
 import { requirePass } from "../../lib/gate";
 import { getPool } from "../../lib/pool";
+import { engineJson } from "../../lib/engine";
+import { tokenFromCookies } from "../../lib/session";
 import "../account.css";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "我的 · 澜" };
+
+const TYPE = {
+  grant: "注册赠礼",
+  charge: "生成扣费",
+  recharge: "充值",
+  prepay: "预扣",
+  settle: "结算",
+  refund: "退款",
+};
+
+function fmtTime(ts) {
+  try {
+    return new Date(Number(ts) * 1000).toLocaleString("zh-CN", {
+      timeZone: "Asia/Shanghai",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return "";
+  }
+}
 
 // 不把池里的账号名暴露到前台：前台只看到序号。
 function accountLabel(index) {
   return `账号 ${String(index + 1).padStart(2, "0")}`;
 }
 
+function Ledger({ entries }) {
+  if (!entries.length) return <p className="me-empty">还没有积分记录。</p>;
+  return (
+    <ul className="ledger">
+      {entries.map((e, i) => (
+        <li key={i}>
+          <span className="ledger-type">{TYPE[e.type] || e.type}</span>
+          <span className="ledger-note">
+            {e.note || ""}
+            <small>{fmtTime(e.ts)}</small>
+          </span>
+          <b className={Number(e.amount) < 0 ? "minus" : "plus"}>
+            {Number(e.amount) > 0 ? "+" : ""}
+            {Number(e.amount).toFixed(2)}
+          </b>
+          <span className="ledger-bal">{Number(e.balance).toFixed(2)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export default async function MePage() {
   await requirePass();
+  const token = await tokenFromCookies();
   const pool = await getPool();
+
+  let user = null;
+  let entries = [];
+  if (token) {
+    const me = await engineJson(`/site/user/me?token=${encodeURIComponent(token)}`);
+    if (me.status === 200 && me.data && me.data.user) {
+      user = me.data.user;
+      const lg = await engineJson(
+        `/site/credits/ledger?token=${encodeURIComponent(token)}&limit=12`
+      );
+      if (lg.status === 200 && lg.data && Array.isArray(lg.data.entries)) {
+        entries = lg.data.entries;
+      }
+    }
+  }
+
   const pct = pool.count ? Math.round((pool.usable / pool.count) * 100) : 0;
   const credit = pool.total.toFixed(2);
   const visible = pool.accounts.slice(0, 12);
@@ -26,12 +91,51 @@ export default async function MePage() {
       <main className="page me-page">
         <header className="me-head">
           <p className="me-kicker">我的</p>
-          <h1>额度与账号</h1>
+          <h1>{user ? "我的积分" : "额度与账号"}</h1>
           <p className="me-sub">
-            这个站的所有生成都由后台账号池转发。下面是池子的实时状态，
-            不需要登录，也不涉及真实支付。
+            登录后生成本会计入你的积分账本；下面还有本站账号池的实时状态。
+            不登录也能以游客身份对话，只是不记账。
           </p>
         </header>
+
+        {user ? (
+          <section className="me-account">
+            <div className="me-account-top">
+              <div>
+                <p className="acct-label">当前积分</p>
+                <p className="acct-big">{Number(user.credit).toFixed(2)}</p>
+                <p className="acct-hint">
+                  {user.name} · {user.email}
+                </p>
+              </div>
+              <div className="me-actions">
+                <Link href="/pricing" className="me-btn primary press">充值</Link>
+                <LogoutButton />
+              </div>
+            </div>
+            <div className="ledger-head">
+              <h2>最近记录</h2>
+              <span>{entries.length} 条</span>
+            </div>
+            <Ledger entries={entries} />
+          </section>
+        ) : (
+          <section className="me-guest">
+            <div>
+              <p className="me-kicker">还没有登录</p>
+              <h2>登录后开始记账</h2>
+              <p>注册即送 100 credit；游客对话仍可用，但不会产生积分记录。</p>
+            </div>
+            <div className="me-actions">
+              <Link href="/login" className="me-btn primary press">登录 / 注册</Link>
+              <Link href="/pricing" className="me-btn ghost press">会员与价格</Link>
+            </div>
+          </section>
+        )}
+
+        <div className="me-divider">
+          <span>本站额度池 · 运营视角</span>
+        </div>
 
         <section className={`me-hero${pool.offline ? " is-offline" : ""}`}>
           <div className="me-hero-main">
@@ -114,7 +218,7 @@ export default async function MePage() {
         </section>
 
         <p className="me-note">
-          说明：credit 是后台账号池的余额，不是你的个人钱包；本站不提供充值、提现或退款。
+          说明：池内 credit 是后台账号池的余额；你的积分账本与它分开，本站不提供真实充值、提现或退款。
         </p>
       </main>
     </div>

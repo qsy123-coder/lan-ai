@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from curl_cffi import requests as creq
 
 import memory as memlib
+import users as userslib
 
 BASE = "https://www.dzmm.ai"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -70,6 +71,11 @@ STATE_PATH = os.path.join(OUT_DIR, "webstate.json")
 RESULTS_PATH = os.path.join(OUT_DIR, "web_results.jsonl")
 PROXY = os.environ.get("DZMM_PROXY", "http://127.0.0.1:7897")
 SITE_TOKEN = os.environ.get("SITE_TOKEN", "")   # 设了就必须带 x-site-token（公网隧道时用）
+
+# —— 本站用户积分（与池子账号分离）：注册送 100，生成前查 ≥3.2，成功后扣 2.1
+USERS_PATH = os.path.join(OUT_DIR, "users.json")
+USER_PREPAY = 3.2
+USER_SETTLE = 2.1
 
 STATE_LOCK = threading.Lock()
 RUN_LOCK = threading.Lock()
@@ -780,6 +786,11 @@ def run_site_chat(payload, emit):
     ctx = model_ctx(model)
     max_tokens = clamp_tokens(payload.get("maxTokens"), ctx)
 
+    # —— 本站用户（可选）：cookie 里的 token 由 Next 透传；无效/过期按游客处理
+    user_token = (payload.get("userToken") or "").strip()
+    user = userslib.session_user(USERS_PATH, user_token) if user_token else None
+    site_uid = user["id"] if user else None
+
     history = payload.get("history")
     # —— 长期记忆：磁盘为底，合并「历史 + 本轮新消息」里出现的设定
     mem = memlib.load_memory(MEMORY_DIR, card_id)
@@ -821,6 +832,13 @@ def run_site_chat(payload, emit):
     cands.sort(key=lambda c: (c[1] != want_acct, c[0]))
     if not cands:
         emit("end", {"reason": "no_credit", "message": "池子里没有可用额度"})
+        return
+
+    # 用户账本预检查：余额不够就不发起生成，避免白跑上游
+    if site_uid and float(user.get("credit") or 0) + 1e-9 < USER_PREPAY:
+        emit("end", {"reason": "user_credit",
+                     "message": "积分不足（当前 %.2f，至少需要 %.1f），请先充值。" %
+                                (float(user.get("credit") or 0), USER_PREPAY)})
         return
 
     gate_hits = 0
@@ -867,13 +885,23 @@ def run_site_chat(payload, emit):
             emit("switch", {"from": name, "reason": "internal", "detail": "upstream internal"})
             continue
         if res["status"] == "ok":
-            ok, credit2, uid, err = get_me(pool[name]["cookie"])
+            ok, credit2, acc_uid, err = get_me(pool[name]["cookie"])
             if ok:
                 a["credit"] = round(credit2, 2)
                 a["exhausted"] = credit2 < MIN_PREPAY
                 save_state(st)
+            # —— 本站用户：生成成功才扣费（失败/换号不扣）
+            user_credit = None
+            if site_uid:
+                try:
+                    u2 = userslib.charge(USERS_PATH, site_uid, USER_SETTLE,
+                                         "生成扣费 · card %s" % card_id)
+                    user_credit = u2["credit"] if u2 else None
+                except Exception as e:
+                    log("用户扣费失败：%s" % str(e)[:120], "warn")
             emit("complete", {"text": res["text"], "account": name, "chatId": cid,
-                              "cardId": card_id, "credit": a.get("credit")})
+                              "cardId": card_id, "credit": a.get("credit"),
+                              "userCredit": user_credit})
             # 用户已经拿到正文；摘要丢到后台，失败也不影响这次回复
             try:
                 if memlib.should_summarize(len(memlib.sanitize_history(history)), mem):
@@ -1165,6 +1193,28 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(400, {"error": "cardId required"})
             mem = memlib.load_memory(MEMORY_DIR, card_id)
             return self._json(200, {"memory": mem})
+        if path == "/site/user/me":
+            if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
+                return self._json(401, {"error": "bad token"})
+            qs = parse_qs(urlparse(self.path).query)
+            token = (qs.get("token") or [""])[0]
+            user = userslib.session_user(USERS_PATH, token)
+            if not user:
+                return self._json(401, {"error": "unauthorized"})
+            return self._json(200, {"user": user})
+        if path == "/site/credits/ledger":
+            if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
+                return self._json(401, {"error": "bad token"})
+            qs = parse_qs(urlparse(self.path).query)
+            token = (qs.get("token") or [""])[0]
+            try:
+                limit = int((qs.get("limit") or ["50"])[0])
+            except (TypeError, ValueError):
+                limit = 50
+            user, rows = userslib.ledger(USERS_PATH, token, limit)
+            if not user:
+                return self._json(401, {"error": "unauthorized"})
+            return self._json(200, {"user": user, "entries": rows})
         return self._json(404, {"error": "not found"})
 
     def do_POST(self):
@@ -1264,6 +1314,40 @@ class Handler(BaseHTTPRequestHandler):
                     pass
             memlib.save_memory(MEMORY_DIR, mem)
             return self._json(200, {"memory": mem})
+        if path == "/site/user/register":
+            if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
+                return self._json(401, {"error": "bad token"})
+            payload = self._body()
+            user, token, err = userslib.register(
+                USERS_PATH, payload.get("email"), payload.get("password"), payload.get("name"))
+            if err:
+                return self._json(400, {"error": err})
+            return self._json(200, {"user": user, "token": token})
+        if path == "/site/user/login":
+            if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
+                return self._json(401, {"error": "bad token"})
+            payload = self._body()
+            user, token, err = userslib.login(
+                USERS_PATH, payload.get("email"), payload.get("password"))
+            if err:
+                return self._json(401, {"error": err})
+            return self._json(200, {"user": user, "token": token})
+        if path == "/site/user/logout":
+            if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
+                return self._json(401, {"error": "bad token"})
+            payload = self._body()
+            userslib.logout(USERS_PATH, payload.get("token"))
+            return self._json(200, {"ok": True})
+        if path == "/site/credits/recharge":
+            if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
+                return self._json(401, {"error": "bad token"})
+            payload = self._body()
+            user, entry, err = userslib.recharge(
+                USERS_PATH, payload.get("token"), payload.get("amount"),
+                payload.get("note") or "演示充值")
+            if err:
+                return self._json(401 if "登录" in err else 400, {"error": err})
+            return self._json(200, {"user": user, "entry": entry})
         if path == "/site/chat":
             if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
                 return self._json(401, {"error": "bad token"})

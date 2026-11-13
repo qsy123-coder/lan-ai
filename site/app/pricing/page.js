@@ -1,6 +1,9 @@
 import Link from "next/link";
 import Nav from "../../components/Nav";
+import RechargeDemo from "../../components/RechargeDemo";
 import { requirePass } from "../../lib/gate";
+import { engineJson } from "../../lib/engine";
+import { tokenFromCookies } from "../../lib/session";
 import "../account.css";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +30,12 @@ const VIP_ROWS = [
 
 export default async function PricingPage() {
   await requirePass();
+  const token = await tokenFromCookies();
+  let user = null;
+  if (token) {
+    const me = await engineJson(`/site/user/me?token=${encodeURIComponent(token)}`);
+    if (me.status === 200 && me.data && me.data.user) user = me.data.user;
+  }
 
   return (
     <div className="shell">
@@ -39,6 +48,9 @@ export default async function PricingPage() {
             下面按 dzmm.ai 的 /pricing 产品定义整理。本站是演示站，
             <b>不提供真实充值、提现或退款</b>，档位只用于说明计费规则。
           </p>
+          {user ? (
+            <p className="price-hint">当前登录：{user.name} · 积分 {Number(user.credit).toFixed(2)}</p>
+          ) : null}
         </header>
 
         <section className="price-section">
@@ -72,6 +84,10 @@ export default async function PricingPage() {
           </div>
           <p className="price-hint">
             任意充值即 VIP1；近 30 天累计充值决定等级。另有月卡，每天领积分（具体数额以站内为准）。
+          </p>
+          <RechargeDemo loggedIn={!!user} />
+          <p className="price-hint">
+            本站用户账本：生成成功后按 2.1 credit/条扣费；余额低于 3.2 时不会发起生成。
           </p>
         </section>
 

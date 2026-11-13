@@ -553,10 +553,12 @@ export default function ChatClient({ card }) {
             setMsgs(list);
             setStreaming("");
             save(list, final.slice(0, 42));
+            const mine =
+              d.userCredit != null ? ` · 我的积分 ${Number(d.userCredit).toFixed(2)}` : "";
             setNote(
               d.credit != null
-                ? `完成 · ${d.account} · 余额 ${Number(d.credit).toFixed(2)}`
-                : "完成"
+                ? `完成 · ${d.account} · 余额 ${Number(d.credit).toFixed(2)}${mine}`
+                : `完成${mine}`
             );
             loadPool();
           } else if (ev === "switch") {

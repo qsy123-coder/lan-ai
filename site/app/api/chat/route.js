@@ -2,12 +2,23 @@
 export const dynamic = "force-dynamic";
 
 import { denyIfNoPass } from "../../../lib/gate";
+import { tokenFromRequest } from "../../../lib/session";
 
 const ENGINE = process.env.ENGINE_URL || "http://127.0.0.1:8787";
 
 export async function POST(req) {
   if (denyIfNoPass(req)) return Response.json({ error: "unauthorized" }, { status: 401 });
-  const body = await req.text();
+  const raw = await req.text();
+  // 已登录用户把会话 token 透传给引擎，由引擎做账本预检查/扣费；游客保持不变。
+  const token = tokenFromRequest(req);
+  let body = raw;
+  if (token) {
+    try {
+      const obj = JSON.parse(raw);
+      obj.userToken = token;
+      body = JSON.stringify(obj);
+    } catch {}
+  }
   let upstream;
   try {
     upstream = await fetch(ENGINE + "/site/chat", {

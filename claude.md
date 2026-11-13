@@ -23,7 +23,7 @@
 | 入口 | `http://dzmm.ai/` → 301 → `https://www.dzmm.ai/` |
 | 边缘 | Cloudflare（`cf-ray ...-SIN`、`server: cloudflare`、`alt-svc h3`、HSTS 86400） |
 | 前端 | Expo / React Native Web，单入口 `/assets/Dq4p9iNB.js`（≈1.78 MB），资源 `assetora.net` |
-| 构建标识 | 响应头 `x-dzmm-build: 38d68fa80180b36e846560893b12e866f26d2376`、`x-dzmm-built-at: 1793962151244` |
+| 构建标识 | 响应头 `x-dzmm-build: 90a5ceae8974d04e1bf6bd5819ebccc0f99ffb3f`、`x-dzmm-built-at: 1794384986591`（11-13 更新；旧值 `38d68fa8…` / `1793962151244`） |
 | API | tRPC over `/api/trpc`（superjson transformer，batch 用逗号拼 procedure） |
 | 认证 | `/api/auth/token`（30 min staleTime）、`/api/auth/sign-in-code/v2`（GET 取二维码 / DELETE 解除）、`/api/auth/sign-in-code/reset`、`.../reset/tg-code` |
 | 数据层 | Supabase `https://rls.cheggpt.com`（`EXPO_PUBLIC_SUPABASE_URL`）；图片/存储 `https://pxlorbit.com`（`EXPO_PUBLIC_PUBLIC_IMAGE_HOST`） |
@@ -32,6 +32,7 @@
 | Cookie | `chosen_language`、`_geo`；登录态另有签名 cookie |
 | 埋点 | PostHog（bundle 内 `quota_limited` / feature flags） |
 | 风控 | 418 `{"error":"captcha_required","location":"/__captcha/"}`；响应头 `x-request-id`、`Vary: Cookie, Authorization` |
+| 注册风控 | `POST /api/auth/sign-up` 恒定 `428 {"code":"human_check_required"}`（11-13 起）；前端弹 `/__captcha/?src=ratelimit` iframe，过闸后自动重试 `[0,2000,2000,2500]ms`，否则 toast `当前环境暂时无法完成注册`。`x-dzmm-client: mobile-app/expo` 只变 418，无豁免；是否需人工拖取决于出口 IP（台湾/德国直接放行，瑞士超时/429）。见 notes/033 |
 | 出口依赖 | 同一站点换节点即可脱离 418：`🇯🇵 日本-hy2 02` 出口正常返回 401；新加坡出口已被锁（见 notes/002） |
 | 生成接口 | `POST /api/chat`（SSE）：`{operation, chatId, cardId, chatSettings{model,maxTokens,...}, prompts[], content, parentGenerationId}`，**model / maxTokens 完全由客户端指定** |
 | 计费 | **预扣式**：每条先预扣 3.2 credit，不足则 SSE 返 `{"classification":"upgrade_needed","upgradeReason":"credit"}` 且不扣费；完成后按实际 token 结算（≈2.1/条）。quotas 全程不变。预扣原子，**并发无法超发** |
@@ -434,6 +435,7 @@ asyncio.run(main())
 | 2026-11-13 | `chore/branch-policy` | 把「每次任务新建分支」写进 claude.md | 开发中 |
 | 2026-11-13 | `fix/memory-full-history` | 前端去 head/tail + 锚点精度 + 50 轮 E2E | 已完成（50 轮 E2E 通过） |
 | 2026-11-13 | `docs/e2e-50-acceptance` | 回填 50 轮验收结果 + 模型/降级验证 + PRD 勾选 | 已完成 |
+| 2026-11-13 | `feat/pool-expand-imap` | 号池扩容：IMAP 代理隧道 + /__captcha/ 等待 + no_code 待补落盘；b020→b029（8 成 1 败） | 已入池，待合并 |
 
 > 规矩：分支从 `main` 切出；任务完成后 `git checkout main && git merge <branch>`，
 > 或推远端开 PR。**合并由用户决定**，不要自行合并到 `main`。

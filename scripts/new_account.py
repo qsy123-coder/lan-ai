@@ -131,6 +131,63 @@ def _load_imap_conf():
 IMAP_HOST, IMAP_USER, IMAP_PASS = _load_imap_conf()
 
 
+class _ProxyIMAP4SSL:
+    """imaplib.IMAP4_SSL 的代理版：经本地 HTTP 代理 CONNECT 到 imap.gmail.com:993。"""
+
+    @staticmethod
+    def connect(host, proxy_url, timeout=30):
+        import imaplib as _imaplib
+        import socket as _socket
+        import ssl as _ssl
+        from urllib.parse import urlparse as _urlparse
+
+        u = _urlparse(proxy_url)
+        phost, pport = u.hostname or "127.0.0.1", u.port or 7897
+
+        class _Client(_imaplib.IMAP4_SSL):
+            def _create_socket(self, timeout=None):
+                s = _socket.create_connection((phost, pport), timeout or 30)
+                req = ("CONNECT %s:%s HTTP/1.1\r\nHost: %s:%s\r\n\r\n"
+                       % (self.host, self.port, self.host, self.port)).encode()
+                s.sendall(req)
+                buf = b""
+                while b"\r\n\r\n" not in buf:
+                    c = s.recv(4096)
+                    if not c:
+                        raise OSError("proxy closed during CONNECT")
+                    buf += c
+                first = buf.split(b"\r\n", 1)[0]
+                if b" 200 " not in first:
+                    raise OSError("proxy CONNECT rejected: %r" % first)
+                ctx = _ssl.create_default_context()
+                return ctx.wrap_socket(s, server_hostname=self.host)
+
+        return _Client(host, timeout=timeout)
+
+
+def imap_connect(timeout=30):
+    """直连优先，失败退回 7897 代理隧道。"""
+    import imaplib
+    try:
+        return imaplib.IMAP4_SSL(IMAP_HOST, timeout=timeout)
+    except Exception as e:
+        print("  [imap] 直连失败(%s)，改走代理" % str(e)[:60])
+    return _ProxyIMAP4SSL.connect(IMAP_HOST, PROXY, timeout=timeout)
+
+
+def imap_handshake(timeout=12):
+    """只验证 CONNECT+TLS+服务器问候，不做登录（避免频繁 AUTH 触风控）。"""
+    try:
+        m = imap_connect(timeout)
+        try:
+            m.logout()
+        except Exception:
+            pass
+        return True
+    except Exception:
+        return False
+
+
 def imap_code_for(addr, timeout=180):
     """读转发到 IMAP 邮箱的验证码：INBOX / Spam / All Mail 都扫。"""
     import email as _email
@@ -142,7 +199,7 @@ def imap_code_for(addr, timeout=180):
     boxes = ["INBOX", "[Gmail]/Spam", "[Gmail]/All Mail"]
     while time.time() - t0 < timeout:
         try:
-            m = imaplib.IMAP4_SSL(IMAP_HOST, timeout=30)
+            m = imap_connect(30)
             m.login(IMAP_USER, IMAP_PASS)
             for box in boxes:
                 try:

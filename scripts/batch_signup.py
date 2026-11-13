@@ -27,6 +27,7 @@ import signup_email as se  # noqa: E402  复用 mail.tm 建箱与收码（无 IM
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LEDGER = os.path.join(ROOT, "out", "ip_ledger.json")
 STATE = os.path.join(ROOT, "out", "batch_state.json")
+PENDING = os.path.join(ROOT, "out", "pending_signups.json")
 
 NODES = [
     "🇯🇵 日本Anytls 03", "🇯🇵 日本-hy2 02", "🇭🇰 香港Anytls 01", "🇭🇰 香港Anytls 04",
@@ -72,6 +73,18 @@ def node_score(node, ledger):
     if rec.get("skip_until", 0) > time.time():
         return None
     return used
+
+
+def save_pending(addr, pwd, node, port, reason):
+    """注册已提交但没走完（取不到码/抓不到 cookie）→ 落盘待补，别丢 75 credit。"""
+    try:
+        data = load(PENDING, [])
+        data.append({"email": addr, "password": pwd, "node": node, "port": port,
+                     "reason": reason, "ts": int(time.time())})
+        save(PENDING, data)
+        print("  [pending] 已记待补:", addr, "→", PENDING)
+    except Exception as e:
+        print("  [pending] 写入失败:", str(e)[:80])
 
 
 def pick_node(ledger):
@@ -193,6 +206,7 @@ def one_account(node, domain, idx, addr="", provider="imap"):
     print("  ✅ 验证码已发，等邮件…")
     code = se.wait_code(mail_token, 180) if provider == "mailtm" else na.imap_code_for(addr, 180)
     if not code:
+        save_pending(addr, pwd, node, port, "no_code")
         return "no_code"
     print("  码:", code)
     submit = ("(async()=>{const inp=[...document.querySelectorAll('input')].find(i=>i.maxLength===8)"
@@ -207,9 +221,11 @@ def one_account(node, domain, idx, addr="", provider="imap"):
 
     ck = na.cookie_header(port)
     if not ck:
+        save_pending(addr, pwd, node, port, "no_cookie")
         return "no_cookie"
     info = na.me_of(ck)
     if not info.get("logged"):
+        save_pending(addr, pwd, node, port, "not_logged")
         return "not_logged"
     name = "b%03d" % idx
     info["note"] = "批量·%s" % node
@@ -263,6 +279,13 @@ def main():
         print("\n=== 节点 %s (probe=%s) ===" % (node, code))
         if code not in (404, 401, 418):
             ledger.setdefault(node, {})["uses"] = MAX_PER_IP
+            save(LEDGER, ledger)
+            continue
+
+        # 该节点连 IMAP 都过不去的话，注册成功也取不到码（b027 的教训）
+        if args.mail_provider == "imap" and not na.imap_handshake(12):
+            print("  IMAP 经该节点不可达 —— 跳过 30 分钟")
+            ledger.setdefault(node, {})["skip_until"] = int(time.time()) + 1800
             save(LEDGER, ledger)
             continue
 

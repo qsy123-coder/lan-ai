@@ -91,6 +91,27 @@ summary 600 字封顶；summarizedUpTo 0→6→…→86 单调不减
 
 原始记录：`out/e2e_memory_50.jsonl`（`out/` 不入 git）。
 
+## 模型与摘要降级验证（同日）
+
+**模型可生成**：`/site/chat` 每档一发中性提示（maxTokens=120），8/8 返回 `complete`：
+
+| 模型 | 结果 | 模型 | 结果 |
+|---|---|---|---|
+| Flux 16K | ✅ | Pulse 128K | ✅ |
+| XL 16K | ✅ | Dash 128K | ✅（中性提示；NSFW 仍可能被 strictModeration 拒） |
+| Medium 32K | ✅ | XL 32K | ✅ |
+| Surge 32K | ✅ | Max 32K | ✅（未触发 trial 限制） |
+
+**摘要降级**（函数级，直接调 `server.maybe_summarize`）：
+
+```text
+A 无可用号：              rule_summary 355 字，summarizedUpTo=8
+B 模型调用抛异常（断网）： rule_summary 355 字，summarizedUpTo=8，无异常抛出
+```
+
+摘要由 `start_summary` 后台线程执行，且在 `emit("complete")` 之后启动，
+失败只记日志，不阻塞主对话返回。
+
 ## 回滚
 
 ```powershell

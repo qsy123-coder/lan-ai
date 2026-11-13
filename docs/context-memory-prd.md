@@ -306,9 +306,9 @@ tail_budget = budget_in - mem_chars - head_chars
 - [x] 50 轮内不出现“初次见面 / 重新自我介绍 / 重新开场”。`notes/016`
 - [ ] 设置面板可见锚点条数、摘要字数，锚点可增删改，改动下一轮生效。
 - [x] `out/memory/<cardId>.json` 存在，`summary` ≤ 600 字，`summarizedUpTo` 单调递增。`notes/016`
-- [ ] 断网/无额度时摘要降级，主对话仍返回 `complete`。
-- [ ] 单轮输入估算 ≤ `maxContext - maxTokens - 1200`。
-- [ ] 原 4 个模型仍可选、可生成；新增 Pulse 128K / Dash 128K / XL 32K / Max 32K 可选、可生成。
+- [x] 断网/无额度时摘要降级，主对话仍返回 `complete`。`notes/016`
+- [x] 单轮输入估算 ≤ `maxContext - maxTokens - 1200`。`notes/016`（`test_budget_respected`）
+- [x] 原 4 个模型仍可选、可生成；新增 Pulse 128K / Dash 128K / XL 32K / Max 32K 可选、可生成。`notes/016`（8/8 complete）
 - [x] 不修改 `captures/`，不写 `accounts.json`，不新增 npm 依赖。`notes/016`
 
 ---

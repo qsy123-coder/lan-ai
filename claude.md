@@ -32,7 +32,7 @@
 | Cookie | `chosen_language`、`_geo`；登录态另有签名 cookie |
 | 埋点 | PostHog（bundle 内 `quota_limited` / feature flags） |
 | 风控 | 418 `{"error":"captcha_required","location":"/__captcha/"}`；响应头 `x-request-id`、`Vary: Cookie, Authorization` |
-| 注册风控 | 两段式：先 `428 {"code":"human_check_required"}` 要求过 `/__captcha/`；**过闸后服务端二次裁决**，失败回 `429 {"code":"REGISTER_RISK_BLOCKED","error":"当前环境暂时无法完成注册，请稍后再试"}`（带请求 ID）。**11-14 实测：`aetouban.cn` 已标记，过闸也 429；`fldubai.com`（mail.tm）可过；每个出口 IP 约只放行 1 个注册**。香港腾讯云 `43.135.10.175` + fldubai + 人工拖 = 成功（b047）；台湾家宽、AWS 段、同 IP 第二次均 429。`x-dzmm-client: mobile-app/expo` 只把 428 变 418，无豁免。见 notes/034 |
+| 注册风控 | 两段式：先 `428 {"code":"human_check_required"}` 过 `/__captcha/`；过闸后服务端二次裁决，失败 `429 REGISTER_RISK_BLOCKED`（带请求 ID）。**11-14 深夜修正：额度单位是「域名」不是「IP」——每个根域每天约 2–3 个**。WARP 每次重注册给新 IPv6（无限免费 IP），但换 IP 不换域名额度；`fldubai.com` 3 个后、`aetouban.cn` 2–3 个后、`jjlnlnl.dpdns.org` 3 个后均 429。aetouban.cn 没有全局封（WARP 上通过 b051–b053）。一次性域（Guerrilla）走另一档「该邮箱暂不支持注册」黑名单。Cloudflare 子域收件不通（三种方式实测 Missing email）。详见 notes/034、notes/037 |
 | 注册邮件 | 验证码邮件发件人 `noreply@send.dianzimeimo.com`（**不是** dzmm 域），标题「你的魔法链接」，基本进 **Gmail 垃圾邮件**；IMAP 按 `TO <别名>` 搜不到，要 `FROM dianzimeimo` 取最新一条。Gmail 加号别名会被规范化成主邮箱 → 变成「登录已有账号」而非注册 |
 | 出口依赖 | 同一站点换节点即可脱离 418：`🇯🇵 日本-hy2 02` 出口正常返回 401；新加坡出口已被锁（见 notes/002） |
 | 生成接口 | `POST /api/chat`（SSE）：`{operation, chatId, cardId, chatSettings{model,maxTokens,...}, prompts[], content, parentGenerationId}`，**model / maxTokens 完全由客户端指定** |
@@ -438,6 +438,7 @@ asyncio.run(main())
 | 2026-11-13 | `docs/e2e-50-acceptance` | 回填 50 轮验收结果 + 模型/降级验证 + PRD 勾选 | 已完成 |
 | 2026-11-13 | `feat/pool-expand-imap` | 号池扩容：IMAP 代理隧道 + /__captcha/ 等待 + no_code 待补落盘；b020→b029（8 成 1 败） | 已入池，待合并 |
 | 2026-11-14 | `feat/pool-expand-imap` | 注册风控摸清：域名标记 / 单 IP 额度 / 出口矩阵 / 验证码邮件；b047 入池（服务器 IP + fldubai + 人工拖） | 已入池并同步线上 |
+| 2026-11-14 | `feat/exit-pool-farm` | 扩号产线：WARP IP 工厂（无限 IPv6）+ DigitalPlat/Cloudflare 域名工厂；b048–b055 入池，池 48 号（notes/037） | 已入池并同步线上 |
 | 2026-11-13 | `fix/sug-replies` | 建议回复消失：默认模型换 Surge 后上游不 armed sug；补格式要求 + 未命中时短生成兜底（`notes/018`） | 已部署生产 |
 | 2026-11-13 | `feat/me-and-pricing` | 我的 + 会员与价格（notes/008 §2.4/§5）；消息 tab 接到 /chat | 已完成 |
 | 2026-11-13 | `feat/account-ledger` | 邮箱登录 + 用户积分账本（notes/008 §7）；注册 100、生成扣 2.1、演示充值 | 已完成 |
@@ -463,6 +464,7 @@ asyncio.run(main())
 | 服务 | `lan-site`（next start -p 3100）、`lan-engine`（python server.py --port 8787） |
 | 卡库 | `/opt/lan/cards.json`（`CARDS_FILE` 环境变量指向它） |
 | 缓存 | `/opt/lan/imgcache` |
+| 出口代理 | `mihomo.service`：mixed-port `127.0.0.1:7890`、API `127.0.0.1:9090`（config `/opt/lan/mihomo/config.yaml`，global 模式）；`lan-engine` 经它出网，418 时自动切节点（`notes/019`） |
 | 公网入口 | `https://43-135-10-175.sslip.io`，口令 `lan-4006` |
 
 > 服务器只认 publickey：`lan_key.pem` 与本机 `wavemod_hk` 都被拒，

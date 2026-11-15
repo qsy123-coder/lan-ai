@@ -76,6 +76,21 @@ RUN_LOCK = threading.Lock()
 STOP = threading.Event()
 LOG_BUFFER = []
 
+# 会话级串行锁：只锁「同一个号 × 同一张卡」对应的 chatId，避免上游 409「该对话正在生成中」；
+# 不同号/不同卡的生成可以并行。全局 RUN_LOCK 只用于 /run 批量任务，不参与站点聊天。
+CHAT_LOCKS_GUARD = threading.Lock()
+CHAT_LOCKS = {}
+
+
+def chat_lock_for(name, card_id):
+    key = (name, card_id)
+    with CHAT_LOCKS_GUARD:
+        lock = CHAT_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            CHAT_LOCKS[key] = lock
+        return lock
+
 
 # ---------------------------------------------------------------- 基础工具
 
@@ -434,8 +449,9 @@ def extract_text(obj):
 
 
 def generate(cookie, chat_id, card_id, model, max_tokens, prompt, emit, history=None,
-             memory=None):
+             memory=None, stop_event=None):
     """流式生成。返回 {status: ok|exhausted|card_error|auth_error|error, ...}"""
+    stop = stop_event if stop_event is not None else STOP
     url = BASE + "/api/chat"
     rid = "web-%d-%s" % (int(time.time() * 1000), os.urandom(3).hex())
     h = headers_of(cookie, referer=BASE + "/chat?c=" + chat_id, request_id=rid)
@@ -464,7 +480,7 @@ def generate(cookie, chat_id, card_id, model, max_tokens, prompt, emit, history=
     buf = []
     try:
         for raw in r.iter_lines():
-            if STOP.is_set():
+            if stop.is_set():
                 break
             line = raw.decode("utf-8", "ignore") if isinstance(raw, bytes) else raw
             if not line:
@@ -585,6 +601,18 @@ def is_gate(err):
     return "418" in e or "captcha" in e
 
 
+def is_network(err):
+    """上游连接层失败（节点坏 / TLS 被掐 / 超时）：跟账号无关，绝不能判账号死亡。"""
+    e = (err or "").lower()
+    keys = ("sslerror", "ssl routines", "ssl_connect", "unexpected eof",
+            "connection closed", "connection reset", "connection refused",
+            "connection aborted", "recv failure", "boringssl",
+            "timed out", "timeout", "curl:", "(35)", "(56)", "(7)",
+            "temporary failure", "name or service not known", "getaddrinfo",
+            "eof occurred")
+    return any(k in e for k in keys)
+
+
 def ensure_chat_for_card(st, pool, name, card_id, emit):
     """为「某个号 × 某张卡」拿到一个 chatId；createByCard 按卡去重，所以缓存即可。
     返回 (chatId, err)：err 非空时上层要区分「闸门」还是「账号问题」。"""
@@ -633,15 +661,16 @@ def _tail_prompt(text, limit=1200):
 
 
 def generate_long(cookie, chat_id, card_id, model, max_tokens, prompt, emit,
-                  history=None, rounds=3, memory=None):
+                  history=None, rounds=3, memory=None, stop_event=None):
     """
     多轮续写：首轮用原始 prompt，之后每轮把「累积正文」当 assistant 历史回灌。
     任一环节失败就带着已有正文返回 ok，不丢内容。
     """
     text = ""
     hist = list(history or [])
+    stop = stop_event if stop_event is not None else STOP
     for i in range(max(1, int(rounds))):
-        if STOP.is_set():
+        if stop.is_set():
             break
         if i == 0:
             this_prompt = prompt
@@ -655,7 +684,7 @@ def generate_long(cookie, chat_id, card_id, model, max_tokens, prompt, emit,
         emit("round", {"index": i + 1, "rounds": rounds, "chars": len(text)})
         try:
             res = generate(cookie, chat_id, card_id, model, max_tokens, this_prompt, emit,
-                           history=this_hist, memory=memory)
+                           history=this_hist, memory=memory, stop_event=stop_event)
         except Exception as e:
             log("round %d failed: %s" % (i + 1, repr(e)[:200]), "warn")
             if text:
@@ -691,12 +720,12 @@ def chat_id_ok(pool, name, chat_id):
         return False
 
 
-def start_summary(pool, name, card_id, mem, history):
+def start_summary(pool, name, card_id, mem, history, stop_event=None):
     """把摘要放到后台线程：不占 SSE 连接、不阻塞下一条消息。"""
     def run():
         try:
             st2 = load_state()
-            maybe_summarize(pool, name, st2, card_id, mem, history)
+            maybe_summarize(pool, name, st2, card_id, mem, history, stop_event=stop_event)
         except Exception as e:
             log("后台摘要失败：%s" % str(e)[:160], "warn")
 
@@ -704,7 +733,7 @@ def start_summary(pool, name, card_id, mem, history):
     t.start()
 
 
-def maybe_summarize(pool, name, st, card_id, mem, history):
+def maybe_summarize(pool, name, st, card_id, mem, history, stop_event=None):
     """压缩旧消息；失败降级为规则摘要，绝不阻塞主流程。"""
     msgs = memlib.sanitize_history(history)
     if not memlib.should_summarize(len(msgs), mem):
@@ -735,7 +764,8 @@ def maybe_summarize(pool, name, st, card_id, mem, history):
                         ch, running, pins,
                         recent=recent if i == len(chunks) - 1 else None)
                     res = generate(pool[name]["cookie"], batch_cid, batch_card,
-                                   SUMMARY_MODEL, 800, prompt, lambda *a, **k: None)
+                                   SUMMARY_MODEL, 800, prompt, lambda *a, **k: None,
+                                   stop_event=stop_event)
                     if res.get("status") != "ok":
                         ok_all = False
                         break
@@ -763,7 +793,7 @@ def maybe_summarize(pool, name, st, card_id, mem, history):
     return mem
 
 
-def run_site_chat(payload, emit):
+def run_site_chat(payload, emit, stop_event=None):
     """前台聊天：指定 cardId，自动挑号 → 建会话 → 流式生成 → 结算。"""
     pool = load_pool()
     st = load_state()
@@ -824,6 +854,7 @@ def run_site_chat(payload, emit):
         return
 
     gate_hits = 0
+    busy_hits = 0
     for credit, name in cands:
         a = account_state(st, name)
         emit("account", {"name": name, "credit": a.get("credit")})
@@ -845,6 +876,12 @@ def run_site_chat(payload, emit):
                                  "message": "上游触发验证码闸门（HTTP 418），出口 IP 被限。稍后再试，额度和账号都还在。"})
                     return
                 continue
+            if is_network(chat_err):
+                # 连接层失败（节点坏/TLS 断）：绝不把账号标成耗尽
+                emit("switch", {"from": name, "reason": "network", "detail": chat_err})
+                emit("end", {"reason": "network",
+                             "message": "上游连接失败（出口节点异常），请稍后再试。账号额度未受影响。"})
+                return
             # 真正的账号/卡片问题才标记
             a["exhausted"] = True
             save_state(st)
@@ -855,13 +892,23 @@ def run_site_chat(payload, emit):
             rounds = int(payload.get("rounds") or 0)
         except (TypeError, ValueError):
             rounds = 0
-        if rounds <= 1:
-            res = generate(pool[name]["cookie"], cid, card_id, model, max_tokens, prompt,
-                           emit, history=history, memory=mem)
-        else:
-            res = generate_long(pool[name]["cookie"], cid, card_id, model, max_tokens,
-                                prompt, emit, history=history, memory=mem,
-                                rounds=min(rounds, 8))
+        # 会话级锁：同一 chatId（号×卡）并发生成会被上游 409「该对话正在生成中」。
+        # 抢不到就换下一个号：既不上游 409，也不排队干等。
+        lock = chat_lock_for(name, card_id)
+        if not lock.acquire(blocking=False):
+            busy_hits += 1
+            emit("switch", {"from": name, "reason": "busy", "detail": "该账号正在生成中"})
+            continue
+        try:
+            if rounds <= 1:
+                res = generate(pool[name]["cookie"], cid, card_id, model, max_tokens, prompt,
+                               emit, history=history, memory=mem, stop_event=stop_event)
+            else:
+                res = generate_long(pool[name]["cookie"], cid, card_id, model, max_tokens,
+                                    prompt, emit, history=history, memory=mem,
+                                    rounds=min(rounds, 8), stop_event=stop_event)
+        finally:
+            lock.release()
         if res.get("status") == "exhausted" and res.get("reason") == "internal":
             # classification=internal 不扣费；createByCard 幂等去重拿回同一 chatId，直接换号
             emit("switch", {"from": name, "reason": "internal", "detail": "upstream internal"})
@@ -897,9 +944,18 @@ def run_site_chat(payload, emit):
                              "message": "上游触发验证码闸门（HTTP 418），出口 IP 被限。稍后再试，额度和账号都还在。"})
                 return
             continue
+        if is_network(res.get("error")):
+            # 生成阶段的连接层失败：不换号、不扣费，直接提示节点异常
+            emit("switch", {"from": name, "reason": "network", "detail": res.get("error")})
+            emit("end", {"reason": "network",
+                         "message": "上游连接失败（出口节点异常），请稍后再试。账号额度未受影响。"})
+            return
         emit("switch", {"from": name, "reason": res["status"], "detail": res.get("error")})
 
-    emit("end", {"reason": "all_failed", "message": "所有账号都没能完成这次生成"})
+    if busy_hits >= len(cands):
+        emit("end", {"reason": "busy", "message": "当前可用账号都在生成中，请稍等几秒再试"})
+    else:
+        emit("end", {"reason": "all_failed", "message": "所有账号都没能完成这次生成"})
 
 
 def run_job(payload, emit):
@@ -1096,8 +1152,9 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(chunk)
             self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, OSError):
-            # 浏览器断开 → 立即停跑，避免继续烧 credit
-            STOP.set()
+            # 浏览器断开 → 立即停掉当前请求，避免继续烧 credit。
+            # 站点聊天用各自的 stop_event，批量任务用全局 STOP，互不干扰。
+            (getattr(self, "_stop", None) or STOP).set()
 
     # ---- 路由
     def do_GET(self):
@@ -1221,6 +1278,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(409, {"error": "已有任务在跑"})
             payload = self._body()
             STOP.clear()
+            self._stop = STOP
             try:
                 self._sse_start()
                 try:
@@ -1267,22 +1325,19 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/site/chat":
             if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
                 return self._json(401, {"error": "bad token"})
-            if not RUN_LOCK.acquire(blocking=False):
-                return self._json(409, {"error": "已有任务在跑"})
             payload = self._body()
-            STOP.clear()
+            # 站点聊天不再用全局 RUN_LOCK：并发请求各自持独立的会话锁与 stop_event，
+            # 避免第二个用户点进来就吃 409「已有任务在跑」。
+            self._stop = threading.Event()
             try:
                 self._sse_start()
+                run_site_chat(payload, self._emit, stop_event=self._stop)
+            except Exception as e:
+                log("site chat crashed: %s" % traceback.format_exc()[-1800:], "error")
                 try:
-                    run_site_chat(payload, self._emit)
-                except Exception as e:
-                    log("site chat crashed: %s" % traceback.format_exc()[-1800:], "error")
-                    try:
-                        self._emit("end", {"reason": "crash", "message": str(e)[:200]})
-                    except Exception:
-                        pass
-            finally:
-                RUN_LOCK.release()
+                    self._emit("end", {"reason": "crash", "message": str(e)[:200]})
+                except Exception:
+                    pass
             return
         return self._json(404, {"error": "not found"})
 

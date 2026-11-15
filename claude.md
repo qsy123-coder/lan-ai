@@ -436,6 +436,7 @@ asyncio.run(main())
 | 2026-11-13 | `fix/memory-full-history` | 前端去 head/tail + 锚点精度 + 50 轮 E2E | 已完成（50 轮 E2E 通过） |
 | 2026-11-13 | `docs/e2e-50-acceptance` | 回填 50 轮验收结果 + 模型/降级验证 + PRD 勾选 | 已完成 |
 | 2026-11-13 | `feat/pool-expand-imap` | 号池扩容：IMAP 代理隧道 + /__captcha/ 等待 + no_code 待补落盘；b020→b029（8 成 1 败） | 已入池，待合并 |
+| 2026-11-15 | `fix/chat-409-concurrency` | 线上 409：全局 RUN_LOCK 串行化 → 「号×卡」会话锁 + 每请求独立 stop_event；is_network 防节点坏误判账号耗尽（从 main 276138b 切出） | 已提交，待合并 |
 
 > 规矩：分支从 `main` 切出；任务完成后 `git checkout main && git merge <branch>`，
 > 或推远端开 PR。**合并由用户决定**，不要自行合并到 `main`。

@@ -23,6 +23,10 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import new_account as na  # noqa: E402  复用 launch / cdp / cookie_header / me_of / add_pool / imap_code_for
 import signup_email as se  # noqa: E402  复用 mail.tm 建箱与收码（无 IMAP 场景）
+import mailbox as mbx  # noqa: E402  temp-mail.io / mail.tm 统一建箱收码
+
+CAPTCHA_URL = (na.BASE + "/__captcha/?src=ratelimit&theme=light"
+               "&next=%2Fapi%2Fhealth%3Fcaptcha_completed%3D1")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LEDGER = os.path.join(ROOT, "out", "ip_ledger.json")
@@ -52,6 +56,15 @@ def probe():
     try:
         r = na.creq.get(na.BASE + "/api/trpc/nope.nothing?batch=1&input=%7B%7D", impersonate="chrome",
                         proxies={"https": na.PROXY}, timeout=15)
+        return r.status_code
+    except Exception:
+        return 0
+
+
+def probe_via(proxy):
+    try:
+        r = na.creq.get(na.BASE + "/api/trpc/nope.nothing?batch=1&input=%7B%7D", impersonate="chrome",
+                        proxies={"https": proxy}, timeout=15)
         return r.status_code
     except Exception:
         return 0
@@ -107,9 +120,17 @@ def switch_node(node):
     return out
 
 
-def one_account(node, domain, idx, addr="", provider="imap", use_proxy=True):
+def one_account(node, domain, idx, addr="", provider="imap", use_proxy=True, proxy=None):
     mail_token = None
-    if provider == "mailtm":
+    if provider == "tmio":
+        try:
+            mb = mbx.provision("tmio", domain or None)
+        except Exception as e:
+            print("  temp-mail.io 建箱失败:", str(e)[:100])
+            return "mailbox_fail"
+        addr, mail_token = mb["addr"], mb
+        print("  邮箱:", addr)
+    elif provider == "mailtm":
         if not addr:
             addr = "".join(random.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=12)) + "@" + domain
         mt_pwd = "Dz" + "".join(random.choices("ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789", k=10)) + "!9"
@@ -124,7 +145,7 @@ def one_account(node, domain, idx, addr="", provider="imap", use_proxy=True):
 
     port = random.randint(9400, 9599)
     profile = os.path.join(os.environ.get("TEMP", "."), "dzmm-b%d" % port)
-    if not na.launch(port, profile, na.BASE + "/sign-in?s=signup", use_proxy=use_proxy):
+    if not na.launch(port, profile, na.BASE + "/sign-in?s=signup", use_proxy=use_proxy, proxy=proxy):
         return "launch_fail"
     time.sleep(3)
 
@@ -184,8 +205,7 @@ def one_account(node, domain, idx, addr="", provider="imap", use_proxy=True):
 
     status = "timeout"
     t0 = time.time()
-    gate_seen = False
-    gate_t0 = time.time()
+    gate_done = False
     while time.time() - t0 < 600:
         time.sleep(2)
         st, _ = na.cdp(port, "JSON.stringify({u:location.search,"
@@ -196,29 +216,52 @@ def one_account(node, domain, idx, addr="", provider="imap", use_proxy=True):
             break
         if "REGISTER_RISK" in st:
             return "risk_429"
-        if "__captcha" in st:
-            if not gate_seen:
-                gate_seen = True
-                gate_t0 = time.time()
-                print("  ⚠️ 人机校验弹窗已出现 —— 请在窗口里拖一次（最多等 300 秒）")
-                na.cdp(port, "(()=>{window.focus();return 1})()")
-            # 站点闸门有 onLoad 竞态：iframe 加载快过 React 挂 onLoad，父组件 8 秒后判 unavailable。
-            # 前 6 秒内强制重载一次 iframe，把 load 事件补上；之后别再动，免得重置用户拖拽。
-            if time.time() - gate_t0 < 6:
-                na.cdp(port, "(()=>{const f=document.querySelector('iframe[src*=\"__captcha\"]');"
-                             "if(!f)return 'no';try{f.contentWindow.location.reload();return 'reload'}"
-                             "catch(e){f.src=f.src;return 'resrc'}})()")
-            continue
         if "暂不支持注册" in st:
             return "domain_reject"
-        if "暂时无法完成注册" in st:
+        if "__captcha" in st and not gate_done:
+            # 前端注册重试只有 [0,2000,2000,2500] ≈6.5s，人工拖来不及。
+            # 改成顶层打开验证页，等人工拖完（不受 6.5s 约束），再回注册页重提。
+            print("  ⚠️ 闸门已触发 → 切独立验证页，请人工拖拽并点「继续访问 DZMM」（≤300s）")
+            na.cdp(port, "(()=>{window.focus();return 1})()")
+            na.cdp(port, "(async()=>{location.href='%s';return 'nav'})()" % CAPTCHA_URL)
+            ok = False
+            t1 = time.time()
+            while time.time() - t1 < 300:
+                time.sleep(3)
+                href, _ = na.cdp(port, "location.href")
+                if "__captcha" not in href and href.startswith("http"):
+                    ok = True
+                    break
+            if not ok:
+                return "gate_timeout"
+            print("  ✓ 验证页已跳转，回注册页重提")
+            na.cdp(port, "(async()=>{location.href='%s/sign-in?s=signup';return 'nav'})()" % na.BASE)
+            time.sleep(5)
+            for _ in range(20):
+                chk, _ = na.cdp(port, "document.querySelector('input[type=email]')?'ready':'no'")
+                if "ready" in chk:
+                    break
+                time.sleep(1)
+            out2, _ = na.cdp(port, step2)
+            time.sleep(1)
+            out, err = na.cdp(port, "(()=>{const b=[...document.querySelectorAll('button')].find(x=>/^注册$/.test((x.innerText||'').trim()));if(!b)return 'no-reg';b.click();return 'clicked'})()")
+            print("  重提:", (out or err)[:120])
+            gate_done = True
+            t0 = time.time()
+            continue
+        if "暂时无法完成注册" in st and not gate_done:
             print("  ✗ 服务端判定当前出口环境不可注册（captchaError）")
             return "gate_failed"
     if status != "otp":
         return "timeout"
 
     print("  ✅ 验证码已发，等邮件…")
-    code = se.wait_code(mail_token, 180) if provider == "mailtm" else na.imap_code_for(addr, 180)
+    if provider == "tmio":
+        code = mbx.wait_code(mail_token, 180)
+    elif provider == "mailtm":
+        code = se.wait_code(mail_token, 180)
+    else:
+        code = na.imap_code_for(addr, 180)
     if not code:
         save_pending(addr, pwd, node, port, "no_code")
         return "no_code"
@@ -254,14 +297,16 @@ def main():
     ap.add_argument("--alias-pool", default="", help="out/aliases.json，从别名池取地址")
     ap.add_argument("--domain", default=os.environ.get("MAIL_DOMAIN", "aetouban.cn"),
                     help="可逗号分隔多个域名，每个号随机选一个")
-    ap.add_argument("--mail-provider", choices=["imap", "mailtm"], default="imap",
-                    help="imap=自有域名 catch-all 转发；mailtm=api.mail.tm 临时邮箱（不需要 IMAP 口令）")
+    ap.add_argument("--mail-provider", choices=["imap", "mailtm", "tmio"], default="imap",
+                    help="imap=自有域名 catch-all；mailtm=api.mail.tm；tmio=temp-mail.io（免鉴权，7 个随机域名）")
     ap.add_argument("--start", type=int, default=-1,
                     help="从第几号继续编号（已有 b001-b019 时传 19，避免覆盖）")
     ap.add_argument("--no-proxy", action="store_true",
                     help="浏览器直连（用本机 IP 注册），IMAP 仍走 7897 隧道")
     ap.add_argument("--node", default="",
                     help="固定节点（热点等受限网络下只有个别节点可用时，跳过账本排序）")
+    ap.add_argument("--proxy", default="",
+                    help="固定出口代理（如 http://127.0.0.1:7901）；给了就不切 Clash 全局，只跑一单")
     ap.add_argument("--status", action="store_true")
     args = ap.parse_args()
 
@@ -278,6 +323,24 @@ def main():
                 print("  %-22s uses=%s last429=%s" % (n, r.get("uses", 0),
                       time.strftime("%m-%d %H:%M", time.localtime(r["last_429"])) if r.get("last_429") else "-"))
         return 0
+
+    if args.proxy:
+        # 独立出口模式：不碰 Clash 全局，只跑一单，用于验收新出口池
+        doms = [d.strip() for d in args.domain.split(",") if d.strip()]
+        code = probe_via(args.proxy)
+        print("出口 %s probe=%s" % (args.proxy, code))
+        if code not in (404, 401, 418):
+            print("出口不可用（probe=%s），换槽位" % code)
+            return 3
+        idx = state.get("done", 0) + 1
+        res = one_account(args.node or ("exit-" + args.proxy.rsplit(":", 1)[-1]),
+                          random.choice(doms) if doms else "fldubai.com", idx,
+                          provider=args.mail_provider, proxy=args.proxy)
+        print("结果:", res)
+        if res == "ok":
+            state["done"] = idx
+            save(STATE, state)
+        return 0 if res == "ok" else 1
 
     if args.mail_provider == "imap" and not (na.IMAP_USER and na.IMAP_PASS):
         print("缺 IMAP 凭据：写 out/imap.json {\"host\":\"imap.gmail.com\",\"user\":\"...\",\"pass\":\"应用密码\"}，")

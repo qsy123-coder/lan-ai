@@ -443,6 +443,8 @@ asyncio.run(main())
 | 2026-11-13 | `feat/me-and-pricing` | 我的 + 会员与价格（notes/008 §2.4/§5）；消息 tab 接到 /chat | 已完成 |
 | 2026-11-13 | `feat/account-ledger` | 邮箱登录 + 用户积分账本（notes/008 §7）；注册 100、生成扣 2.1、演示充值 | 已完成 |
 | 2026-11-13 | `feat/checkin-vip` | 每日签到 + VIP 等级（notes/008 §7 运营）；签到 +5/第7天 +20，VIP 按 30 天充值 | 已完成 |
+| 2026-11-15 | `fix/memory-delete` | 记忆删除不生效：删会话清记忆 + 锚点抑制防复活 + 摘要拒答降级 + seeds 删除墓碑 + 固定人称预设 | 已完成（41 单测过） |
+| 2026-11-15 | `fix/chat-409-concurrency` | 线上 409：全局 RUN_LOCK 串行化 → 改为「号×卡」会话锁 + 每请求独立 stop_event，不同会话并行、同 chatId 才互斥；附带 is_network 防节点坏时误判账号耗尽；补部署 users.py | 已部署线上，实测并发 8 探针无 409（notes/020） |
 
 > 规矩：分支从 `main` 切出；任务完成后 `git checkout main && git merge <branch>`，
 > 或推远端开 PR。**合并由用户决定**，不要自行合并到 `main`。

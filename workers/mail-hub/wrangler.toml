@@ -1,0 +1,12 @@
+name = "mail-hub"
+main = "src/index.js"
+compatibility_date = "2026-11-01"
+
+# KV 必须在控制台/CLI 先建：wrangler kv namespace create MAILKV
+# 然后把返回的 id 填进来（email handler 不经过 route，绑定在 Email Routing 里做）
+[[kv_namespaces]]
+binding = "MAILKV"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# 可选：设置后 HTTP 接口要求 Authorization: Bearer <token>
+# wrangler secret put API_TOKEN

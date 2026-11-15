@@ -90,8 +90,26 @@ if (hook) {
     };
     const of = window.fetch;
     window.fetch = function (input, init) {
-      rec('fetch', input && input.url ? input.url : input, init);
-      return of.apply(this, arguments);
+      const u = input && input.url ? input.url : input;
+      rec('fetch', u, init);
+      const p = of.apply(this, arguments);
+      try {
+        if (String(u).includes('/api/')) {
+          p.then((res) => {
+            try {
+              res.clone().text().then((body) => {
+                const hs = {};
+                res.headers.forEach((v, k) => { hs[k] = v; });
+                window.__log.push({
+                  t: Date.now(), kind: 'fetch-res', url: String(u).slice(0, 300),
+                  status: res.status, headers: hs, body: body.slice(0, 600),
+                });
+              }).catch(() => {});
+            } catch (e) {}
+          }).catch(() => {});
+        }
+      } catch (e) {}
+      return p;
     };
     const oo = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function (m, u) {

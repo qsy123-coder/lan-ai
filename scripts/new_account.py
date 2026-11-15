@@ -28,7 +28,19 @@ from curl_cffi import requests as creq
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASE = "https://www.dzmm.ai"
 MAIL = "https://api.mail.tm"
-NODE_BIN = os.environ.get("NODE_BIN", r"C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe")
+def _find_node():
+    cands = [os.environ.get("NODE_BIN", ""),
+             r"F:\Program Files\nodejs\node.exe",
+             r"C:\Program Files\nodejs\node.exe",
+             r"C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe"]
+    for c in cands:
+        if c and os.path.exists(c):
+            return c
+    from shutil import which
+    return which("node") or "node"
+
+
+NODE_BIN = _find_node()
 EDGE = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 CLASH = os.path.join(ROOT, "scripts", "clash.ps1")
 CDP = os.path.join(ROOT, "scripts", "cdp.mjs")
@@ -84,11 +96,12 @@ def pick_node(state):
 
 
 # ---------- 浏览器 ----------
-def launch(port, profile, url, use_proxy=True):
+def launch(port, profile, url, use_proxy=True, proxy=None):
     os.makedirs(profile, exist_ok=True)
     args = [EDGE]
     if use_proxy:
-        args.append("--proxy-server=" + PROXY)
+        # proxy 显式传入时走独立出口（如 127.0.0.1:7901 的 mihomo 槽位），否则用默认 7897
+        args.append("--proxy-server=" + (proxy or PROXY))
     else:
         # 系统代理可能是开的（HKCU ProxyEnable=1 → 7897），必须显式关掉才算真直连
         args.append("--no-proxy-server")

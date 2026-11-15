@@ -178,12 +178,22 @@ export default function SessionList({
                 </div>
                 {list.map((s) => {
                   const on = String(s.sessionId) === String(currentId);
+                  const sameCard = String(s.cardId) === String(cardId);
                   return (
                     <div className={`sp-row ${on ? "on" : ""}`} key={s.sessionId || s.cardId}>
-                      <Link
+                      <a
                         href={`/chat?card=${s.cardId}&s=${s.sessionId || ""}`}
                         className="sp-main"
-                        onClick={onClose}
+                        onClick={(e) => {
+                          if (sameCard && s.sessionId) {
+                            // 同卡切会话：客户端瞬时切换，不整页重载
+                            e.preventDefault();
+                            onClose?.();
+                            onOpen?.(s.sessionId);
+                          } else {
+                            onClose?.();
+                          }
+                        }}
                         aria-current={on ? "page" : undefined}
                       >
                         <span className="sp-av">
@@ -203,7 +213,7 @@ export default function SessionList({
                         <span className="sp-meta">
                           {on ? <em>当前</em> : metaOf(s.lastAt || Date.now())}
                         </span>
-                      </Link>
+                      </a>
                       {manage ? (
                         <button
                           className={`sp-del press ${confirmId === String(s.sessionId) ? "sure" : ""}`}

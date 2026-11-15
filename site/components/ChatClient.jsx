@@ -531,6 +531,30 @@ export default function ChatClient({ card, initialSession }) {
     setNote("长期记忆已清空");
   }, [saveMemory]);
 
+  // 把「卡片级旧记忆」导入当前会话（老对话一键找回）
+  const importCardMemory = useCallback(async () => {
+    const sid = sidRef.current || sessionId;
+    setMemBusy(true);
+    try {
+      const r = await fetch("/api/memory", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cardId: card.id, sessionId: sid || undefined, importCard: true }),
+      });
+      const j = await r.json().catch(() => null);
+      if (j?.memory) {
+        setMem(j.memory);
+        setNote("已导入卡片旧记忆");
+      } else {
+        setNote("没有找到卡片级旧记忆");
+      }
+    } catch {
+      setNote("导入失败");
+    } finally {
+      setMemBusy(false);
+    }
+  }, [card.id, sessionId]);
+
   const regenSummary = useCallback(() => {
     saveMemory({ summary: "", summarizedUpTo: 0 });
     setMem((cur) => ({ ...(cur || {}), summary: "", summarizedUpTo: 0 }));
@@ -764,7 +788,7 @@ export default function ChatClient({ card, initialSession }) {
     [msgs, save, rebuildMemory]
   );
 
-  // 清空当前会话：只清本地消息 + 删本会话上游存档；共享的长期记忆不动
+  // 清空当前会话 = 本会话从零开始：清本地消息 + 清本会话记忆 + 删本会话上游
   const clear = useCallback(() => {
     const sid = sidRef.current || sessionId;
     setMsgs([]);
@@ -773,9 +797,10 @@ export default function ChatClient({ card, initialSession }) {
     fetch("/api/memory", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ cardId: card.id, sessionId: sid || undefined, dropUpstream: true }),
+      body: JSON.stringify({ cardId: card.id, sessionId: sid || undefined, clear: true }),
     }).catch(() => {});
-    setNote("已清空本会话（共享记忆保留）");
+    setMem(null);
+    setNote("已清空本会话（含记忆）");
   }, [card.id, save, sessionId]);
 
   // 从列表移除一个会话：消息体 + 索引 + 该会话上游存档；共享记忆不动。
@@ -791,11 +816,11 @@ export default function ChatClient({ card, initialSession }) {
           setNote("已删除本会话（共享记忆保留）");
         }
       } catch {}
-      // 服务端：只删该会话的上游存档（sessionId 维度），共享记忆保留
+      // 服务端：清该会话记忆 + 删该会话上游存档（sessionId 维度）
       fetch("/api/memory", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ cardId: card.id, sessionId: sid, dropUpstream: true }),
+        body: JSON.stringify({ cardId: card.id, sessionId: sid, clear: true }),
       }).catch(() => {});
     },
     [card.id, sessionId]
@@ -1271,6 +1296,9 @@ export default function ChatClient({ card, initialSession }) {
                     disabled={memBusy}
                   >
                     导入
+                  </button>
+                  <button className="btn btn-ghost press" onClick={importCardMemory} disabled={memBusy}>
+                    导入旧记忆
                   </button>
                   <button className="btn btn-ghost press" onClick={clearMemory} disabled={memBusy}>
                     清空记忆

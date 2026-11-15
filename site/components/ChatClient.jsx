@@ -764,18 +764,21 @@ export default function ChatClient({ card, initialSession }) {
     [msgs, save, rebuildMemory]
   );
 
-  // 清空当前会话 = 彻底重开：清本地消息 + 清本会话记忆 + 删本会话上游存档
+  // 清空当前会话：只清本地消息 + 删本会话上游存档；共享的长期记忆不动
   const clear = useCallback(() => {
     const sid = sidRef.current || sessionId;
     setMsgs([]);
     localStorage.removeItem(mkey(card.id, sid));
     save([], "");
-    saveMemory({ clear: true });
-    setNote("已清空本会话（含记忆，下次从零开始）");
-  }, [card.id, save, saveMemory, sessionId]);
+    fetch("/api/memory", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cardId: card.id, sessionId: sid || undefined, dropUpstream: true }),
+    }).catch(() => {});
+    setNote("已清空本会话（共享记忆保留）");
+  }, [card.id, save, sessionId]);
 
-  // 从列表里彻底移除一个会话（消息体 + 索引 + 该会话记忆 + 上游存档）。
-  // 多会话：按 sessionId 删除，不影响同卡其它会话。
+  // 从列表移除一个会话：消息体 + 索引 + 该会话上游存档；共享记忆不动。
   const dropSession = useCallback(
     (sid) => {
       try {
@@ -785,15 +788,14 @@ export default function ChatClient({ card, initialSession }) {
         setSessions(next);
         if (String(sid) === String(sidRef.current || sessionId)) {
           setMsgs([]);
-          setMem(null);
-          setNote("已删除本会话及其长期记忆");
+          setNote("已删除本会话（共享记忆保留）");
         }
       } catch {}
-      // 服务端：清该会话记忆 + 删该会话上游存档（sessionId 维度）
+      // 服务端：只删该会话的上游存档（sessionId 维度），共享记忆保留
       fetch("/api/memory", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ cardId: card.id, sessionId: sid, clear: true }),
+        body: JSON.stringify({ cardId: card.id, sessionId: sid, dropUpstream: true }),
       }).catch(() => {});
     },
     [card.id, sessionId]

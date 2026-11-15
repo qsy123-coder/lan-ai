@@ -1109,8 +1109,8 @@ def run_site_chat(payload, emit, stop_event=None):
 
     history = payload.get("history")
     session_id = (payload.get("sessionId") or "").strip() or None
-    # —— 长期记忆：磁盘为底，合并「历史 + 本轮新消息」里出现的设定
-    mem = memlib.load_memory(MEMORY_DIR, card_id, session_id)
+    # —— 长期记忆按卡共享（所有会话共用同一套锚点/摘要）；消息与上游会话仍按会话隔离
+    mem = memlib.load_memory(MEMORY_DIR, card_id)
     before_ids = [p.get("id") for p in (mem.get("pinned") or [])]
     pin_source = list(history or []) + [{"role": "user", "content": prompt}]
     fresh = memlib.apply_suppression(memlib.extract_pins(pin_source), mem.get("suppressed"))
@@ -1587,8 +1587,7 @@ class Handler(BaseHTTPRequestHandler):
                 card_id = 0
             if not card_id:
                 return self._json(400, {"error": "cardId required"})
-            session_id = (qs.get("sessionId") or [""])[0] or None
-            mem = memlib.load_memory(MEMORY_DIR, card_id, session_id)
+            mem = memlib.load_memory(MEMORY_DIR, card_id)   # 长期记忆按卡共享
             return self._json(200, {"memory": mem})
         if path == "/site/sessions":
             qs = parse_qs(urlparse(self.path).query)
@@ -1710,21 +1709,21 @@ class Handler(BaseHTTPRequestHandler):
             except (TypeError, ValueError):
                 return self._json(400, {"error": "cardId required"})
             session_id = (payload.get("sessionId") or "").strip() or None
-            mem = memlib.load_memory(MEMORY_DIR, card_id, session_id)
+            mem = memlib.load_memory(MEMORY_DIR, card_id)   # 长期记忆按卡共享
             if payload.get("clear"):
-                # 清空时把现有锚点记入 suppressed：否则下一轮 auto 抽取会从
-                # 还留在历史里的原句把它们重新捞回来，表现为「删了又出现」。
+                # 「清空记忆」：只清共享的卡片级记忆（不删上游会话，不动其它会话）。
                 removed = memlib.pin_ids(mem.get("pinned"))
                 mem = memlib.default_memory(card_id)
                 mem["suppressed"] = sorted(set(removed))[:200]
-                if session_id:
-                    mem["sessionId"] = session_id
                 memlib.save_memory(MEMORY_DIR, mem)
+                return self._json(200, {"memory": mem})
+            if payload.get("dropUpstream"):
+                # 「删除会话」：只删这个会话的上游存档（不碰共享记忆）。
                 if session_id:
                     drop_session_chat(card_id, session_id)
                 else:
                     drop_site_chats_for_card(card_id)
-                return self._json(200, {"memory": mem})
+                return self._json(200, {"ok": True})
             if payload.get("rebuild"):
                 # 前端删了某条消息后触发：manual 锚点保留，auto 从当前历史重抽，
                 # 摘要清空待下一轮重新生成——让被删剧情的记忆贡献随之消失。
@@ -1736,13 +1735,6 @@ class Handler(BaseHTTPRequestHandler):
                 mem["summary"] = ""
                 mem["summarizedUpTo"] = 0
                 memlib.save_memory(MEMORY_DIR, mem)
-                # 删光所有消息 = 用户想从零开始：丢弃上游会话，否则模型仍能从
-                # 上游 chatId 的存档里读到被删掉的剧情（实测「删了还记得」的根因）。
-                if not history:
-                    if session_id:
-                        drop_session_chat(card_id, session_id)
-                    else:
-                        drop_site_chats_for_card(card_id)
                 return self._json(200, {"memory": mem})
             if isinstance(payload.get("pinned"), list):
                 old_ids = memlib.pin_ids(mem.get("pinned"))

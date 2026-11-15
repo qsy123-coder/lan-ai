@@ -1,22 +1,129 @@
-# CLAUDE.md — dzmm-quota 项目上下文与作业规范
+# CLAUDE.md — 项目上下文与工程规范
 
 > 本文件是本工作区的**唯一事实来源**。每次会话开始先读完它，再动手。
-> 与本文件冲突的旧笔记一律作废；新发现的事实当天回写进「§1 站点事实」。
+> 与本文件冲突的旧笔记一律作废；新发现的事实当天回写进「站点事实」与「分支台账」。
 > 原 `新建文本文档.txt` 是另一个项目（WaveMod）的规范，与本项目无关，不要混用。
 
 ---
 
-## 0. 一句话目标
+## 项目概述
 
-把 `https://www.dzmm.ai` 的**付费边界**打平：会员等级、每日额度（quota）、积分（credits）、
-导出次数、搜索次数、图片生成次数、六连抽 —— 让账号在服务端账本上"用不完"。
+- **项目名称**：lan-ai（「澜」）
+- **两条主线**：
+  1. **额度池**：把 `https://www.dzmm.ai` 的付费边界打平（会员等级、每日额度 quota、积分 credits、
+     导出/搜索/绘图次数、六连抽），手段固定为一条链：**本地代理全量抓包 → 定位额度判定点 →
+     重放 / 改包 / 并发 / 头部错位 → 固化成脚本**。不做"分析报告"，只交付能跑的
+     `capture / replay / patch / verify` 四件套。
+  2. **「澜」前台**：按 `notes/008` 拆解做的同类站（角色卡聊天），额度直连上面的号池。
+- **两个进程**：`engine`（Python，`:8787`）+ `site`（Next.js，`:3100`）。引擎只监听回环，Next 转发。
 
-手段固定为一条链：**本地代理全量抓包 → 定位额度判定点 → 重放 / 改包 / 并发 / 头部错位 → 固化成脚本**。
-不做"分析报告"，只交付能跑的 `capture / replay / patch / verify` 四件套。
+## 技术栈
+
+- **前端**：Next.js 15（App Router），React 18，**原生 CSS**（无 Tailwind / shadcn）。
+- **引擎**：Python 3.12，标准库 `HTTPServer` + `curl_cffi`（`impersonate="chrome"`）。
+- **上游**：dzmm.ai —— tRPC over `/api/trpc`（superjson）+ `/api/chat`（SSE）。
+- **出口**：Clash / mihomo 混合端口 `127.0.0.1:7897`（本机）/ `7890`（服务器）。
+- **部署**：腾讯云 Ubuntu `43.135.10.175`，systemd（`lan-site` / `lan-engine` / `mihomo`），
+  公网入口 `https://43-135-10-175.sslip.io`（口令 `lan-4006`）。
+- **持久化**：JSON 文件为主（`accounts.json` / `out/webstate.json` / `out/users.json` / `out/memory/*.json`）。
+
+## 架构原则（必须严格遵守）
+
+1. **服务端账本为准**：前端展示层好改但没用；真正的判定点在 `chat.getQuotas` / `credits.getBalance`
+   背后的服务端计数，以及生成类接口的扣减事务。
+2. **引擎单职责**：`engine/` 只做号池轮换 / 建会话 / 流式 / 结算；`site/` 只做界面与转发（`/api/chat` 透传 SSE）。
+3. **占位符先行**：真实凭证只进 `notes/` 与本地 `.env`，**不进 git、不进本文件**。
+4. **原始 flow 不可变**：`captures/` 只读，任何分析基于 `.flow`，不许只看截图。
+5. **一次只推一条攻击面**（A→G 依次），跑穿再换；不要同时开五条线导致日志互相污染。
+6. **速率约束**：单账号 ≤ 2 rps；并发实验单轮 ≤ 16 并发、≤ 30 s，轮间冷却 ≥ 60 s。
+7. **可回滚**：改包 / 改 claims / 部署前先存原值与还原命令到 `patches/<日期>.md` 或备份目录。
+
+## 目录结构（重要）
+
+```
+project/
+├── CLAUDE.md                  # 本文件（唯一事实来源）
+├── accounts.md                # 账号登记簿（人读）
+├── accounts.json              # 账号池 + cookie（机器读，凭证，勿外发）
+├── engine/                    # 额度池引擎（Python）
+│   ├── server.py              # stdlib HTTPServer + curl_cffi，127.0.0.1:8787
+│   ├── memory.py              # 长期记忆（锚点/摘要/content 注入）
+│   ├── users.py               # 站内用户 + 积分账本（注册/登录/签到/充值）
+│   └── tests/                 # 单测（pytest/unittest）
+├── site/                      # 「澜」前台（Next.js 15，:3100）
+│   ├── app/                   # App Router：首页 / card/[id] / chat / me / pricing / about
+│   ├── app/api/               # Route Handlers（enter / chat / auth / credits / memory / img / pool）
+│   ├── components/            # ChatClient / SessionList / Nav / ThemeToggle ...
+│   └── lib/                   # session / pool / engine / cards / gate
+├── web/                       # 账号池可视化控制台（Next.js，:3000）
+├── scripts/                   # 抓包/重放/并发/开号/出口探测/求解 等工具
+├── workers/                   # Cloudflare Worker（mail-hub 邮件中心）
+├── docs/                      # PRD / 方案
+├── deploy/                    # 部署说明
+├── captures/                  # mitmproxy 原始流（.flow，永不改）+ site 卡片库
+├── notes/                     # 每个 procedure / 每轮结论一页
+├── patches/                   # 改包/改头/改 claims 的配置 + 还原命令
+└── out/                       # 运行态与产物（webstate/users/memory/日志/截图）
+```
+
+> `scripts/` 里 `*.ps1`（`clash.ps1` / `start*.ps1`）与 `*.py` / `*.mjs` 各司其职；
+> `workers/` 不参与 Next 构建。
+
+## 编码规范
+
+- **Python**：3.12，标准库 + `curl_cffi`；单文件单职责；日志用 `logging` / `log()`，别 `print` 到
+  stdout 混进 JSON。
+- **Node**：ESM，只用内置模块；脚本必须能 `node scripts/xxx.mjs` 直接跑，参数走 `process.argv`。
+- **命名**：`snake_case.py` / `kebab-case.mjs`；常量全大写放文件头。
+- **落盘**：一切"请求 → 结论"必须落盘：`notes/<procedure>.md` 写清入参、返回码、扣减行为、结论一句话。
+- **时间**：统一 `Asia/Shanghai`，与站点 08:00 重置口径对齐。
+
+## 测试策略
+
+- **引擎单测**：`python -m pytest engine/tests`（无 pytest 则 `python -m unittest discover engine/tests`），
+  重点覆盖 `memory.py`（锚点/摘要/抑制）与 `users.py`（账本/签到）。
+- **站点构建**：`npm run build` 必须成功（能打开页面）。
+- **冒烟**：`/health`、`/site/pool`、`/site/chat`（判成功看 `event: complete`，见常见坑 #17）。
+- **TDD 优先**：改引擎核心逻辑（记忆/账本/锁）先补单测。
+
+## Git 提交规范
+
+使用 Conventional Commits：
+
+- `feat:` 新功能
+- `fix:` Bug 修复
+- `refactor:` 重构
+- `chore:` 构建/依赖/配置
+- `docs:` 文档
+- `perf:` 性能
+
+提交信息：`type: 中文一句话`，正文写清 **改了什么 / 为什么 / 怎么验的**，末尾 `Refs: notes/NNN`。
+
+## Claude 工作要求（核心）
+
+1. **每次任务必须新建分支，且从 `main` 切出**（最高优先级）：
+   - 开工第一件事：`git checkout -b <type>/<slug>`，**不许在 `main` 上改代码**；
+   - 分支名 `feat/` `fix/` `chore/` `docs/` 前缀 + 短横线 slug；
+   - **不要基于其它未合并分支再切新分支**（曾因此把别的分支提交一起合并进 main）；
+   - 同一任务的后续提交都留在该分支；分支名与要点当天回写「分支台账」；
+   - 例外：纯读取/调查（不改任何文件）不需要开分支。
+2. **先读「站点事实」再动手**：任何结论必须能指回一次真实抓包，不许凭 bundle 猜。
+3. **一次只推一条攻击面**（A→G 依次），跑穿再换。
+4. **输出格式固定**：
+   - 先给**变更计划**（要动 / 要新建的文件列表）；
+   - 再给**完整代码或完整命令**（不许省略号、不许"自行补全"）；
+   - 最后给**自检清单**（判据 + 回滚方式）。
+5. **永远不要**：
+   - 用截图/记忆替代 `trpc.jsonl` 原始记录；
+   - 在没跑 `--dry-run` 的情况下批量写库、批量注册、批量发请求；
+   - 把并发从 8 直接拉到 200（先 8 → 12 → 16，每次看 429/403 曲线）；
+   - 改动 `captures/` 里的原始 flow；
+   - 引入未在「工具与运行环境」列出的运行时或依赖；
+   - **先部署后提交**（顺序必须是：提交 → 推送 → 部署，见「提交前质量门禁」）。
 
 ---
 
-## 1. 站点事实（2026-11-06 实测，代理 7897 出口 SG）
+## 站点事实（2026-11-06 实测，代理 7897 出口 SG）
 
 | 项 | 值 |
 |---|---|
@@ -40,7 +147,7 @@
 | 会话锁 | 同一 chatId 并发生成 → `409 该对话正在生成中`；`chat.createByCard` 按 cardId 去重 |
 | 浏览器头 | `/api/*` POST 缺 `referer`/`sec-fetch-*` 直接 `403 Forbidden`（纯文本） |
 
-### 1.1 额度语义（站内文案原文归纳，改文案即为线上变更信号）
+### 额度语义（站内文案原文归纳，改文案即为线上变更信号）
 
 - `剩余 {{count}} 次`、`已用 {{used}} 次 / 共 {{limit}} 次` —— used/limit 每周期一对计数。
 - **Anime 图片生成 / 编辑图片**：从本周期首次使用起**满 24h 整批恢复**（滚动窗口，不是整点，也不是逐次恢复）。
@@ -54,7 +161,7 @@
 - 绘图：`单次消耗 1 额度`、`六连抽消耗 6 额度`。
 - VIP：解锁"使用权限"，**每次使用仍扣积分**；`综合积分 = 普通积分 + 限时积分`。
 
-### 1.2 tRPC 错误信封（实测）
+### tRPC 错误信封（实测）
 
 - `401` → `{"message":"UNAUTHORIZED","code":-32001,"data":{"path":"<PROC>","authBlock":null,"guestBlocked":false,"blockedDrawIds":null}}`
   —— 服务端有 **authBlock / guestBlocked / blockedDrawIds** 三档封禁，额度判定与封禁判定是两套逻辑。
@@ -70,7 +177,7 @@
 
 ---
 
-## 2. 代理与抓包链路（固定，不许换）
+## 代理与抓包链路（固定，不许换）
 
 系统代理是**关闭**的；Clash/mihomo 只开混合端口 `127.0.0.1:7897`。所有出站必须显式走它。
 
@@ -90,7 +197,7 @@ curl.exe --proxy http://127.0.0.1:7897 -sS -D - "https://www.dzmm.ai/" -o nul
 节点挂了的表现：端口还在听但返回 `502` / `schannel: failed to receive handshake` / Cloudflare `403 cf-mitigated`。
 **先切节点再重试，不要对着同一个节点死磕。**
 
-### 2.1 一键起飞
+### 一键起飞
 
 ```powershell
 $PY   = "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
@@ -112,9 +219,9 @@ $NODE = "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bi
 ```
 
 证书装法（装一次）：浏览器访问 `http://mitm.it` 下 Windows 证书 → 导入"受信任的根证书颁发机构"。
-抓 App 端时加 `--set ignore_hosts=''`，并额外过 SSL pinning（见 §3-E）。
+抓 App 端时加 `--set ignore_hosts=''`，并额外过 SSL pinning（见攻击面 E）。
 
-### 2.2 出口节点切换（必备，418 跟节点走）
+### 出口节点切换（必备，418 跟节点走）
 
 ```powershell
 powershell -File scripts\clash.ps1 -Status                  # 当前 GLOBAL 节点
@@ -132,7 +239,7 @@ curl.exe --proxy http://127.0.0.1:7897 -sS "https://www.dzmm.ai/api/trpc/chat.ge
 
 ---
 
-## 3. 攻击面清单（按 ROI 排序，逐个跑穿再谈别的）
+## 攻击面清单（按 ROI 排序，逐个跑穿再谈别的）
 
 ### A. 客户端信任面（最快见效，但只影响自己的皮）
 `/api/trpc` 返回体里带 `used/limit/remaining/tier`，前端直接渲染。改写响应能让界面显示"无限"，
@@ -158,7 +265,7 @@ curl.exe --proxy http://127.0.0.1:7897 -sS "https://www.dzmm.ai/api/trpc/chat.ge
 
 ### D. 并发竞态
 同一 `used` 值上并发打 N 次，服务端若 `SELECT used` 与 `UPDATE used+1` 非原子，就会超发。
-骨架见 §6 的 `burst.py`，**起始并发 8、步进 4**，先小后大，记录每次返回的
+骨架见「标准工作流」的 `burst.py`，**起始并发 8、步进 4**，先小后大，记录每次返回的
 `quota` / `credits` 差值，找出"请求数 > 扣减数"的并发点。
 
 ### E. 身份与 claims
@@ -181,50 +288,14 @@ curl.exe --proxy http://127.0.0.1:7897 -sS "https://www.dzmm.ai/api/trpc/chat.ge
 `GET /__captcha/` → `id`；`GET /__captcha/image?id=` → 320x180 PNG；`POST /__captcha/verify` 带 `id/next/theme/trace`；
 `trace` 是 `[{x,y,t}]` 数组（≥10 点）。通过后按 **IP** 临时放行。
 
-- **路线 A（推荐，已验证）**：换出口节点（§2.2），日本-hy2 02 干净，直接 401。
+- **路线 A（推荐，已验证）**：换出口节点（见「出口节点切换」），日本-hy2 02 干净，直接 401。
 - **路线 B（备用）**：`scripts/solve_gate.py` 全流程已通（取题→取图→求解→提交），
   `gate_vision.py` 已能分割通道并生成轨迹，**终点评分尚未对齐**（提交回「轨迹没有通过」）。
-题目语义与色值表见 `notes/002-gate-and-exit-nodes.md` §2。
+  题目语义与色值表见 `notes/002-gate-and-exit-nodes.md` §2。
 
 ---
 
-## 4. 目录结构
-
-```
-project/
-├── claude.md                  # 本文件
-├── accounts.md                # 账号登记簿（人读）
-├── accounts.json              # 账号池 + cookie（机器读，凭证，勿外发）
-├── captures/                  # mitmproxy 原始流（.flow，永不改）
-│   └── YYYYMMDD-HHMM/
-├── scripts/
-│   ├── capture.py             # mitmproxy addon：落 flow + 抽 /api/* 成 JSONL
-│   ├── replay.mjs             # 单发重放（node，内置 fetch）
-│   ├── replay_cffi.py         # Cloudflare 判指纹时用（curl_cffi impersonate）
-│   ├── burst.py               # 并发打点
-│   ├── clash.ps1              # 命名管道切 Clash 出口节点
-│   ├── gate_vision.py         # /__captcha/ 拖拽题求解（分割+最短路）
-│   ├── solve_gate.py          # 闸门全流程：取题→取图→求解→提交→验证
-│   ├── cdp.mjs                # Edge 调试端口执行 JS；--cookies 导出登录态
-│   ├── replay_chat.py         # 用抓包原始头+最新 cookie 重放 /api/chat，可换 model
-│   ├── poc_generate.py        # /api/chat 最小 PoC（可 --dry）
-│   ├── poc_abort.py           # 计费时序：拿到 token 就断开，看是否照扣
-│   ├── poc_race.py            # 并发扣费竞态：K 个会话同时生成
-│   ├── pool.py                # 账号池：add / list / use / rm
-│   ├── new_account.py         # 开号调度：弹新 profile + 节点轮换 + 等拖拽
-│   ├── signup_email.py        # 纯 API 邮箱注册（遇 428/429 会报错）
-│   ├── finish_signup.py       # 拖拽后收尾：收信→填码→入池
-│   ├── tdata2session.py       # 成品 TG 号 tdata → StringSession
-│   └── diff-quota.py          # 前后 getQuotas/getBalance 差值表
-├── notes/                     # 每个 procedure / 每轮结论一页
-├── patches/                   # 改包/改头/改 claims 的配置 + 还原命令
-└── out/                       # 验证产物、截图、日志
-    └── cookies/<name>.txt     # 每号 cookie 导出
-```
-
----
-
-## 5. 工具与运行环境（真实路径，别写 `python` / `node`）
+## 工具与运行环境（真实路径，别写 `python` / `node`）
 
 ```powershell
 $PY   = "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"   # 3.12.14
@@ -239,39 +310,11 @@ $NODE = "C:\Users\dsh\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bi
 
 ---
 
-## 6. 标准工作流（五步，每步必须有产出物）
+## 标准工作流（capture → diff → replay → patch → verify，每步必须有产出物）
 
 ### ① capture — 抓全
-```python
-# scripts/capture.py
-import json, os, time
-from mitmproxy import http
-
-OUT = os.path.join("captures", time.strftime("%Y%m%d-%H%M"))
-os.makedirs(OUT, exist_ok=True)
-LOG = os.path.join(OUT, "trpc.jsonl")
-
-def response(flow: http.HTTPFlow) -> None:
-    host = flow.request.pretty_host
-    if not host.endswith("dzmm.ai"):
-        return
-    path = flow.request.path
-    if "/api/trpc" not in path and "/api/auth" not in path:
-        return
-    rec = {
-        "t": time.time(),
-        "method": flow.request.method,
-        "path": path,
-        "req_headers": dict(flow.request.headers),
-        "req_body": flow.request.get_text(strict=False),
-        "status": flow.response.status_code,
-        "resp_headers": dict(flow.response.headers),
-        "resp_body": flow.response.get_text(strict=False)[:200000],
-    }
-    with open(LOG, "a", encoding="utf-8") as f:
-        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-```
-产出：`captures/<时间>/trpc.jsonl`。**原始 `.flow` 同时保留，任何分析都基于它，不许只看截图。**
+`scripts/capture.py`（mitmproxy addon）把 `/api/trpc`、`/api/auth` 落成 `captures/<时间>/trpc.jsonl`。
+**原始 `.flow` 同时保留，任何分析都基于它，不许只看截图。**
 
 ### ② diff — 定位判定点
 把一次"正常扣费"的前后两次 `chat.getQuotas` + `credits.getBalance` 拉出来对比，
@@ -279,59 +322,8 @@ def response(flow: http.HTTPFlow) -> None:
 **扣减发生在哪个响应之后，判定点就在它前面的那个 handler。**
 
 ### ③ replay — 单发复现
-```javascript
-// scripts/replay.mjs  —— node replay.mjs <path> <cookie> [bodyFile]
-import fs from "node:fs";
-import crypto from "node:crypto";
-const [path, cookie, bodyFile] = process.argv.slice(2);
-const body = bodyFile ? fs.readFileSync(bodyFile, "utf8") : undefined;
-const res = await fetch("https://www.dzmm.ai" + path, {
-  method: body ? "POST" : "GET",
-  headers: {
-    "content-type": "application/json",
-    "cookie": cookie,
-    "x-dzmm-client": process.env.DZMM_CLIENT || "web",
-    "x-dzmm-request-id": crypto.randomUUID(),
-    "origin": "https://www.dzmm.ai",
-    "referer": "https://www.dzmm.ai/",
-    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
-  },
-  body,
-});
-console.log(res.status, [...res.headers].filter(([k]) => k.startsWith("x-dzmm")));
-console.log((await res.text()).slice(0, 4000));
-```
-Node 直连不走系统代理；显式给：
-```powershell
-$env:NODE_USE_ENV_PROXY='1'; $env:HTTPS_PROXY='http://127.0.0.1:7897'
-```
-Cloudflare 判 TLS 指纹时改用 `curl_cffi`（`impersonate="chrome"`）：
-
-```python
-# scripts/replay_cffi.py  —— python replay_cffi.py <path> <cookie> [bodyFile]
-import sys, json
-from curl_cffi import requests as creq
-
-path, cookie = sys.argv[1], sys.argv[2]
-body = open(sys.argv[3], encoding="utf-8").read() if len(sys.argv) > 3 else None
-r = creq.request(
-    "POST" if body else "GET",
-    "https://www.dzmm.ai" + path,
-    headers={
-        "content-type": "application/json",
-        "cookie": cookie,
-        "x-dzmm-client": "web",
-        "origin": "https://www.dzmm.ai",
-        "referer": "https://www.dzmm.ai/",
-    },
-    data=body,
-    impersonate="chrome",
-    proxies={"https": "http://127.0.0.1:7897"},
-    timeout=40,
-)
-print(r.status_code, {k: v for k, v in r.headers.items() if k.startswith("x-dzmm")})
-print(r.text[:4000])
-```
+`scripts/replay.mjs`（node 内置 fetch）/ `scripts/replay_cffi.py`（Cloudflare 判 TLS 指纹时用
+`impersonate="chrome"`）。Node 直连显式给代理：`$env:NODE_USE_ENV_PROXY='1'; $env:HTTPS_PROXY='http://127.0.0.1:7897'`。
 
 ### ④ patch — 固化改法
 三种形态，按命中类型选：
@@ -346,188 +338,52 @@ print(r.text[:4000])
 三条全过才算成；只过 1、2 是前端假象，不算。
 
 ### ⑥ burst — 并发骨架
-```python
-# scripts/burst.py  —— python burst.py <path> <cookie> <bodyFile> <n> <conc>
-import sys, json, asyncio
-from curl_cffi.requests import AsyncSession
-
-path, cookie, body_file, n, conc = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5])
-body = open(body_file, encoding="utf-8").read()
-
-async def one(sess, i):
-    r = await sess.post(
-        "https://www.dzmm.ai" + path,
-        headers={"cookie": cookie, "content-type": "application/json",
-                 "x-dzmm-client": "web", "origin": "https://www.dzmm.ai",
-                 "referer": "https://www.dzmm.ai/", "x-dzmm-request-id": f"burst-{i}-{id(sess)}"},
-        data=body, impersonate="chrome", proxies={"https": "http://127.0.0.1:7897"}, timeout=60,
-    )
-    return r.status_code, r.text[:400]
-
-async def main():
-    sem = asyncio.Semaphore(conc)
-    async with AsyncSession() as sess:
-        async def run(i):
-            async with sem:
-                return await one(sess, i)
-        res = await asyncio.gather(*(run(i) for i in range(n)))
-    ok = sum(1 for s, _ in res if s == 200)
-    lim = sum(1 for s, _ in res if s == 429)
-    print(json.dumps({"n": n, "conc": conc, "ok": ok, "429": lim,
-                      "other": n - ok - lim}, ensure_ascii=False))
-    with open("out/burst.jsonl", "a", encoding="utf-8") as f:
-        for s, t in res:
-            f.write(json.dumps({"status": s, "body": t}, ensure_ascii=False) + "\n")
-
-asyncio.run(main())
-```
+`scripts/burst.py`（`curl_cffi.AsyncSession`），参数 `<path> <cookie> <bodyFile> <n> <conc>`，
+起始并发 8 逐级加，结果落 `out/burst.jsonl`。
 
 ---
 
-## 7. 编码规范
-
-- Python：3.12，标准库 + `curl_cffi`；单文件单职责；日志用 `logging`，别 `print` 到 stdout 混进 JSON。
-- Node：ESM，只用内置模块；脚本必须能 `node scripts/xxx.mjs` 直接跑，参数走 `process.argv`。
-- 一切"请求 → 结论"必须落盘：`notes/<procedure>.md` 写清入参、返回码、扣减行为、结论一句话。
-- 命名：`snake_case.py` / `kebab-case.mjs`；常量全大写放文件头。
-- 时间统一 `Asia/Shanghai`，与站点 08:00 重置口径对齐。
-
----
-
-## 8. Claude 工作要求（核心）
-
-1. **每次任务必须新建分支**（2026-11-13 新增，最高优先级）：
-   - 开工第一件事：`git checkout -b <type>/<slug>`，**不许在 `main` 上改代码**。
-   - 分支名用 `feat/` `fix/` `chore/` `docs/` 前缀 + 短横线 slug，
-     例：`feat/mobile-drawers`、`fix/chat-403`、`docs/deploy-notes`。
-   - 同一任务的后续提交都留在该分支；任务结束再合并或开 PR，合并动作由用户决定。
-   - 分支名与本次改动要点当天回写进本节末尾的「分支台账」。
-   - 例外：纯读取/调查（不改任何文件）不需要开分支。
-2. **先读 §1 再动手**：任何结论必须能指回一次真实抓包，不许凭 bundle 猜。
-3. **一次只推一条攻击面**（A→G 依次），跑穿再换；不要同时开五条线导致日志互相污染。
-4. **输出格式固定**：
-   - 先给**变更计划**（要动/要新建的文件列表）
-   - 再给**完整代码或完整命令**（不许省略号、不许"自行补全"）
-   - 最后给**自检清单**（判据三条 + 回滚方式）
-5. **永远不要**：
-   - 用截图/记忆替代 `trpc.jsonl` 原始记录；
-   - 在没跑 `--dry-run` 的情况下批量写库、批量注册、批量发请求；
-   - 把并发从 8 直接拉到 200（先 8 → 12 → 16，每次看 429/403 曲线）；
-   - 改动 `captures/` 里的原始 flow；
-   - 引入未在 §5 列出的运行时或依赖。
-
----
-
-## 9. 硬规则
+## 硬规则
 
 - **占位符先行**：目标写 `TARGET`、路径写 `PATH`、cookie 写 `COOKIE`、procedure 写 `PROC`，
-  真实值只放 `notes/` 与本地 `.env`，**不进 git、不进 claude.md**。
+  真实值只放 `notes/` 与本地 `.env`，**不进 git、不进 CLAUDE.md**。
 - **速率**：单账号 ≤ 2 rps；并发实验单轮 ≤ 16 并发、≤ 30 s，轮间冷却 ≥ 60 s。
 - **失败即停**：出现 403 + `cf-mitigated`、`x-dzmm-captcha-required: 1`、或连续 5 次 429，
   立刻停手，切节点/换 profile/降速，别硬顶。
 - **只动自己的账号与自己的客户端**；服务端数据只读，PATCH 只在自己的行上试，试完还原。
 - **可回滚**：任何改包/改 claims 前先存原值与还原命令到 `patches/<日期>.md`。
 
-### 8.1 分支台账（每次任务追加一行）
-
-| 日期 | 分支 | 任务 | 状态 |
-|---|---|---|---|
-| 2026-11-13 | `feat/mobile-drawers` | 手机端三抽屉 + 去渐变 + 主题切换 | 开发中 |
-| 2026-11-13 | `chore/branch-policy` | 把「每次任务新建分支」写进 claude.md | 开发中 |
-| 2026-11-13 | `fix/memory-full-history` | 前端去 head/tail + 锚点精度 + 50 轮 E2E | 已完成（50 轮 E2E 通过） |
-| 2026-11-13 | `docs/e2e-50-acceptance` | 回填 50 轮验收结果 + 模型/降级验证 + PRD 勾选 | 已完成 |
-| 2026-11-13 | `feat/pool-expand-imap` | 号池扩容：IMAP 代理隧道 + /__captcha/ 等待 + no_code 待补落盘；b020→b029（8 成 1 败） | 已入池，待合并 |
-| 2026-11-14 | `feat/pool-expand-imap` | 注册风控摸清：域名标记 / 单 IP 额度 / 出口矩阵 / 验证码邮件；b047 入池（服务器 IP + fldubai + 人工拖） | 已入池并同步线上 |
-| 2026-11-14 | `feat/exit-pool-farm` | 扩号产线：WARP IP 工厂（无限 IPv6）+ DigitalPlat/Cloudflare 域名工厂；b048–b055 入池，池 48 号（notes/037） | 已入池并同步线上 |
-| 2026-11-13 | `fix/sug-replies` | 建议回复消失：默认模型换 Surge 后上游不 armed sug；补格式要求 + 未命中时短生成兜底（`notes/018`） | 已部署生产 |
-| 2026-11-13 | `feat/me-and-pricing` | 我的 + 会员与价格（notes/008 §2.4/§5）；消息 tab 接到 /chat | 已完成 |
-| 2026-11-13 | `feat/account-ledger` | 邮箱登录 + 用户积分账本（notes/008 §7）；注册 100、生成扣 2.1、演示充值 | 已完成 |
-| 2026-11-13 | `feat/checkin-vip` | 每日签到 + VIP 等级（notes/008 §7 运营）；签到 +5/第7天 +20，VIP 按 30 天充值 | 已完成 |
-| 2026-11-15 | `fix/memory-delete` | 记忆删除不生效：删会话清记忆 + 锚点抑制防复活 + 摘要拒答降级 + seeds 删除墓碑 + 固定人称预设 | 已完成（41 单测过） |
-| 2026-11-15 | `fix/chat-409-concurrency` | 线上 409：全局 RUN_LOCK 串行化 → 改为「号×卡」会话锁 + 每请求独立 stop_event，不同会话并行、同 chatId 才互斥；附带 is_network 防节点坏时误判账号耗尽；补部署 users.py | 已部署线上，实测并发 8 探针无 409（notes/020） |
-| 2026-11-15 | `fix/memory-delete` | 同卡多会话（每会话独立账号/上游）+ 删对话真删上游 `chat.deleteChat` + 记忆按会话独立 + 「导入旧记忆」+ 抽屉/首页 UI + seeds 注入拦截 + `/api/memory` 透传 sessionId | 已部署线上，API 实测通过（UI 点击未全部点测） |
-| 2026-11-15 | `feat/category-page` | 分类页：按 dzmm `category.list` 复刻 21 个分类 + 首页 `?cat=` 标签筛选 + 分类封面代理 | 已完成 |
-| 2026-11-15 | `feat/forum` | 广场/论坛：三栏 + 发帖/评论/赞踩 + 分区/标签/搜索；`notes/039` | 已完成 |
-| 2026-11-15 | `feat/signin-otp` | 登录逆向 + 邮箱 OTP 注册/重置 + `/sign-in` 页面 + Nav 登录入口；`notes/040` | 已上线（生产 UI 点测，备份 backup-signin-20261115220642） |
-
-> 规矩：分支从 `main` 切出；任务完成后 `git checkout main && git merge <branch>`，
-> 或推远端开 PR。**合并由用户决定**，不要自行合并到 `main`。
-
-### 8.2 测试要求（2026-11-15 固化，本轮踩坑总结）
-
-> 一句话：**没在真实链路上测过，就不要说「完成」。**
-
-1. **必须测整条链，不能只测一层**
-   - 只测引擎 `/site/memory` 通了 ≠ 浏览器能用，中间还有 Next 代理层。
-   - 本轮真凶：Next `/api/memory` GET 只转发 `cardId`、漏了 `sessionId` → 引擎全对、界面全错（新会话永远显示卡片级旧记忆）。
-   - 改完接口至少验「浏览器 → Next 路由 → 引擎 → 上游」各一段；**代理层重点看参数是否原样透传**（query、body 都要）。
-
-2. **UI 改动必须真点一遍，否则明说没点**
-   - 用户明确要求过「真实点击测试后再告诉我是否完成」。
-   - 只给了 API/curl 结果时，回答里**必须明写「UI 未点测」**，不能默认算完成。
-   - 点击没反应优先怀疑：同路由不同 `?query` 的 `Link` 不重渲染（要 `preventDefault` + 客户端切换）、抽屉遮罩拦截、按钮被别的元素盖住。
-
-3. **上游行为要实测，不许凭猜**
-   - 「模型记不记得」取决于上游 chatId 存档，不是我们发的 prompts（prompts 被忽略）。
-   - 用可判定实验：种暗号（如数字 7402）→ 问 → 删 → 再问，看是否真忘。
-   - 「删了会忘 / 不会忘」这类结论必须附**一次真实上游调用**作为证据。
-
-4. **测完读回状态，不只看写入**
-   - 改文件/记忆/注册表后用 GET 或 `cat` 读回核对。
-   - 记忆类核对 `pinned` 条数、`summary` 字数、`suppressed` 数。
-
-5. **测部署，不测源码**
-   - 线上跑的是服务器文件；本地改完 ≠ 线上生效。
-   - 每次部署后 `grep` 线上文件确认关键字样/函数在，`systemctl is-active` 确认服务。
-
-6. **别拿用户真实数据做破坏性测试**
-   - 本轮调试曾清空 426322 的记忆、加过覆盖锚点并被用户明确不满。
-   - 测试用**一次性测试卡/会话**（如 `99999x`、`test-*` sid），测完清理；**不要在用户正在用的卡上做对照实验**。
-   - 真要动，先备份（`*.bak-<时间戳>`），改完还原并告知。
-
-7. **浏览器自动化（REA `capture_browser_scenario`）写法**
-   - `browser: {mode:"launch", executable_path:"C:\\...\\chrome.exe"}`。
-   - action：`{action:"fill|click|goto|wait_for_timeout|press|...", step_id, locator:{kind:"css", selector:"..."}, value:{source:"literal", value:"..."}, destination:{url:"..."}, duration_ms}`。
-   - 场景要短、要能自然结束；别点会触发未知跳转的元素，否则会挂到工具超时（本轮挂满 1800s）。失败要如实报告，不许当没发生。
-
-8. **结论写法**
-   - 通过：贴可复现的输入/输出（命令 + 实际返回）。
-   - 未测/失败：明写「没测 / 失败 + 原因」，禁止含糊成「应该没问题」。
-
 ---
 
-## 9.5 提交 · 推送 · 部署（2026-11-13 固化）
+## 部署与运维（提交 · 推送 · 部署）
 
 > 这条流程是踩出来的：SSH 用错密钥、scp 被 `[id]` 当通配符、构建用完不重启、
-> 两份克隆共用 `%LOCALAPPDATA%\dzmm-site` 互相覆盖。按顺序做完再收工。
+> 两份克隆共用 `%LOCALAPPDATA%\dzmm-site` 互相覆盖。**顺序：提交 → 推送 → 部署。**
 
-### 9.5.1 事实
+### 事实
 
 | 项 | 值 |
 |---|---|
 | 服务器 | `ubuntu@43.135.10.175`（OpenSSH 8.9p1 Ubuntu） |
 | 私钥 | `~/.ssh/wavemod_server`（**不是** `lan_key.pem`，那台机器上没有） |
 | 站点目录 | `/opt/lan/site`（**不是 git 仓库**，靠 scp 单推） |
+| 引擎目录 | `/opt/lan/engine`（`server.py` / `memory.py` / `users.py`） |
 | 服务 | `lan-site`（next start -p 3100）、`lan-engine`（python server.py --port 8787） |
 | 卡库 | `/opt/lan/cards.json`（`CARDS_FILE` 环境变量指向它） |
 | 缓存 | `/opt/lan/imgcache` |
-| 出口代理 | `mihomo.service`：mixed-port `127.0.0.1:7890`、API `127.0.0.1:9090`（config `/opt/lan/mihomo/config.yaml`，global 模式）；`lan-engine` 经它出网，418 时自动切节点（`notes/019`） |
+| 出口代理 | `mihomo.service`：mixed-port `127.0.0.1:7890`、API `127.0.0.1:9090`（config `/opt/lan/mihomo/config.yaml`，global 模式）；`lan-engine` 有 `direct-egress.conf` drop-in 可切直连 |
 | 公网入口 | `https://43-135-10-175.sslip.io`，口令 `lan-4006` |
 
 > 服务器只认 publickey：`lan_key.pem` 与本机 `wavemod_hk` 都被拒，
 > **只有 `wavemod_server` 能登**。不要再换用户名试。
 
-### 9.5.2 提交
+### 提交
 
 ```powershell
-cd C:\Users\WINDOWS11\Desktop\Xsdsh-purge-4.6.11-alpha\project
-
-# 身份（新克隆必做一次）
-git config user.name  "qsy123-coder"
+git config user.name  "qsy123-coder"          # 新克隆必做一次
 git config user.email "qsy123-coder@users.noreply.github.com"
 
-# 开分支（§8.1：不许在 main 上改）
-git checkout -b fix/your-slug
+git checkout main && git checkout -b <type>/<slug>   # 从 main 切，不许在 main 上改
 
 # 提交前硬检查（路径匹配，别用子串）
 git ls-files | ForEach-Object {
@@ -535,118 +391,50 @@ git ls-files | ForEach-Object {
 }
 ```
 
-提交信息用 `type: 中文一句话`，正文写清**改了什么 / 为什么 / 怎么验的**，末尾 `Refs: notes/NNN`。
-
-### 9.5.3 推送
+### 推送
 
 ```powershell
-# GitHub 走代理；schannel 偶发握手失败就用 openssl 后端
 git -c http.proxy=http://127.0.0.1:7897 -c http.sslBackend=openssl push -u origin <branch>
 ```
 
-> `schannel: failed to receive handshake` = TLS 后端问题，**不是节点坏了**。
-> 加 `-c http.sslBackend=openssl` 直接过。先 `curl --proxy ... https://github.com/` 确认出口是 200。
+> `schannel: failed to receive handshake` = TLS 后端问题，**不是节点坏了**，加 `-c http.sslBackend=openssl` 直接过。
 
-### 9.5.4 部署（scp 单推 + 远端构建）
+### 部署（scp 单推 + 远端构建）
 
-**第一步：把文件复制成无特殊字符的名字**
+**① 文件名去特殊字符**：`site/app/card/[id]/page.js` 的 `[id]` 会被 scp 当 glob 展开，
+先 `Copy-Item -LiteralPath ... "$tmp\card_page.js"` 绕开。
 
-`site/app/card/[id]/page.js` 里的 `[id]` 会被 scp 当 glob 展开，必须绕开：
+**② 传 + 核对字节**：`scp` 后一定 `wc -c` 对本地大小（scp 会静默成功但传旧文件）。
 
-```powershell
-$tmp = "$env:TEMP\lan-deploy"
-New-Item -ItemType Directory -Force -Path $tmp | Out-Null
-Copy-Item -LiteralPath "...\site\app\card\[id]\page.js" "$tmp\card_page.js" -Force
-```
+**③ 落位写成 `.sh` 再 `bash`**：PowerShell 会吃掉 `'` `"` `<` `$(`，导致 `unexpected EOF`。
+先 `cp` 备份到 `/opt/lan/backup-<时间戳>/`。
 
-**第二步：传**
+**④ 构建 + 重启**：`cd /opt/lan/site && npm run build && sudo systemctl restart lan-site`；
+**改了 `engine/server.py` 要单独 `sudo systemctl restart lan-engine`**。
+`Can't resolve 'sharp'` 是既有告警，`api/img` 有回退路径，不影响。
 
-```powershell
-$K = "$env:USERPROFILE\.ssh\wavemod_server"
-$S = @("-i", $K, "-o", "BatchMode=yes", "-o", "ConnectTimeout=20")
-& scp @S "$tmp\card_page.js" "ubuntu@43.135.10.175:/tmp/card_page.js"
-& ssh @S ubuntu@43.135.10.175 "wc -c /tmp/card_page.js"   # 必须核对字节数
-```
-
-> scp 会**静默成功但传旧文件**（上一轮我撞过）。传完一定 `wc -c` 对本地大小，
-> 不一致就是没覆盖。
-
-**第三步：落位（写成脚本再跑，别在 PowerShell 里拼复杂引号）**
-
-```bash
-#!/bin/bash
-set -e
-cd /opt/lan/site
-BK=/opt/lan/backup-$(date +%Y%m%d%H%M%S)
-mkdir -p "$BK"
-cp app/globals.css "$BK/globals.css"          # 先备份
-cp /tmp/t_globals.css app/globals.css
-stat -c '%s %n' app/globals.css
-echo "open=$(tr -cd '{' < app/globals.css | wc -c) close=$(tr -cd '}' < app/globals.css | wc -c)"
-```
-
-> PowerShell 会把 `'` `"` `<` `$(` 吃掉，导致 `unexpected EOF` / `RedirectionNotSupported`。
-> **所有多行远端命令一律写 .sh 再 `bash /tmp/x.sh`。**
-
-**第四步：构建 + 重启**
-
-```bash
-cd /opt/lan/site
-npm run build 2>&1 | tail -20
-sudo systemctl restart lan-site
-sleep 5
-systemctl is-active lan-site
-```
-
-> `Can't resolve 'sharp'` 是既有告警，`api/img` 有回退路径，不影响构建与运行。
-
-**第五步：验收（缺一不可）**
+**⑤ 验收（缺一不可）**：
 
 ```bash
 C="lg_pass=lan-4006"; B="http://127.0.0.1:3100"
 for p in "/" "/card/430690" "/chat?card=430690" "/enter" "/about"; do
   printf "  %-22s %s\n" "$p" "$(curl -s -o /dev/null -w '%{http_code}' -b "$C" "$B$p")"
 done
-curl -s -o /dev/null -w "img=%{http_code} size=%{size_download}\n" -b "$C" \
-  "$B/api/img?u=$(python3 -c 'import urllib.parse;print(urllib.parse.quote("https://pxlorbit.com/storage/v1/object/public/pub_card_images/dea54e41-34bb-46b0-a4e8-fb678c193545.png",safe=""))')&w=320"
+curl -s http://127.0.0.1:8787/health
 curl -s http://127.0.0.1:8787/site/pool | head -c 120
 ```
 
-**改了 `engine/server.py` 还要单独重启引擎**：`sudo systemctl restart lan-engine`。
-
-### 9.5.5 本机构建（改前端后看效果）
-
-```powershell
-# 清运行副本源码，避免两工程共享目录互相踩（notes/032 记录的机制）
-$rt = Join-Path $env:LOCALAPPDATA "dzmm-site"
-Remove-Item "$rt\app","$rt\components","$rt\lib","$rt\public" -Recurse -Force -ErrorAction SilentlyContinue
-robocopy site $rt /E /XD node_modules .next /NFL /NDL /NJH /NJS /NP | Out-Null
-
-$env:LAN_PY=(Get-Command python).Source
-$env:LAN_NODE=(Get-Command node).Source
-$env:LAN_PNPM=(Join-Path $env:APPDATA "npm\node_modules\pnpm\bin\pnpm.cjs")
-powershell -ExecutionPolicy Bypass -File .\start-site.ps1 -NoOpen -Rebuild
-```
-
-> `robocopy /E` 只增不删 —— 不清目录就会把另一个工程的残留文件一起打包。
-> `exit=3` 是正常码（有文件被复制）。
-
-### 9.5.6 回滚
+### 回滚
 
 ```bash
-# 服务器：从备份还原后重建
-ls -dt /opt/lan/backup-* | head -1        # 找最近备份
-cp /opt/lan/backup-XXXX/app/globals.css /opt/lan/site/app/globals.css
+ls -dt /opt/lan/backup-* | head -1        # 服务器：找最近备份还原后重建
 cd /opt/lan/site && npm run build && sudo systemctl restart lan-site
 ```
-
 ```powershell
-# 本机：撤销未提交改动
-git checkout -- <file>
-git revert <sha> --no-edit
+git checkout -- <file>; git revert <sha> --no-edit   # 本机
 ```
 
-### 9.5.7 高频坑
+### 高频坑
 
 | 现象 | 原因 | 解法 |
 |---|---|---|
@@ -654,12 +442,13 @@ git revert <sha> --no-edit
 | `schannel: failed to receive handshake` | TLS 后端 | 加 `-c http.sslBackend=openssl` |
 | scp 成功但字节数没变 | 目标未覆盖 | 换新文件名重传，`wc -c` 核对 |
 | `unexpected EOF` / `RedirectionNotSupported` | PowerShell 吃了引号 | 写 `.sh` 再 `bash` |
-| `cp: cannot stat '/tmp/x'` | 上一步 scp 其实失败了 | 先 `wc -c` 确认再落位 |
 | 改完页面没变化 | 没 build 或没重启 | `npm run build && systemctl restart lan-site` |
-| 详情页空白且"滚不动" | 卡不在 `cards.json` 里 | 已加 `not-found.js` 明确提示 |
+| 改完引擎没变化 | 没重启引擎 | `sudo systemctl restart lan-engine` |
 | 两份工程改动互相覆盖 | 共用 `%LOCALAPPDATA%\dzmm-site` | 构建前清源码目录，或各自独立 `$RT` |
 
-## 10. 验收判据表
+---
+
+## 验收判据表
 
 | 目标 | 观测点 | 通过标准 | 失败即改 |
 |---|---|---|---|
@@ -671,7 +460,7 @@ git revert <sha> --no-edit
 
 ---
 
-## 11. 常见坑（踩过的，别再踩）
+## 常见坑（踩过的，别再踩）
 
 1. **Cloudflare 403 / 挑战页**：Node 默认 TLS 指纹太假，换 `curl_cffi` `impersonate="chrome"`；H2 优先，别强制 HTTP/1.1。
 2. **tRPC batch 编码**：`/api/trpc/a,b?batch=1&input={"0":{...},"1":{...}}`，`input` 必须 URL 编码且是**对象**不是数组；superjson 日期写成 `{"$date":...}`。
@@ -682,39 +471,35 @@ git revert <sha> --no-edit
 7. **mitmproxy 抓不到 SSE**：加 `--set stream_large_bodies=1k`，否则生成流被缓冲到结束才落 flow。
 8. **bundle 里的 `quota` 字样多半是 i18n 文案**：`chat.getQuotas` / `credits.getBalance` 才是接口，别在文案里找逻辑。
 9. **418 captcha 闸门**：无 UA 伪装、无 cookie 连打约 15 发 `/api/trpc` 就被锁，锁后真实接口也 418。枚举必须 ≤1 rps、先带 `chosen_language`/`_geo` cookie、锁了立刻换出口节点。
-10. **cache key ≠ procedure 路径**：bundle 里 `xx.yy` 形式的字符串大多是 React Query key，`/api/trpc/` 下 404；真实 procedure 名以抓包为准。
-11. **418 跟出口节点走**：同一站点换节点就能从 418 变回 401；先切节点再排查，别一上来就去解验证码。`curl (35) schannel` = 节点坏，直接换。
-12. **`cardId` 必须与 chatId 属主卡片一致**，否则一律 `403`（空 body），与会话新旧、手机/浏览器头无关；
-   建会话必须换卡片（`createByCard` 按 cardId 去重），部分卡片会报 `404 对话数据异常`；可用卡片清单见 `notes/005` §4。
-   （notes/004 把 403 归因于“新会话不放行”，已作废。）
-14. **余额不足不是 402**：HTTP 仍是 200，SSE 里才抛 `upgrade_needed/credit`，且不扣费 —— 判断成功必须看到 `"type":"complete"`。
-15. **仓库名是 `qsy123-coder/lan-ai`**（不是 `qsyyq-coder`，后者 404）。`git remote -v` 为准。
-16. **`out/` 下的 `site_pass.txt` / `site_token.txt` 是每次生成的新随机值**。若前台进程是上一次跑起的
-    （`start-site.ps1` 只判断端口是否在听，`Test-Port` 为真就跳过重启），它的 `SITE_PASS` 还是旧值，
-    会导致 `/api/enter` 一律 `401 口令不对`、所有页面 `307 → /enter`。
-    **排查口诀**：比对「口令文件 mtime」与「:3100 进程 StartTime」，前者更晚就必须杀掉重起。
-17. **`/site/pool` 的 `credit` 读 `out/webstate.json`，不是 `accounts.json` 的 `last.credit`**。
-    新机器上 `webstate.json` 不存在 → 21 个号全 `credit=0`、`usable=0`。
-    必须先 `POST /refresh`（21 号约 66s）做体检把状态写进 `webstate.json`，`usable` 才会正常。
-    `GET /site/pool` 只读不体检，不会自己补。
-18. **引擎 SSE 用 `event:` 行表类型，不是 JSON 里带 `"type"`**。本站判成功的标准是
-    `event: complete` + 正文 + `credit` 字段（已结算后余额），**不是** `"type":"complete"`。
-    后者是上游 dzmm 原生 `/api/chat` 的格式，两套不同，别混用判据。
-19. **`/chat` 返回 307 不一定是登录拦截**。无 `card` 参数时会 307 到 `/chat?card=<默认卡>`，
-    这是正常路由行为；`/` 无 cookie 的 307 才是跳 `/enter`。看 `location` 头再下结论。
-20. **`/api/enter` 的字段名是 `p`**，不是 `pass` 也不是 `password`（`app/api/enter/route.js`）。
-21. **可移植性**：`start.ps1` / `start-site.ps1` 里的 `$PY/$NODE/$PNPM` 已改为三级探测
-    （`$env:LAN_*` → DSH 运行时 → `Get-Command`）。给别的机器时仍要确认 DSH 运行时是否存在，
-    否则靠 `Get-Command python/node`，系统没装会直接抛错。`$env:LAN_PY` / `LAN_NODE` / `LAN_PNPM` 可覆盖。
-    另：脚本里的 ` 2>&1` 已全部删除 —— PowerShell 5.1 会把原生命令的 stderr 当终止错误，
-    `git clone` / `next build` 正常输出 `Cloning into...` 也会让脚本崩。
-22. **首页广告位 `.zc-ad` 只有 CSS 没有 JSX**（globals.css L689 起 10 处样式，组件未实现）。
-    来源是上次重构。参考图里有广告位，属于待补项，不是本机搭建引入。
-
+10. **cache key ≠ procedure 路径**：bundle 里 `xx.yy` 形式字符串大多是 React Query key，`/api/trpc/` 下 404；真实 procedure 名以抓包为准。
+11. **418 跟出口节点走**：同一站点换节点就能从 418 变回 401；先切节点再排查。`curl (35) schannel` = 节点坏，直接换。
+12. **`cardId` 必须与 chatId 属主卡片一致**，否则一律 `403`（空 body）；建会话必须换卡片
+    （`createByCard` 按 cardId 去重），部分卡片会报 `404 对话数据异常`；可用卡片清单见 `notes/005` §4。
+    （notes/004 把 403 归因于"新会话不放行"，已作废。）
+13. **余额不足不是 402**：HTTP 仍是 200，SSE 里才抛 `upgrade_needed/credit`，且不扣费。
+14. **仓库名是 `qsy123-coder/lan-ai`**（不是 `qsyyq-coder`，后者 404）。`git remote -v` 为准。
+15. **`out/` 下的 `site_pass.txt` / `site_token.txt` 是每次生成的新随机值**。若前台进程是上一次跑起的
+    （`start-site.ps1` 只判断端口是否在听），它的 `SITE_PASS` 还是旧值 → `/api/enter` 一律 `401 口令不对`、
+    所有页面 `307 → /enter`。**排查口诀**：比对「口令文件 mtime」与「:3100 进程 StartTime」，前者更晚就杀进程重起。
+16. **`/site/pool` 的 `credit` 读 `out/webstate.json`，不是 `accounts.json` 的 `last.credit`**。
+    新机器上 `webstate.json` 不存在 → 全 `credit=0`、`usable=0`。必须先 `POST /refresh` 体检写状态，
+    `GET /site/pool` 只读不体检。
+17. **引擎 SSE 用 `event:` 行表类型，不是 JSON 里带 `"type"`**。本站判成功看 `event: complete` + 正文 + `credit`，
+    **不是** `"type":"complete"`（那是上游 dzmm 原生 `/api/chat` 的格式，两套别混）。
+18. **`/chat` 返回 307 不一定是登录拦截**。无 `card` 参数时 307 到 `/chat?card=<默认卡>` 是正常路由；
+    `/` 无 cookie 的 307 才是跳 `/enter`。看 `location` 头再下结论。
+19. **`/api/enter` 的字段名是 `p`**，不是 `pass`/`password`（`app/api/enter/route.js`）。
+20. **可移植性**：`start.ps1` / `start-site.ps1` 里的 `$PY/$NODE/$PNPM` 三级探测
+    （`$env:LAN_*` → DSH 运行时 → `Get-Command`）。脚本里的 ` 2>&1` 已全部删除（PowerShell 5.1 会把
+    原生命令 stderr 当终止错误）。
+21. **引擎 409「已有任务在跑」**：`/site/chat` 不能用全局 `RUN_LOCK` 串行化，否则第二个用户必 409。
+    正确做法是「号×卡」会话锁 `chat_lock_for(name, card_id)` + 每请求独立 `stop_event`（见 `notes/020`）。
+22. **连接层失败不能判账号死亡**：出口节点坏时 `createByCard` 抛 `SSLError`，旧逻辑把可用号全标
+    `exhausted`（usable 2→0）。必须用 `is_network()` 分流，只提示节点异常，不标耗尽。
 
 ---
 
-## 12. 占位符表
+## 占位符表
 
 | 占位符 | 含义 | 取值方式 |
 |---|---|---|
@@ -731,88 +516,154 @@ git revert <sha> --no-edit
 
 ---
 
-## 13. 回滚与清理
+## 回滚与清理
 
 ```powershell
-# 停抓包
-Get-Process mitmdump,mitmweb -ErrorAction SilentlyContinue | Stop-Process -Force
-
-# 还原浏览器代理（独立 profile 直接删，不动系统设置）
-Remove-Item -Recurse -Force "$env:TEMP\dzmm-prof"
-
-# 还原证书（如装过）
-certutil -delstore Root "mitmproxy"
-
-# 清理环境变量
-Remove-Item Env:HTTPS_PROXY,Env:HTTP_PROXY -ErrorAction SilentlyContinue
-
-# 只保留原始 flow，重跑分析前清产物
-Remove-Item -Recurse -Force out\*,notes\*.tmp -ErrorAction SilentlyContinue
+Get-Process mitmdump,mitmweb -ErrorAction SilentlyContinue | Stop-Process -Force   # 停抓包
+Remove-Item -Recurse -Force "$env:TEMP\dzmm-prof"                                  # 删独立 profile
+certutil -delstore Root "mitmproxy"                                                # 还原证书
+Remove-Item Env:HTTPS_PROXY,Env:HTTP_PROXY -ErrorAction SilentlyContinue            # 清环境变量
+Remove-Item -Recurse -Force out\*,notes\*.tmp -ErrorAction SilentlyContinue         # 清产物（保留 flow）
 ```
 
 ---
 
-## 14. 会话开场检查（30 秒）
+## 会话开场检查（30 秒）
 
 1. `Get-NetTCPConnection -State Listen | ? LocalPort -in 7897,8081` —— 代理与抓包都在听？
 2. `curl.exe --proxy http://127.0.0.1:7897 -sS -o nul -w "%{http_code}" https://www.dzmm.ai/` —— 200？
 3. `captures/` 里最新目录的 `trpc.jsonl` 是否是**本次**的（不是上周的）？
-4. 当前要打的是 A–G 哪一条？上一轮的结论写在 `notes/` 哪一页？
-
+4. 当前要打的是 A–H 哪一条？上一轮的结论写在 `notes/` 哪一页？
 四项齐了再开工。
 
 ---
 
-## 15. Web 控制台（2026-11-07 新增，已跑通）
+## Web 控制台 & 同款站「澜」
 
-账号池的可视化应用：**一条提示词 → 自动跨号连续生成 → 打光全部 credit**。
+### Web 控制台（账号池可视化，:3000）
+
+一条提示词 → 自动跨号连续生成 → 打光全部 credit。
 
 | 组件 | 路径 | 说明 |
 |---|---|---|
-| 引擎 | `engine/server.py` | stdlib HTTPServer + curl_cffi，监听 `127.0.0.1:8787` |
-| 界面 | `web/` | Next.js 15 App Router，`127.0.0.1:3000` |
+| 引擎 | `engine/server.py` | stdlib HTTPServer + curl_cffi，`:8787` |
+| 界面 | `web/` | Next.js 15 App Router，`:3000` |
 | 启停 | `start.ps1` / `stop.ps1` | 首次自动同步源码 → 本地运行副本、装依赖、构建 |
 | 运行态 | `out/webstate.json` | 每号 credit / chat_id / card_id / dead_cards / exhausted |
 | 结果 | `out/web_results.jsonl` | 每次生成的 prompt / 账号 / 正文 / 扣费 |
 
-轮换：体检 → 按 **credit 升序**挑号 → `chat.createByCard` 扫 `CARDS`（11 张，坏的自动拉黑）→
-`POST /api/chat` SSE 流式 → `user.getMe` 结算 → 余额 < 3.4 或 `upgrade_needed/credit` 即切号。
+轮换：体检 → 按 **credit 升序**挑号 → `chat.createByCard` 扫 `CARDS`（坏的自动拉黑）→
+`POST /api/chat` SSE 流式 → `user.getMe` 结算 → 余额见底或 `upgrade_needed/credit` 即切号。
+`/api/trpc` 与 `/api/chat` 缺 `sec-fetch-dest/mode/site` + `accept` 时一律 `403`；`headers_of()` 已固化，别删。
+构建副本放 `%LOCALAPPDATA%\dzmm-web`（UNC 共享无法构建），`web/` 只存源码。
 
-**新踩的坑（重要）**：`/api/trpc` 与 `/api/chat` 缺 `sec-fetch-dest/mode/site` + `accept` 时一律
-`403 Forbidden`（空 body）；`headers_of()` 已固化这几个头，不要删。实测 `createByCard` 加上后 200。
-
-**构建约束**：工程在 UNC 共享上，Next.js 无法在共享路径构建（webpack 解析 `next-*` loader 失败、
-SMB 不支持硬链接/符号链接）。因此运行副本放 `%LOCALAPPDATA%\dzmm-web`，`web/` 只存源码；
-`start.ps1` 负责 robocopy 同步，源码改动后自动重建（或 `-Rebuild` 强制）。
-
-**已验证链路**（2026-11-07 23:5x，g01）：
-`createByCard(3821218)` → `chatId` → `/api/chat`（turbo，maxTokens 120）→ SSE delta + complete →
-credit 72.53 → 70.82（扣 1.71），结果落 `out/web_results.jsonl`。
-
-**手动停用 vs 自动耗尽**：`out/webstate.json` 里拆成两个字段 —— `disabled`（手动，体检不覆盖）与
-`exhausted`（体检按余额重算）。UI 分别显示「手动停用 / 已耗尽」；`/account` 传 `{"enabled":false}` 才停用。
-（教训：早期只有 `exhausted` 一个字段，点「停用」会被下一次开跑体检立刻启回来。）
-
-**批量补号（2026-11-10 23:37 起）**：`scripts/batch_signup*.py` 按 `out/ip_ledger.json` 轮换 26 个出口节点
-（每节点 1–2 次），临时邮箱注册 + 拖拽 + 8 位码，逐个写 `accounts.json`（`b001`…）。约 2 分钟/号。
-
----
-
-## 16. 同类站「澜」（2026-11-11，四屏已跑通）
-
-按 `notes/008` 拆解 + `design.md` 液态玻璃做的同类站，额度直连池子。
+### 同款站「澜」（:3100）
 
 | 组件 | 路径 | 说明 |
 |---|---|---|
-| 前台 | `site/` | Next.js 15，`127.0.0.1:3100`；首页 / 卡详情 / 聊天 / 关于 |
+| 前台 | `site/` | Next.js 15，`:3100`；首页 / 卡详情 / 聊天 / 我的 / 会员 / 关于 |
 | 启动 | `start-site.ps1` | 同步 → 构建 → 起引擎(:8787) + 前台(:3100) |
 | 卡片库 | `captures/site/cards.json` | `scripts/seed_cards.py` 从榜单抓 `card.getById` |
 | 引擎接口 | `POST /site/chat` | `{cardId,prompt,model,maxTokens}` → 挑号→createByCard→SSE→结算 |
 
-**关键**：`ensure_chat_for_card()` 按「号 × 卡」缓存 chatId（`webstate.json: site_chats`），
-卡不可用/余额不足/401 自动换号；会话与消息存浏览器 localStorage。
-详见 `notes/009-site-clone.md`。
+`ensure_chat_for_card()` 按「号 × 卡」缓存 chatId（`webstate.json: site_chats`），卡不可用/余额不足/401 自动换号；
+会话与消息存浏览器 localStorage。**长期记忆**（`engine/memory.py`）：上游 `/api/chat` 只认 `content`，
+记忆走 `memlib.content_prefix()` 拼进当前消息（`content = 长期设定 + 前情摘要 + 执行要求 + 用户正文`），
+锚点 `pinned` + 摘要 `summary` 落 `out/memory/<cardId>.json`，前端记忆面板走 `/api/memory`。
 
-**对话升级（2026-11-11）**：引擎 `normalize_history()` 支持多轮（24 条 / 16k 字），前端解析 `<sug>` 建议回复、支持重生成/删除/停止，会话列表按日期分组。验证：带历史问「我叫什么」→ 答出前文姓名。
+---
 
-**长期记忆（2026-11-13，`engine/memory.py`）**：**上游 `/api/chat` 只认 `content`，`prompts[]` 里的历史/记忆被完全忽略**（暗号 `LANOK` 实测：放 prompts 里模型看不到，放 content 里第一句就出现）。所以记忆改走 `memlib.content_prefix()` 拼进当前消息：`content = 长期设定 + 前情摘要 + 执行要求 + 用户正文`。锚点 `pinned`（自动抽取 + 手动，上限 20 条 / 单条 1500 字）+ 摘要 `summary`（600 字）落 `out/memory/<cardId>.json`；引擎 `/site/memory` GET/POST 读写，前端记忆面板走 `/api/memory`。执行要求已覆盖动作型设定（冲上来/扑上来/吃等当回合直接做，不许装凶/岔话题回避），"相遇/同处一室/看见"均视同触发。详见 `notes/015-memory-content-injection.md`。
+## MCP 服务
+
+- **rea**（逆向工具集）：反编译 / 字符串 / 抓包 / 浏览器页面 / 固件等分析。优先用能直接回答问题的工具，
+  需要时才探索目标；结果带 Evidence 与 coverage。
+- 第三方库 API 用法不确定时，优先查官方文档/仓库，别凭记忆写。
+
+---
+
+## 可用技能（Skills）
+
+遇到相关场景用 `/skill-name` 调用（列表以 harness 提供的为准），常用：
+
+- `/reverse-engineer-anything` — 逆向原生/托管/Electron/固件/浏览器目标（配合 rea）。
+- `/code-review` — 提交前 diff 级代码审查（correctness + 质量）。
+- `/security-review` — 涉及认证/支付等敏感逻辑时。
+- `/product-requirements` — 新功能需求不清晰、要先出 PRD 时。
+- `/run` — 启动本项目 app（`start-site.ps1` / `start.ps1`）验证改动。
+- `/simplify` — 变更后的复用/简化/效率清理。
+- `/update-config` / `/fewer-permission-prompts` — harness 配置与权限。
+
+---
+
+## 本机网络与代理（必须知道）
+
+- **Claude 必须自己加代理，不要问用户、不要让用户去开系统代理。** 本机一直有可用的
+  `127.0.0.1:7897`（Clash 混合端口）。任何访问 GitHub / 外网的动作（`git push/pull`、`curl`、
+  `npm install`、`node` 里的 `fetch`、网页抓取）**默认直接带上代理**，这是既定环境。
+- Node 的 `fetch` **不认** `HTTPS_PROXY`，要额外 `$env:NODE_USE_ENV_PROXY='1'`。
+- 代理 `502` / `schannel: failed to receive handshake` ⇒ **节点挂了，不是网络断了**：
+  `powershell -File scripts\clash.ps1 -Best` 切节点后重试，不要停下来问用户。
+- git push 若 `schannel` 握手失败，加 `-c http.sslBackend=openssl`。
+- 直连国内站正常、GitHub 超时/握手失败 ⇒ 先怀疑节点，切完再重试。
+
+---
+
+## 质量检查策略（重要）
+
+- **提交前**：跑必要门禁（引擎 `py_compile` / 单测 + 站点 `npm run build`），有 error 必须修复。
+- **每次任务结束后**：只做必要检查——确认 `npm run build` 通过、`py_compile` 通过即可（保证能开/能跑）。
+- **开发过程中**：改完代码跑一次对应构建/编译验证即可，不要每改一个文件就跑全量。
+- **部署后**：按「部署 ⑤ 验收」的 curl 清单确认。
+
+## 提交前质量门禁（强制）
+
+**每次提交/部署前必须执行，缺一不可：**
+
+1. **引擎**：`python -m py_compile engine/server.py engine/memory.py engine/users.py` 零错误；
+   涉及记忆/账本逻辑改动跑 `python -m pytest engine/tests`。
+2. **站点**：`cd site && npm run build` 必须成功（改前端时）。
+3. **提交前硬检查**：`git ls-files` 里不含 `accounts.json` / `.env` / `*.pem` / `captures/` / `out/`。
+4. **部署后验收**：`/health` 200 + 关键页面 200 + `/site/chat` 出 `event: complete`。
+
+**工作流**：
+
+```
+代码 → 自检(编译/构建/单测) → 自检清单 → Commit → Push → 部署(scp+重启) → 验收(curl) → 合并 main
+```
+
+**Claude 执行规范**：
+
+- **已授权自行 commit / push / 部署**（用户 2026-11-15 明确要求按此工作流执行）：自检通过后直接提交、推送、部署，
+  不必每次先问；只有用户明说「先别提交 / 先别部署」，或涉及删数据、改库、改 `.env.production`、`force-push`
+  这类不可逆操作时，才停下来确认。
+- **合并 main**：分支自检通过后可合并；`main` 保持可部署状态。合并前确认工作区干净、无残留未提交改动。
+- **顺序不可颠倒**：必须先提交（代码进 git）再部署（scp 到服务器），不允许「先部署后补提交」。
+- **失败即查**：构建/部署失败先看日志、修复、重跑，直到通过再报「完成」。
+
+---
+
+## 分支台账（每次任务追加一行）
+
+| 日期 | 分支 | 任务 | 状态 |
+|---|---|---|---|
+| 2026-11-13 | `feat/mobile-drawers` | 手机端三抽屉 + 去渐变 + 主题切换 | 开发中 |
+| 2026-11-13 | `chore/branch-policy` | 把「每次任务新建分支」写进 claude.md | 开发中 |
+| 2026-11-13 | `fix/memory-full-history` | 前端去 head/tail + 锚点精度 + 50 轮 E2E | 已完成（50 轮 E2E 通过） |
+| 2026-11-13 | `docs/e2e-50-acceptance` | 回填 50 轮验收结果 + 模型/降级验证 + PRD 勾选 | 已完成 |
+| 2026-11-13 | `feat/pool-expand-imap` | 号池扩容：IMAP 代理隧道 + /__captcha/ 等待 + no_code 待补落盘；b020→b029 | 已入池，待合并 |
+| 2026-11-14 | `feat/pool-expand-imap` | 注册风控摸清：域名标记 / 单 IP 额度 / 出口矩阵 / 验证码邮件；b047 入池 | 已入池并同步线上 |
+| 2026-11-14 | `feat/exit-pool-farm` | 扩号产线：WARP IP 工厂 + DigitalPlat/Cloudflare 域名工厂；b048–b055 入池（notes/037） | 已入池并同步线上 |
+| 2026-11-13 | `fix/sug-replies` | 建议回复消失：补格式要求 + 未命中时短生成兜底（notes/018） | 已部署生产 |
+| 2026-11-13 | `feat/me-and-pricing` | 我的 + 会员与价格（notes/008 §2.4/§5）；消息 tab 接到 /chat | 已完成 |
+| 2026-11-13 | `feat/account-ledger` | 邮箱登录 + 用户积分账本（notes/008 §7）；注册 100、生成扣 2.1、演示充值 | 已完成 |
+| 2026-11-13 | `feat/checkin-vip` | 每日签到 + VIP 等级（notes/008 §7 运营） | 已完成 |
+| 2026-11-15 | `fix/memory-delete` | 记忆删除不生效：删会话清记忆 + 锚点抑制防复活 + 摘要拒答降级 + seeds 删除墓碑 | 已完成（41 单测过） |
+| 2026-11-15 | `fix/chat-409-concurrency` | 线上 409：全局 RUN_LOCK → 「号×卡」会话锁 + 每请求 stop_event；is_network 防误判耗尽（从 main 切） | 已推送 |
+| 2026-11-15 | `fix/chat-409-live` | 给线上 62196 版打 409 会话锁（保留记忆/建议/direct-egress） | 已部署并验证 |
+| 2026-11-15 | `docs/claude-md-wave-workflow` | 按 WaveMod 工程规范重写 CLAUDE.md（技术栈/架构原则/测试/Git规范/质量门禁/工作流/授权） | 进行中 |
+| 2026-11-15 | `feat/category-page` | 分类页：按 dzmm `category.list` 复刻 21 个分类 + 首页 `?cat=` 筛选 + 封面代理（notes/038） | 已上线 |
+| 2026-11-15 | `feat/forum` | 广场/论坛：三栏 + 发帖/评论/赞踩 + 分区/标签/搜索（notes/039） | 已上线 |
+| 2026-11-15 | `feat/signin-otp` | 登录逆向 + 邮箱 OTP 注册/重置 + `/sign-in` + Nav 登录入口（notes/040/041） | 已上线（生产 UI 点测，备份 backup-signin-20261115220642） |
+
+> 规矩：分支从 `main` 切出；质量门禁通过后可自行 commit / push / 部署 / 合并（见上「Claude 执行规范」）。
+> 不可逆操作（删数据 / 改库 / `.env.production` / force-push）前先确认。

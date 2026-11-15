@@ -15,7 +15,8 @@ const CACHE =
     : "/opt/lan/imgcache");
 
 // 只允许代理这几个域名，避免被当成开放代理
-const ALLOWED_HOSTS = new Set(["pxlorbit.com", "assetora.net"]);
+// rls.cheggpt.com = Supabase Storage，分类封面（category-covers）在这里
+const ALLOWED_HOSTS = new Set(["pxlorbit.com", "assetora.net", "rls.cheggpt.com"]);
 
 // 本机 Node 直连该源站会在 ~320KB 处挂死（fetch / https / http2 都复现），
 // curl 与 Python 正常。所以回源优先用 curl；curl 不可用时才退回 fetch。
@@ -28,8 +29,10 @@ function keyOf(src, w) {
 
 // pxlorbit 是 Supabase Storage：把 object/public 换成 render/image/public，
 // 用服务端缩图（实测 320px webp ≈ 20–30KB），免装 sharp。
+const RENDER_HOSTS = new Set(["pxlorbit.com", "rls.cheggpt.com"]);
+
 function renderUrl(target, w) {
-  if (target.hostname !== "pxlorbit.com" || w <= 0) return null;
+  if (!RENDER_HOSTS.has(target.hostname) || w <= 0) return null;
   let p = target.pathname;
   if (p.startsWith("/storage/v1/object/public/")) {
     p = "/storage/v1/render/image/public/" + p.slice("/storage/v1/object/public/".length);
@@ -167,23 +170,38 @@ export async function GET(req) {
   }
 
   // 2) 回源（curl 优先，失败退回 fetch）；pxlorbit 走服务端缩图端点
-  let buf;
+  let buf = null;
   let ctype = "image/jpeg";
   try {
     const proxy = await proxyArg();
     const thumb = renderUrl(target, w);
-    if (thumb) {
-      try {
-        buf = await download(thumb.href, proxy);
+    // rls.cheggpt.com 走本机 Clash 会 SSL_ERROR_SYSCALL，但它直连正常；
+    // 线上若需要代理则先用 IMG_PROXY，失败再直连。其他域保持原行为。
+    const tries =
+      target.hostname === "rls.cheggpt.com"
+        ? (proxy ? [proxy, null] : [null])
+        : [proxy];
+    for (const p of tries) {
+      if (thumb) {
+        try {
+          buf = await download(thumb.href, p);
+        } catch {
+          buf = null;
+        }
+      }
+      if (!buf) {
+        try {
+          buf = await download(target.href, p);
+        } catch {
+          buf = null;
+        }
+      }
+      if (buf) {
         ctype = sniffType(buf);
-      } catch {
-        buf = null;
+        break;
       }
     }
-    if (!buf) {
-      buf = await download(target.href, proxy);
-      ctype = sniffType(buf);
-    }
+    if (!buf) return new NextResponse("upstream error", { status: 502 });
   } catch {
     return new NextResponse("upstream error", { status: 502 });
   }

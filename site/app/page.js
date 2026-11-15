@@ -1,8 +1,11 @@
 import Link from "next/link";
 import Nav from "../components/Nav";
 import HomeGrid from "../components/HomeGrid";
+import CategoryGrid from "../components/CategoryGrid";
 import { lightCards, allTags } from "../lib/cards";
+import { categoriesWithCounts, getCategory, matchesCategory } from "../lib/categories";
 import { requirePass } from "../lib/gate";
+import "./category/category.css";
 
 export const dynamic = "force-dynamic";
 
@@ -41,13 +44,17 @@ export default async function Home({ searchParams }) {
   const tag = (sp.tag || "").toString();
   const tab = (sp.tab || "").toString();
   const pill = (sp.pill || "").toString();
+  const cat = (sp.cat || "").toString();
 
   const all = lightCards();
+  const categories = categoriesWithCounts(all);
+  const activeCat = cat ? getCategory(cat) : null;
   let cards = all;
 
   if (tab === "match" || pill === "match")
     cards = cards.filter((c) => (c.tags || []).includes("参赛卡"));
   if (tag) cards = cards.filter((c) => (c.tags || []).includes(tag));
+  if (activeCat) cards = cards.filter((c) => matchesCategory(c, activeCat));
   if (q)
     cards = cards.filter(
       (c) =>
@@ -63,12 +70,13 @@ export default async function Home({ searchParams }) {
   const noSource = ["game", "draw", "group"].includes(tab);
 
   const qs = (patch) => {
-    const merged = { q, tag, tab, pill, ...patch };
+    const merged = { q, tag, tab, pill, cat, ...patch };
     const u = new URLSearchParams();
     if (merged.q) u.set("q", merged.q);
     if (merged.tag) u.set("tag", merged.tag);
     if (merged.tab) u.set("tab", merged.tab);
     if (merged.pill) u.set("pill", merged.pill);
+    if (merged.cat) u.set("cat", merged.cat);
     const s = u.toString();
     return s ? `/?${s}` : "/";
   };
@@ -87,7 +95,11 @@ export default async function Home({ searchParams }) {
           {TABS.map((t) => (
             <Link
               key={t.key || "new"}
-              href={qs({ tab: t.key, tag: "", q: "", pill: "" })}
+              href={
+                t.key === "cat"
+                  ? "/category"
+                  : qs({ tab: t.key, tag: "", q: "", pill: "", cat: "" })
+              }
               className={`home-tab ${tab === t.key ? "on" : ""}`}
             >
               {t.label}
@@ -109,7 +121,18 @@ export default async function Home({ searchParams }) {
           ))}
         </div>
 
-        {noSource ? (
+        {activeCat ? (
+          <div className="cat-filter">
+            <span>
+              分类：{activeCat.displayName} · {total} 张
+            </span>
+            <Link href={qs({ cat: "" })}>清除</Link>
+          </div>
+        ) : null}
+
+        {tab === "cat" && !activeCat ? (
+          <CategoryGrid categories={categories} compact />
+        ) : noSource ? (
           <div className="state-panel">
             <div className="state-badge">未接入</div>
             <p>这个频道还没有内容源。</p>

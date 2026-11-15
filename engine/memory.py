@@ -52,8 +52,14 @@ SUMMARY_SYSTEM = (
 
 # ---------------------------------------------------------------- 文件
 
-def memory_path(memory_dir, card_id):
-    """memory_dir 就是 out/memory 本身，不再二次拼 memory。"""
+def memory_path(memory_dir, card_id, session_id=None):
+    """memory_dir 就是 out/memory 本身，不再二次拼 memory。
+
+    多会话：session_id 非空时存 out/memory/<cardId>/<sessionId>.json，
+    每个会话记忆完全独立；为空时沿用旧的 out/memory/<cardId>.json。
+    """
+    if session_id:
+        return os.path.join(memory_dir, str(int(card_id)), "%s.json" % str(session_id))
     return os.path.join(memory_dir, "%s.json" % int(card_id))
 
 
@@ -62,8 +68,8 @@ def default_memory(card_id):
             "summary": "", "summarizedUpTo": 0, "updatedAt": 0, "suppressed": []}
 
 
-def load_memory(out_dir, card_id):
-    path = memory_path(out_dir, card_id)
+def load_memory(out_dir, card_id, session_id=None):
+    path = memory_path(out_dir, card_id, session_id)
     try:
         with io.open(path, encoding="utf-8-sig") as f:
             data = json.load(f)
@@ -78,13 +84,18 @@ def load_memory(out_dir, card_id):
             "suppressed": [s for s in (data.get("suppressed") or [])
                            if isinstance(s, str) and s][:200],
         })
+        if session_id:
+            mem["sessionId"] = str(session_id)
         return mem
     except Exception:
-        return default_memory(card_id)
+        mem = default_memory(card_id)
+        if session_id:
+            mem["sessionId"] = str(session_id)
+        return mem
 
 
 def save_memory(out_dir, mem):
-    path = memory_path(out_dir, mem["cardId"])
+    path = memory_path(out_dir, mem["cardId"], mem.get("sessionId"))
     os.makedirs(os.path.dirname(path), exist_ok=True)
     mem["updatedAt"] = int(time.time())
     tmp = path + ".tmp"

@@ -1,7 +1,7 @@
 "use client";
 
 // 对话列表面板 —— 手机全屏 / 桌面左栏，共用一套 DOM
-// 直角、1px 分隔线、44px 触摸区（design.md 的 spacing/触摸下限，但不用圆角）
+// 支持「同一张卡多个会话」：每个会话独立记忆、独立上游存档。
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import ThemeToggle from "./ThemeToggle";
@@ -14,19 +14,14 @@ const dateOf = (ts) => {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 };
 
-// 今天的显示时刻，更早的显示月/日 —— 列表里混着两种时间才读得懂
 const metaOf = (ts) => {
   const d = new Date(ts);
   return d.toDateString() === new Date().toDateString() ? timeOf(ts) : dateOf(ts);
 };
 
-// 预览：模型常输出 markdown 与换行，列表里只留一行干净文本
 function previewOf(s) {
   const raw = String(s || "").replace(/<[^>]*>/g, " ");
-  const flat = raw
-    .replace(/[*_`#>~]+/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  const flat = raw.replace(/[*_`#>~]+/g, "").replace(/\s+/g, " ").trim();
   return flat || "开始新的对话";
 }
 
@@ -44,8 +39,11 @@ export default function SessionList({
   open,
   sessions,
   currentId,
+  cardId,
   onClose,
   onDelete,
+  onOpen,
+  onNew,
   onOpenSettings,
 }) {
   const [q, setQ] = useState("");
@@ -73,13 +71,13 @@ export default function SessionList({
     return order.filter((k) => m.has(k)).map((k) => [k, m.get(k)]);
   }, [filtered]);
 
-  const del = (cardId) => {
-    if (confirmId !== String(cardId)) {
-      setConfirmId(String(cardId));
+  const del = (sid) => {
+    if (confirmId !== String(sid)) {
+      setConfirmId(String(sid));
       return;
     }
     setConfirmId(null);
-    onDelete?.(cardId);
+    onDelete?.(sid);
   };
 
   return (
@@ -89,26 +87,18 @@ export default function SessionList({
         <header className="sp-head">
           <button className="sp-ico press" onClick={onClose} aria-label="关闭对话列表">
             <svg className="ico-close" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path
-                d="M6 6l12 12M18 6L6 18"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-              />
+              <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
             </svg>
             <svg className="ico-back" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path
-                d="M14.5 5.5L8 12l6.5 6.5"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
+              <path d="M14.5 5.5L8 12l6.5 6.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </button>
           <h2>对话</h2>
           <span className="sp-count">{sessions.length}</span>
           <span className="sp-gap" />
+          <button className="sp-txt-btn press" onClick={() => onNew?.()} title="同卡新开一个会话">
+            ＋ 新对话
+          </button>
           <button
             className={`sp-txt-btn press ${manage ? "on" : ""}`}
             onClick={() => {
@@ -167,11 +157,11 @@ export default function SessionList({
                   <em>{list.length}</em>
                 </div>
                 {list.map((s) => {
-                  const on = String(s.cardId) === String(currentId);
+                  const on = String(s.sessionId) === String(currentId);
                   return (
-                    <div className={`sp-row ${on ? "on" : ""}`} key={s.cardId}>
+                    <div className={`sp-row ${on ? "on" : ""}`} key={s.sessionId || s.cardId}>
                       <Link
-                        href={`/chat?card=${s.cardId}`}
+                        href={`/chat?card=${s.cardId}&s=${s.sessionId || ""}`}
                         className="sp-main"
                         onClick={onClose}
                         aria-current={on ? "page" : undefined}
@@ -196,10 +186,10 @@ export default function SessionList({
                       </Link>
                       {manage ? (
                         <button
-                          className={`sp-del press ${confirmId === String(s.cardId) ? "sure" : ""}`}
-                          onClick={() => del(s.cardId)}
+                          className={`sp-del press ${confirmId === String(s.sessionId) ? "sure" : ""}`}
+                          onClick={() => del(s.sessionId)}
                         >
-                          {confirmId === String(s.cardId) ? "确认删除" : "删除"}
+                          {confirmId === String(s.sessionId) ? "确认删除" : "删除"}
                         </button>
                       ) : null}
                     </div>

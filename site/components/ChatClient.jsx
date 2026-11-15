@@ -43,13 +43,17 @@ function clampTokens(v) {
   return Math.min(TOKEN_MAX, Math.max(TOKEN_MIN, n));
 }
 
-const SKEY = "lg.sessions.v2";
+const SKEY = "lg.sessions.v3";
 const MKEY = "lg.model.v2";
-const mkey = (id) => `lg.msgs.v2.${id}`;
+// 多会话：消息按 cardId:sessionId 存，每个会话独立。
+const mkey = (id, sid) => `lg.msgs.v3.${id}${sid ? ":" + sid : ""}`;
 // 被「彻底删除」的卡片：删除后不再从 seeds.json 恢复旧历史，
 // 否则删了会话、清了记忆，重新点开卡又会被上游快照复活。
 const DKEY = "lg.deleted.cards";
 const uid = () => Math.random().toString(36).slice(2, 9);
+const newSid = () =>
+  (globalThis.crypto && globalThis.crypto.randomUUID && globalThis.crypto.randomUUID()) ||
+  `${Date.now().toString(36)}-${uid()}`;
 
 // 多段续写会产出多个 <sug> 块，必须全局匹配；
 // 否则第一个之后的标签会漏进正文，皔得像 HTML。
@@ -168,7 +172,8 @@ async function readSSE(res, onEvent) {
   }
 }
 
-export default function ChatClient({ card }) {
+export default function ChatClient({ card, initialSession }) {
+  const [sessionId, setSessionId] = useState(initialSession || "");
   const [msgs, setMsgs] = useState([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -194,6 +199,7 @@ export default function ChatClient({ card }) {
   const stick = useRef(true);
   const chatIdRef = useRef(null);   // 恢复的历史属于哪个上游会话
   const seedAcctRef = useRef(null);  // 该会话在哪个号下
+  const sidRef = useRef(initialSession || "");  // 当前会话 id（回调里读最新值）
   // 流式平滑渲染：上游按 ~80ms 一包吐出，直接渲染会「一顿一顿」。
   // 这里把累积文本放进 ref，用 rAF 以稳定节奏逐字揭示（追平 backlog），
   // 让画面连续，而不是按上游包的节奏跳动。
@@ -247,20 +253,21 @@ export default function ChatClient({ card }) {
 
   const loadMemory = useCallback(async () => {
     try {
-      const r = await fetch(`/api/memory?cardId=${encodeURIComponent(card.id)}`, {
-        cache: "no-store",
-      });
+      const sid = sidRef.current || sessionId;
+      const q = `/api/memory?cardId=${encodeURIComponent(card.id)}` +
+        (sid ? `&sessionId=${encodeURIComponent(sid)}` : "");
+      const r = await fetch(q, { cache: "no-store" });
       if (!r.ok) return;
       const j = await r.json();
       if (j?.memory) setMem(j.memory);
     } catch {}
-  }, [card.id]);
+  }, [card.id, sessionId]);
 
   useEffect(() => {
     setMem(null);
     setMemInput("");
     loadMemory();
-  }, [card.id, loadMemory]);
+  }, [card.id, sessionId, loadMemory]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return;
@@ -268,12 +275,44 @@ export default function ChatClient({ card }) {
   }, []);
 
   useEffect(() => {
-    const saved = readJSON(mkey(card.id), []);
+    if (!sessionId) {
+      // 首次进入：沿用 URL 的 s，否则新开一个会话
+      setSessionId(initialSession || newSid());
+      return;
+    }
+    const sid = sessionId;
+    sidRef.current = sid;
+
+    // 1) 本会话消息（多会话按 sid 隔离）
+    let saved = readJSON(mkey(card.id, sid), []);
+    // 2) 单会话旧版兼容：v2 消息迁移到当前会话（仅一次）
+    if (!saved.length) {
+      const legacy = readJSON(`lg.msgs.v2.${card.id}`, []);
+      if (Array.isArray(legacy) && legacy.length) {
+        saved = legacy;
+        localStorage.setItem(mkey(card.id, sid), JSON.stringify(legacy));
+      }
+    }
     setMsgs(saved);
 
-    // 本地空白时，从上游导出的 seeds.json 恢复真实历史（带 chatId），
-    // 这样「上下文满了被重置」的对话能直接接着写。
-    // 被「删除」过的卡跳过恢复，避免旧剧情复活。
+    // 3) 会话索引：upsert 当前会话
+    const s = readJSON(SKEY, []);
+    const prev = s.find((x) => String(x.sessionId) === String(sid));
+    const next = [
+      {
+        sessionId: sid,
+        cardId: card.id,
+        name: card.name,
+        cover: card.cover,
+        lastAt: prev?.lastAt || Date.now(),
+        last: prev?.last || "",
+      },
+      ...s.filter((x) => String(x.sessionId) !== String(sid)),
+    ].slice(0, 200);
+    localStorage.setItem(SKEY, JSON.stringify(next));
+    setSessions(next);
+
+    // 4) 完全空白且未删除过 → 从 seeds.json 恢复（带的 chatId 也一并恢复）
     const deleted = readJSON(DKEY, []);
     if (!saved.length && !deleted.some((x) => String(x) === String(card.id))) {
       let alive = true;
@@ -292,29 +331,14 @@ export default function ChatClient({ card }) {
           setMsgs(restored);
           if (seed.chatId) chatIdRef.current = seed.chatId;
           if (seed.account) seedAcctRef.current = seed.account;
-          localStorage.setItem(mkey(card.id), JSON.stringify(restored));
+          localStorage.setItem(mkey(card.id, sid), JSON.stringify(restored));
         })
         .catch(() => {});
       return () => {
         alive = false;
       };
     }
-
-    const s = readJSON(SKEY, []);
-    const prev = s.find((x) => String(x.cardId) === String(card.id));
-    const next = [
-      {
-        cardId: card.id,
-        name: card.name,
-        cover: card.cover,
-        lastAt: prev?.lastAt || Date.now(),
-        last: prev?.last || "",
-      },
-      ...s.filter((x) => String(x.cardId) !== String(card.id)),
-    ].slice(0, 40);
-    localStorage.setItem(SKEY, JSON.stringify(next));
-    setSessions(next);
-  }, [card.id, card.name, card.cover]);
+  }, [card.id, card.name, card.cover, sessionId, initialSession]);
 
   const loadPool = useCallback(async () => {
     try {
@@ -343,36 +367,39 @@ export default function ChatClient({ card }) {
 
   const save = useCallback(
     (list, lastText) => {
+      const sid = sidRef.current || sessionId;
       const trimmed = list
         .slice(-120)
         .map(({ id, role, content, ts }) => ({ id, role, content, ts }));
-      localStorage.setItem(mkey(card.id), JSON.stringify(trimmed));
+      localStorage.setItem(mkey(card.id, sid), JSON.stringify(trimmed));
       const s = readJSON(SKEY, []);
-      const prev = s.find((x) => String(x.cardId) === String(card.id));
+      const prev = s.find((x) => String(x.sessionId) === String(sid));
       const next = [
         {
+          sessionId: sid,
           cardId: card.id,
           name: card.name,
           cover: card.cover,
           lastAt: Date.now(),
           last: lastText ?? prev?.last ?? "",
         },
-        ...s.filter((x) => String(x.cardId) !== String(card.id)),
-      ].slice(0, 40);
+        ...s.filter((x) => String(x.sessionId) !== String(sid)),
+      ].slice(0, 200);
       localStorage.setItem(SKEY, JSON.stringify(next));
       setSessions(next);
     },
-    [card.id, card.name, card.cover]
+    [card.id, card.name, card.cover, sessionId]
   );
 
   const saveMemory = useCallback(
     async (body) => {
       setMemBusy(true);
       try {
+        const sid = sidRef.current || sessionId;
         const r = await fetch("/api/memory", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ cardId: card.id, ...body }),
+          body: JSON.stringify({ cardId: card.id, sessionId: sid || undefined, ...body }),
         });
         const j = await r.json().catch(() => null);
         if (j?.memory) setMem(j.memory);
@@ -401,13 +428,18 @@ export default function ChatClient({ card }) {
         const r = await fetch("/api/memory", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ cardId: card.id, rebuild: true, history }),
+          body: JSON.stringify({
+            cardId: card.id,
+            sessionId: sidRef.current || sessionId || undefined,
+            rebuild: true,
+            history,
+          }),
         });
         const j = await r.json().catch(() => null);
         if (j?.memory) setMem(j.memory);
       } catch {}
     },
-    [card.id]
+    [card.id, sessionId]
   );
 
   // 保留每条锚点原有的 source：auto 是从对话消息抽出来的，必须保持 auto，
@@ -586,6 +618,7 @@ export default function ChatClient({ card }) {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             cardId: card.id,
+            sessionId: sidRef.current || sessionId || undefined,
             prompt: text,
             history,
             model,
@@ -689,42 +722,73 @@ export default function ChatClient({ card }) {
     [msgs, save, rebuildMemory]
   );
 
+  // 清空当前会话 = 彻底重开：清本地消息 + 清本会话记忆 + 删本会话上游存档
   const clear = useCallback(() => {
+    const sid = sidRef.current || sessionId;
     setMsgs([]);
-    localStorage.removeItem(mkey(card.id));
+    localStorage.removeItem(mkey(card.id, sid));
     save([], "");
-    setNote("已清空本会话");
-  }, [card.id, save]);
+    saveMemory({ clear: true });
+    setNote("已清空本会话（含记忆，下次从零开始）");
+  }, [card.id, save, saveMemory, sessionId]);
 
-  // 从列表里彻底移除一个会话（消息体 + 索引条目 + 服务端记忆），不影响其它卡。
-  // 记忆按 cardId 存在引擎侧，只删 localStorage 会造成「对话没了、记忆还在」。
+  // 从列表里彻底移除一个会话（消息体 + 索引 + 该会话记忆 + 上游存档）。
+  // 多会话：按 sessionId 删除，不影响同卡其它会话。
   const dropSession = useCallback(
-    (cardId) => {
+    (sid) => {
       try {
-        localStorage.removeItem(mkey(cardId));
-        const next = readJSON(SKEY, []).filter((x) => String(x.cardId) !== String(cardId));
+        localStorage.removeItem(mkey(card.id, sid));
+        const next = readJSON(SKEY, []).filter((x) => String(x.sessionId) !== String(sid));
         localStorage.setItem(SKEY, JSON.stringify(next));
         setSessions(next);
-        // 记入删除名单：之后重新点开这张卡，不再从 seeds.json 恢复旧历史
-        const deleted = readJSON(DKEY, []);
-        if (!deleted.some((x) => String(x) === String(cardId))) {
-          localStorage.setItem(DKEY, JSON.stringify([...deleted, String(cardId)]));
-        }
-        if (String(cardId) === String(card.id)) {
+        if (String(sid) === String(sidRef.current || sessionId)) {
           setMsgs([]);
           setMem(null);
           setNote("已删除本会话及其长期记忆");
         }
       } catch {}
-      // 服务端记忆一并清除；clear 会把当前锚点记入抑制，防止下一轮复活
+      // 服务端：清该会话记忆 + 删该会话上游存档（sessionId 维度）
       fetch("/api/memory", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ cardId, clear: true }),
+        body: JSON.stringify({ cardId: card.id, sessionId: sid, clear: true }),
       }).catch(() => {});
     },
-    [card.id]
+    [card.id, sessionId]
   );
+
+  // 新开一个会话：新 sessionId，不影响已有会话
+  const newSession = useCallback(() => {
+    const sid = newSid();
+    sidRef.current = sid;
+    chatIdRef.current = null;
+    seedAcctRef.current = null;
+    setSessionId(sid);
+    setMsgs([]);
+    setStreaming("");
+    setNote("已开新会话");
+    try {
+      const u = new URL(window.location.href);
+      u.searchParams.set("s", sid);
+      window.history.replaceState({}, "", u);
+    } catch {}
+  }, []);
+
+  // 切换到已有会话
+  const openSession = useCallback((sid) => {
+    if (!sid) return;
+    sidRef.current = sid;
+    chatIdRef.current = null;
+    seedAcctRef.current = null;
+    setSessionId(sid);
+    setMsgs([]);
+    setStreaming("");
+    try {
+      const u = new URL(window.location.href);
+      u.searchParams.set("s", sid);
+      window.history.replaceState({}, "", u);
+    } catch {}
+  }, []);
 
   const groupedCount = useMemo(() => {
     const g = new Map();
@@ -750,9 +814,15 @@ export default function ChatClient({ card }) {
         <SessionList
           open={showSess}
           sessions={sessions}
-          currentId={card.id}
+          currentId={sessionId}
+          cardId={card.id}
           onClose={() => setShowSess(false)}
           onDelete={dropSession}
+          onOpen={openSession}
+          onNew={() => {
+            newSession();
+            setShowSess(false);
+          }}
           onOpenSettings={() => {
             setShowSess(false);
             setShowPanel(true);

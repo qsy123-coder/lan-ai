@@ -43,5 +43,5 @@ export default async function ChatPage({ searchParams }) {
       </div>
     );
   }
-  return <ChatClient card={card} />;
+  return <ChatClient card={card} initialSession={sp.s || ""} />;
 }

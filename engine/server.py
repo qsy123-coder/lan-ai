@@ -297,6 +297,7 @@ TOKEN_MAX = 8000
 TOKEN_DEFAULT = 4000
 
 MEMORY_DIR = os.path.join(OUT_DIR, "memory")
+SESSIONS_PATH = os.path.join(OUT_DIR, "sessions.json")
 
 
 def model_ctx(model_id):
@@ -691,6 +692,49 @@ def drop_chat(st, name):
     save_state(st)
 
 
+# ---------------------------------------------------------------- 多会话
+# 同一张卡可以开多个「会话」，每个会话绑定一个独立账号 → 上游会话天然隔离，
+# 记忆按 sessionId 独立存。注册表：out/sessions.json
+# { "<cardId>:<sessionId>": {cardId, sessionId, account, chatId, at} }
+
+def load_sessions():
+    s = read_json(SESSIONS_PATH, {})
+    return s if isinstance(s, dict) else {}
+
+
+def save_sessions(s):
+    write_json(SESSIONS_PATH, s)
+
+
+def session_key(card_id, session_id):
+    return "%s:%s" % (int(card_id), str(session_id))
+
+
+def get_session(card_id, session_id):
+    if not session_id:
+        return None
+    return load_sessions().get(session_key(card_id, session_id))
+
+
+def bind_session(card_id, session_id, account, chat_id):
+    if not session_id:
+        return
+    s = load_sessions()
+    s[session_key(card_id, session_id)] = {
+        "cardId": int(card_id), "sessionId": str(session_id),
+        "account": account, "chatId": chat_id, "at": int(time.time())}
+    save_sessions(s)
+
+
+def accounts_used_by_card(card_id):
+    """该卡上已被其它会话占用的账号。"""
+    used = set()
+    for v in load_sessions().values():
+        if int(v.get("cardId") or 0) == int(card_id) and v.get("account"):
+            used.add(v["account"])
+    return used
+
+
 def drop_site_chats_for_card(card_id):
     """删除某张卡在所有账号上的上游会话，并清掉本地缓存。
 
@@ -702,8 +746,13 @@ def drop_site_chats_for_card(card_id):
     st = load_state()
     pool = load_pool()
     sc = st.setdefault("site_chats", {})
-    suffix = ":%s" % int(card_id)
-    keys = [k for k in list(sc.keys()) if k.endswith(suffix)]
+
+    def _belongs(k):
+        # key 形态：site:<account>:<cardId> 或 site:<account>:<cardId>:<sessionId>
+        parts = str(k).split(":")
+        return len(parts) >= 3 and parts[0] == "site" and parts[2] == str(int(card_id))
+
+    keys = [k for k in list(sc.keys()) if _belongs(k)]
     for k in keys:
         ent = sc.get(k) or {}
         acct = ent.get("account")
@@ -713,9 +762,42 @@ def drop_site_chats_for_card(card_id):
             log("删除上游会话 %s（%s/%s）-> %s %s" % (
                 str(cid)[:8], acct, card_id, ok, err))
         sc.pop(k, None)
+    # 同时清掉该卡的会话注册（每个 session 的上游会话已在上面的 keys 里删除）
+    sess = load_sessions()
+    for sk in [k for k, v in sess.items() if int((v or {}).get("cardId") or 0) == int(card_id)]:
+        ent = sess.get(sk) or {}
+        acct = ent.get("account")
+        cid = ent.get("chatId")
+        # 若该会话的 chatId 尚未在 site_chats 里被删，补删
+        if cid and not any((sc.get(_k) or {}).get("chatId") == cid for _k in keys):
+            if acct in pool:
+                delete_chat(pool[acct]["cookie"], cid)
+        sess.pop(sk, None)
+    save_sessions(sess)
     if keys:
         save_state(st)
     return keys
+
+
+def drop_session_chat(card_id, session_id):
+    """删除「某个会话」绑定的上游会话，并清掉它的缓存与注册（不影响同卡其它会话）。"""
+    sess = get_session(card_id, session_id) or {}
+    st = load_state()
+    pool = load_pool()
+    sc = st.setdefault("site_chats", {})
+    acct = sess.get("account")
+    cid = sess.get("chatId")
+    if acct and cid and acct in pool:
+        ok, err = delete_chat(pool[acct]["cookie"], cid)
+        log("删除会话上游 %s（%s/%s/%s）-> %s %s" % (
+            str(cid)[:8], acct, card_id, session_id, ok, err))
+    for k in [k for k, v in sc.items() if (v or {}).get("chatId") == cid]:
+        sc.pop(k, None)
+    save_state(st)
+    s = load_sessions()
+    s.pop(session_key(card_id, session_id), None)
+    save_sessions(s)
+    return cid
 
 
 # ---------------------------------------------------------------- 前台站点接入
@@ -743,10 +825,12 @@ def is_network(err):
     return any(k in e for k in keys)
 
 
-def ensure_chat_for_card(st, pool, name, card_id, emit):
-    """为「某个号 × 某张卡」拿到一个 chatId；createByCard 按卡去重，所以缓存即可。
+def ensure_chat_for_card(st, pool, name, card_id, emit, session_id=None):
+    """为「某个号 × 某张卡 [× 某个会话]」拿到一个 chatId。会话维度独立缓存。
     返回 (chatId, err)：err 非空时上层要区分「闸门」还是「账号问题」。"""
     key = "site:%s:%s" % (name, card_id)
+    if session_id:
+        key = "site:%s:%s:%s" % (name, card_id, session_id)
     chats = st.setdefault("site_chats", {})
     ent = chats.get(key)
     if ent and ent.get("chatId"):
@@ -757,6 +841,8 @@ def ensure_chat_for_card(st, pool, name, card_id, emit):
         return None, err
     chats[key] = {"chatId": cid, "cardId": card_id, "account": name, "at": int(time.time())}
     save_state(st)
+    if session_id:
+        bind_session(card_id, session_id, name, cid)
     emit("chat", {"account": name, "chatId": cid, "cardId": card_id})
     return cid, None
 
@@ -1022,8 +1108,9 @@ def run_site_chat(payload, emit, stop_event=None):
     site_uid = user["id"] if user else None
 
     history = payload.get("history")
+    session_id = (payload.get("sessionId") or "").strip() or None
     # —— 长期记忆：磁盘为底，合并「历史 + 本轮新消息」里出现的设定
-    mem = memlib.load_memory(MEMORY_DIR, card_id)
+    mem = memlib.load_memory(MEMORY_DIR, card_id, session_id)
     before_ids = [p.get("id") for p in (mem.get("pinned") or [])]
     pin_source = list(history or []) + [{"role": "user", "content": prompt}]
     fresh = memlib.apply_suppression(memlib.extract_pins(pin_source), mem.get("suppressed"))
@@ -1061,6 +1148,24 @@ def run_site_chat(payload, emit, stop_event=None):
         want_chat = None
 
     cands.sort(key=lambda c: (c[1] != want_acct, c[0]))
+
+    # —— 多会话：会话必须固定绑定一个账号（上游存档按账号隔离）。
+    # 已绑定的会话强制走它自己的号 + chatId；未绑定的会话优先选「本卡还没被
+    # 其它会话占用的号」，保证新会话的上游存档是干净独立的。
+    if session_id:
+        sess = get_session(card_id, session_id)
+        if sess and sess.get("account") and sess.get("account") in pool \
+                and sess.get("chatId"):
+            want_acct = sess["account"]
+            want_chat = sess["chatId"]
+            cands = [((account_state(st, want_acct).get("credit") or 0), want_acct)] + \
+                    [c for c in cands if c[1] != want_acct]
+        else:
+            used = accounts_used_by_card(card_id)
+            free = [c for c in cands if c[1] not in used]
+            if free:
+                cands = free + [c for c in cands if c[1] in used]
+            want_chat = None
     if not cands:
         emit("end", {"reason": "no_credit", "message": "池子里没有可用额度"})
         return
@@ -1079,12 +1184,18 @@ def run_site_chat(payload, emit, stop_event=None):
         emit("account", {"name": name, "credit": a.get("credit")})
         if want_chat and name == want_acct and chat_id_ok(pool, name, want_chat):
             cid, chat_err = want_chat, None
-            st.setdefault("site_chats", {})["site:%s:%s" % (name, card_id)] = {
+            _k = "site:%s:%s" % (name, card_id)
+            if session_id:
+                _k = "site:%s:%s:%s" % (name, card_id, session_id)
+            st.setdefault("site_chats", {})[_k] = {
                 "chatId": want_chat, "account": name}
             save_state(st)
+            if session_id:
+                bind_session(card_id, session_id, name, want_chat)
             emit("note", {"message": "接上原会话 %s" % want_chat[:8]})
         else:
-            cid, chat_err = ensure_chat_for_card(st, pool, name, card_id, emit)
+            cid, chat_err = ensure_chat_for_card(st, pool, name, card_id, emit,
+                                                 session_id=session_id)
         if not cid:
             if is_gate(chat_err):
                 # 闸门是 IP 级：先换出口节点再重试一次；换不了才进冷却。
@@ -1476,8 +1587,19 @@ class Handler(BaseHTTPRequestHandler):
                 card_id = 0
             if not card_id:
                 return self._json(400, {"error": "cardId required"})
-            mem = memlib.load_memory(MEMORY_DIR, card_id)
+            session_id = (qs.get("sessionId") or [""])[0] or None
+            mem = memlib.load_memory(MEMORY_DIR, card_id, session_id)
             return self._json(200, {"memory": mem})
+        if path == "/site/sessions":
+            qs = parse_qs(urlparse(self.path).query)
+            try:
+                _cid = int((qs.get("cardId") or ["0"])[0])
+            except (TypeError, ValueError):
+                _cid = 0
+            rows = [v for v in load_sessions().values()
+                    if (not _cid or int(v.get("cardId") or 0) == _cid)]
+            rows.sort(key=lambda r: int(r.get("at") or 0))
+            return self._json(200, {"sessions": rows})
         if path == "/site/user/me":
             if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
                 return self._json(401, {"error": "bad token"})
@@ -1587,15 +1709,21 @@ class Handler(BaseHTTPRequestHandler):
                 card_id = int(payload.get("cardId"))
             except (TypeError, ValueError):
                 return self._json(400, {"error": "cardId required"})
-            mem = memlib.load_memory(MEMORY_DIR, card_id)
+            session_id = (payload.get("sessionId") or "").strip() or None
+            mem = memlib.load_memory(MEMORY_DIR, card_id, session_id)
             if payload.get("clear"):
                 # 清空时把现有锚点记入 suppressed：否则下一轮 auto 抽取会从
                 # 还留在历史里的原句把它们重新捞回来，表现为「删了又出现」。
                 removed = memlib.pin_ids(mem.get("pinned"))
                 mem = memlib.default_memory(card_id)
                 mem["suppressed"] = sorted(set(removed))[:200]
+                if session_id:
+                    mem["sessionId"] = session_id
                 memlib.save_memory(MEMORY_DIR, mem)
-                drop_site_chats_for_card(card_id)
+                if session_id:
+                    drop_session_chat(card_id, session_id)
+                else:
+                    drop_site_chats_for_card(card_id)
                 return self._json(200, {"memory": mem})
             if payload.get("rebuild"):
                 # 前端删了某条消息后触发：manual 锚点保留，auto 从当前历史重抽，
@@ -1611,7 +1739,10 @@ class Handler(BaseHTTPRequestHandler):
                 # 删光所有消息 = 用户想从零开始：丢弃上游会话，否则模型仍能从
                 # 上游 chatId 的存档里读到被删掉的剧情（实测「删了还记得」的根因）。
                 if not history:
-                    drop_site_chats_for_card(card_id)
+                    if session_id:
+                        drop_session_chat(card_id, session_id)
+                    else:
+                        drop_site_chats_for_card(card_id)
                 return self._json(200, {"memory": mem})
             if isinstance(payload.get("pinned"), list):
                 old_ids = memlib.pin_ids(mem.get("pinned"))

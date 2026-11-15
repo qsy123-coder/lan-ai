@@ -115,7 +115,7 @@ export default async function MePage() {
                 <p className="acct-label">当前积分</p>
                 <p className="acct-big">{Number(user.credit).toFixed(2)}</p>
                 <p className="acct-hint">
-                  {user.name} · {user.email}
+                  {user.name} · {user.email || user.phone || ""}
                   <span className={`vip-badge${user.vip > 0 ? " on" : ""}`}>
                     {user.vip > 0 ? `VIP${user.vip}` : "普通用户"}
                   </span>

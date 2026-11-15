@@ -7,7 +7,8 @@
   "sessions": {"<token>": {"uid","exp"}},
   "ledger": {"u_x": [{"ts","type","amount","balance","note"}]},
   "pending_signups": {"<email>": {"salt","hash","name","code","exp","tries"}},
-  "reset_codes": {"<email>": {"code","exp","tries"}}
+  "reset_codes": {"<email>": {"code","exp","tries"}},
+  "phone_codes": {"<phone>": {"code","exp","tries","lastSent"}}
 }
 
 只依赖标准库。注册送 100 credit；生成按预扣 3.2 / 结算 2.1 记账。
@@ -30,7 +31,10 @@ SESSION_TTL = 30 * 24 * 3600
 LEDGER_KEEP = 200
 OTP_TTL = 600
 OTP_TRIES = 5
+PHONE_TTL = 300
+PHONE_COOLDOWN = 60
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+PHONE_RE = re.compile(r"^\+\d{8,15}$")
 
 # 北京时间固定 UTC+8（不依赖 tzdata，Windows 也能跑）
 TZ = datetime.timezone(datetime.timedelta(hours=8))
@@ -57,7 +61,7 @@ def _today(now=None):
 
 def _empty():
     return {"version": VERSION, "users": {}, "sessions": {}, "ledger": {},
-            "pending_signups": {}, "reset_codes": {}}
+            "pending_signups": {}, "reset_codes": {}, "phone_codes": {}}
 
 
 def load(path):
@@ -68,7 +72,7 @@ def load(path):
         return _empty()
     if not isinstance(data, dict):
         return _empty()
-    for k in ("users", "sessions", "ledger", "pending_signups", "reset_codes"):
+    for k in ("users", "sessions", "ledger", "pending_signups", "reset_codes", "phone_codes"):
         if not isinstance(data.get(k), dict):
             data[k] = {}
     data["version"] = VERSION
@@ -86,10 +90,13 @@ def save(path, data):
 
 
 def _public(user, vip=0):
+    email = user.get("email") or ""
+    name = (user.get("name") or (email.split("@")[0] if email else "") or "用户")
     return {
         "id": user["id"],
-        "email": user["email"],
-        "name": user.get("name") or user["email"].split("@")[0],
+        "email": email,
+        "phone": user.get("phone") or "",
+        "name": name,
         "credit": round(float(user.get("credit") or 0), 2),
         "vip": int(vip),
         "createdAt": int(user.get("createdAt") or 0),
@@ -170,12 +177,14 @@ def _new_code():
     return "%08d" % secrets.randbelow(100000000)
 
 
-def _create_user(data, email, salt_hex, hash_hex, name=""):
+def _create_user(data, email, salt_hex, hash_hex, name="", phone=""):
     uid = "u_" + secrets.token_hex(6)
+    fallback = (email.split("@")[0] if email else ("用户" + phone[-4:] if phone else "用户"))
     user = {
         "id": uid,
         "email": email,
-        "name": (name or "").strip()[:24] or email.split("@")[0],
+        "phone": phone,
+        "name": (name or "").strip()[:24] or fallback,
         "salt": salt_hex,
         "hash": hash_hex,
         "credit": 0.0,
@@ -526,3 +535,70 @@ def checkin_status(path, token, now=None):
             "streak": streak,
             "rewardNext": round(reward, 2),
         }
+
+
+# ---------------------------------------------------------------- 手机号短信登录
+
+def normalize_phone(raw):
+    s = re.sub(r"[^\d+]", "", str(raw or ""))
+    if s.startswith("00"):
+        s = "+" + s[2:]
+    if not s.startswith("+"):
+        s = "+" + s
+    return s if PHONE_RE.match(s) else None
+
+
+def phone_request(path, phone, now=None):
+    """生成 6 位短信码；同一号码 60 秒内不重复发。"""
+    phone = normalize_phone(phone)
+    if not phone:
+        return None, "手机号格式不对（需 E.164，如 +8613800138000）"
+    now = int(now or _now())
+    with LOCK:
+        data = load(path)
+        _prune_codes(data["phone_codes"], now)
+        rec = data["phone_codes"].get(phone)
+        if rec:
+            wait = PHONE_COOLDOWN - (now - int(rec.get("lastSent") or 0))
+            if wait > 0:
+                return None, "请 %d 秒后再试" % wait
+        code = "%06d" % secrets.randbelow(1000000)
+        data["phone_codes"][phone] = {
+            "code": code, "exp": now + PHONE_TTL, "tries": 0, "lastSent": now,
+        }
+        save(path, data)
+        return {"phone": phone, "code": code}, None
+
+
+def phone_clear(path, phone):
+    phone = normalize_phone(phone) or phone
+    with LOCK:
+        data = load(path)
+        data["phone_codes"].pop(phone, None)
+        save(path, data)
+
+
+def phone_verify(path, phone, code, name=""):
+    """验证短信码；老号登录，新号自动建号并送 100 credit。"""
+    phone = normalize_phone(phone)
+    if not phone:
+        return None, None, "手机号格式不对"
+    with LOCK:
+        data = load(path)
+        now = _now()
+        rec = data["phone_codes"].get(phone)
+        err = _check_code(rec, code, now)
+        if err:
+            if rec and int(rec.get("exp") or 0) <= now:
+                data["phone_codes"].pop(phone, None)
+            save(path, data)
+            return None, None, err
+        user = next((u for u in data["users"].values() if u.get("phone") == phone), None)
+        if user:
+            token = _make_session(data, user["id"])
+        else:
+            user, token = _create_user(
+                data, "", "", "", (name or "").strip()[:24], phone=phone)
+        data["phone_codes"].pop(phone, None)
+        save(path, data)
+        return _public(user, vip_level(data, user["id"])), token, None

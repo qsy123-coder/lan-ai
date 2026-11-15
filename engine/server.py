@@ -29,6 +29,7 @@ from curl_cffi import requests as creq
 import memory as memlib
 import users as userslib
 import forum as forumlib
+import sms as smslib
 
 BASE = "https://www.dzmm.ai"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -1851,6 +1852,33 @@ class Handler(BaseHTTPRequestHandler):
             if err:
                 return self._json(400, {"error": err})
             return self._json(200, {"ok": True, "user": user})
+        if path == "/site/user/phone/request":
+            if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
+                return self._json(401, {"error": "bad token"})
+            payload = self._body()
+            res, err = userslib.phone_request(USERS_PATH, payload.get("phone"))
+            if err:
+                return self._json(400, {"error": err})
+            try:
+                ok, detail = smslib.send_code(res["phone"], res["code"], OUT_DIR, "login")
+            except Exception as e:
+                ok, detail = False, str(e)[:160]
+            if not ok:
+                userslib.phone_clear(USERS_PATH, res["phone"])
+                return self._json(502, {"error": "短信发送失败", "detail": detail})
+            out = {"ok": True, "phone": res["phone"], "provider": smslib.provider()}
+            if smslib.dev_code_enabled():
+                out["devCode"] = res["code"]
+            return self._json(200, out)
+        if path == "/site/user/phone/verify":
+            if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
+                return self._json(401, {"error": "bad token"})
+            payload = self._body()
+            user, token, err = userslib.phone_verify(
+                USERS_PATH, payload.get("phone"), payload.get("code"), payload.get("name") or "")
+            if err:
+                return self._json(400, {"error": err})
+            return self._json(200, {"user": user, "token": token})
         if path == "/site/user/register":
             if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
                 return self._json(401, {"error": "bad token"})

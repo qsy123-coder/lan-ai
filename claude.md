@@ -664,6 +664,7 @@ Remove-Item -Recurse -Force out\*,notes\*.tmp -ErrorAction SilentlyContinue     
 | 2026-11-15 | `feat/category-page` | 分类页：按 dzmm `category.list` 复刻 21 个分类 + 首页 `?cat=` 筛选 + 封面代理（notes/038） | 已上线 |
 | 2026-11-15 | `feat/forum` | 广场/论坛：三栏 + 发帖/评论/赞踩 + 分区/标签/搜索（notes/039） | 已上线 |
 | 2026-11-15 | `feat/signin-otp` | 登录逆向 + 邮箱 OTP 注册/重置 + `/sign-in` + Nav 登录入口（notes/040/041） | 已上线（生产 UI 点测，备份 backup-signin-20261115220642） |
+| 2026-11-15 | `feat/sms-login` | 短信服务抽象（mock/webhook/twilio/smsbao）+ 手机号 OTP 登录/注册 + 手机号 tab（notes/042） | 已完成（本地 UI 点测，待部署） |
 
 > 规矩：分支从 `main` 切出；质量门禁通过后可自行 commit / push / 部署 / 合并（见上「Claude 执行规范」）。
 > 不可逆操作（删数据 / 改库 / `.env.production` / force-push）前先确认。

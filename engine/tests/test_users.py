@@ -116,6 +116,38 @@ class UserTest(unittest.TestCase):
         self.assertIsNotNone(new_token)
         self.assertIsNone(u.session_user(self.path, token))
 
+    def test_normalize_phone(self):
+        self.assertEqual(u.normalize_phone("13800138000"), "+13800138000")
+        self.assertEqual(u.normalize_phone("+86 138-0013-8000"), "+8613800138000")
+        self.assertIsNone(u.normalize_phone("abc"))
+        self.assertIsNone(u.normalize_phone("+123"))
+
+    def test_phone_login_and_register(self):
+        base = u._now()
+        res, err = u.phone_request(self.path, "+8613800138000", now=base)
+        self.assertIsNone(err)
+        code = res["code"]
+        self.assertEqual(len(code), 6)
+        _, err2 = u.phone_request(self.path, "+8613800138000", now=base + 10)
+        self.assertIn("秒", err2)
+        wrong = "000000" if code != "000000" else "111111"
+        bad, _, err3 = u.phone_verify(self.path, "+8613800138000", wrong)
+        self.assertIsNone(bad)
+        self.assertIn("验证码", err3)
+        user, token, err4 = u.phone_verify(self.path, "+8613800138000", code)
+        self.assertIsNone(err4)
+        self.assertEqual(user["phone"], "+8613800138000")
+        self.assertEqual(user["email"], "")
+        self.assertEqual(user["credit"], 100.0)
+        self.assertIsNotNone(u.session_user(self.path, token))
+        # 同号再次登录
+        res2, err5 = u.phone_request(self.path, "+8613800138000", now=base + 61)
+        self.assertIsNone(err5)
+        user2, token2, err6 = u.phone_verify(self.path, "+8613800138000", res2["code"])
+        self.assertIsNone(err6)
+        self.assertEqual(user2["id"], user["id"])
+        self.assertIsNotNone(u.session_user(self.path, token2))
+
     def test_vip_levels(self):
         user, token, _ = u.register(self.path, "a@b.com", "password123")
         self.assertEqual(user["vip"], 0)

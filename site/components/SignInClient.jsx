@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-const MODES = ["login", "signup", "reset", "otp", "signin-tg", "signin-code", "google"];
+const MODES = ["login", "signup", "reset", "phone", "otp", "signin-tg", "signin-code", "google"];
 
 export default function SignInClient({ initialMode = "login", next = "/" }) {
   const router = useRouter();
@@ -20,8 +20,21 @@ export default function SignInClient({ initialMode = "login", next = "/" }) {
   const [err, setErr] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  // 手机号短信登录
+  const [cc, setCc] = useState("+86");
+  const [phone, setPhone] = useState("");
+  const [smsCode, setSmsCode] = useState("");
+  const [phoneSent, setPhoneSent] = useState(false);
+  const [phoneTerms, setPhoneTerms] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
 
   const safeNext = next && next.startsWith("/") ? next : "/";
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown(cooldown - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
 
   const switchMode = (m) => {
     setMode(m);
@@ -31,6 +44,16 @@ export default function SignInClient({ initialMode = "login", next = "/" }) {
     setCode("");
     setNewPassword("");
     setDevCode("");
+    setPhoneSent(false);
+    setSmsCode("");
+    setCooldown(0);
+  };
+
+  const fullPhone = () => {
+    const raw = phone.trim();
+    if (raw.startsWith("+")) return "+" + raw.replace(/\D/g, "");
+    const code = (cc || "+86").trim().replace(/\D/g, "") || "86";
+    return "+" + code + raw.replace(/\D/g, "");
   };
 
   const post = async (path, body) => {
@@ -130,6 +153,71 @@ export default function SignInClient({ initialMode = "login", next = "/" }) {
     setStep("done");
     setNote("密码已重设，请用新密码登录。");
   };
+
+  const requestPhone = async () => {
+    if (busy || cooldown > 0) return;
+    const p = fullPhone();
+    if (p.replace(/\D/g, "").length < 8) {
+      setErr("请输入手机号");
+      return;
+    }
+    setErr("");
+    setBusy(true);
+    const { ok, data } = await post("/api/auth/phone/request", { phone: p });
+    setBusy(false);
+    if (!ok) {
+      setErr((data && data.error) || "发送失败");
+      return;
+    }
+    setPhoneSent(true);
+    setDevCode((data && data.devCode) || "");
+    setCooldown(60);
+    setNote(`验证码已发送至 ${p}`);
+  };
+
+  const verifyPhone = async (e) => {
+    e.preventDefault();
+    if (busy || !phoneTerms || smsCode.length < 6) return;
+    setErr("");
+    setBusy(true);
+    const { ok, data } = await post("/api/auth/phone/verify", {
+      phone: fullPhone(),
+      code: smsCode,
+    });
+    setBusy(false);
+    if (!ok) {
+      setErr((data && data.error) || "验证失败");
+      return;
+    }
+    finish();
+  };
+
+  const phoneDevBox =
+    phoneSent && devCode ? (
+      <div className="signin-dev">
+        演示验证码 <b>{devCode}</b>
+        <button type="button" onClick={() => setSmsCode(devCode)}>填入</button>
+      </div>
+    ) : null;
+
+  const tabs = (
+    <div className="signin-tabs">
+      <button
+        type="button"
+        className={mode !== "phone" ? "on" : ""}
+        onClick={() => switchMode("login")}
+      >
+        邮箱
+      </button>
+      <button
+        type="button"
+        className={mode === "phone" ? "on" : ""}
+        onClick={() => switchMode("phone")}
+      >
+        手机号
+      </button>
+    </div>
+  );
 
   const devBox = devCode ? (
     <div className="signin-dev">
@@ -346,8 +434,87 @@ export default function SignInClient({ initialMode = "login", next = "/" }) {
     );
   }
 
+  if (mode === "phone") {
+    return (
+      <div className="signin-card">
+        {tabs}
+        <h1 className="signin-title">手机号登录 / 注册</h1>
+        <p className="signin-sub">未注册的手机号会自动创建账号，注册送 100 credit。</p>
+        <form className="signin-form" onSubmit={verifyPhone}>
+          <div className="signin-phone-row">
+            <input
+              className="signin-cc"
+              value={cc}
+              onChange={(e) => setCc(e.target.value)}
+              maxLength={5}
+              inputMode="tel"
+              aria-label="国家区号"
+            />
+            <input
+              type="tel"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="13800138000"
+              autoComplete="tel-national"
+              required
+            />
+            <button
+              type="button"
+              className="signin-send"
+              onClick={requestPhone}
+              disabled={busy || cooldown > 0 || phone.trim().length < 5}
+            >
+              {cooldown > 0 ? `${cooldown}s` : phoneSent ? "重发" : "获取验证码"}
+            </button>
+          </div>
+          {phoneSent ? (
+            <label className="signin-field">
+              <span>6 位短信验证码</span>
+              <input
+                value={smsCode}
+                onChange={(e) => setSmsCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                placeholder="000000"
+                maxLength={6}
+                required
+              />
+            </label>
+          ) : null}
+          {phoneDevBox}
+          <label className="signin-terms">
+            <input
+              type="checkbox"
+              checked={phoneTerms}
+              onChange={(e) => setPhoneTerms(e.target.checked)}
+            />
+            <span>
+              未注册将自动创建账号；我已阅读并同意 <Link href="/about">服务协议</Link> 和{" "}
+              <Link href="/about">隐私权政策</Link>
+            </span>
+          </label>
+          {err ? <p className="signin-err">{err}</p> : null}
+          <button
+            className="signin-submit"
+            disabled={busy || !phoneSent || smsCode.length < 6 || !phoneTerms}
+          >
+            {busy ? "处理中…" : "登录 / 注册"}
+          </button>
+        </form>
+        {methods}
+        <p className="signin-guest"><Link href="/">以游客模式继续</Link></p>
+        <p className="signin-foot">
+          <button type="button" className="signin-link" onClick={() => switchMode("login")}>
+            使用邮箱登录
+          </button>
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="signin-card">
+      {tabs}
       <h1 className="signin-title">登录后畅聊你喜欢的角色</h1>
       <p className="signin-sub">用邮箱和密码登录；没有账号可以注册，或先以游客模式逛逛。</p>
       <form className="signin-form" onSubmit={doLogin}>

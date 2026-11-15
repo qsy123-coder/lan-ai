@@ -8,7 +8,7 @@ import ThemeToggle from "./ThemeToggle";
 // 主导航：照 dzmm —— 左「角色 消息 论坛 我的」／中「搜索」／右「加号 头像」
 // 还没实现的页面标 soon：渲染成禁用态，避免点了 404（悬停预取也会 404）。
 const NAV = [
-  { href: "/", label: "角色", icon: "role" },
+  { href: "/", label: "首页", icon: "home" },
   // 消息就是 /chat：三栏 + 会话抽屉已经在 ChatClient 里，不再单独做 /messages。
   { href: "/chat", label: "消息", icon: "msg" },
   { href: "/forum", label: "论坛", icon: "forum", soon: true },
@@ -16,6 +16,14 @@ const NAV = [
 ];
 
 function Icon({ name, size = 17 }) {
+  if (name === "home")
+    return (
+      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M4 11l8-7 8 7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M6 10v9h12v-9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M10 19v-5h4v5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
   if (name === "role")
     return (
       <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">

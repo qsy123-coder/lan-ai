@@ -55,6 +55,38 @@ const newSid = () =>
   (globalThis.crypto && globalThis.crypto.randomUUID && globalThis.crypto.randomUUID()) ||
   `${Date.now().toString(36)}-${uid()}`;
 
+// 一次性迁移：旧版单会话（lg.sessions.v2 / lg.msgs.v2.<cardId>）→ 多会话 v3。
+// 每个旧记录变成一个独立会话，消息一并搬过去，避免升级后「对话全没了」。
+function migrateV2toV3() {
+  try {
+    if (localStorage.getItem("lg.migrated.v3")) return;
+    const v2 = readJSON("lg.sessions.v2", []);
+    const v3 = readJSON(SKEY, []);
+    const have = new Set((Array.isArray(v3) ? v3 : []).map((x) => String(x.cardId)));
+    const add = [];
+    for (const x of (Array.isArray(v2) ? v2 : [])) {
+      if (!x || have.has(String(x.cardId))) continue;
+      const sid = newSid();
+      const old = readJSON(`lg.msgs.v2.${x.cardId}`, []);
+      if (Array.isArray(old) && old.length) {
+        localStorage.setItem(mkey(x.cardId, sid), JSON.stringify(old));
+      }
+      add.push({
+        sessionId: sid,
+        cardId: x.cardId,
+        name: x.name,
+        cover: x.cover,
+        lastAt: x.lastAt || Date.now(),
+        last: x.last || "",
+      });
+    }
+    if (add.length) {
+      localStorage.setItem(SKEY, JSON.stringify([...add, ...(Array.isArray(v3) ? v3 : [])]));
+    }
+    localStorage.setItem("lg.migrated.v3", "1");
+  } catch {}
+}
+
 // 多段续写会产出多个 <sug> 块，必须全局匹配；
 // 否则第一个之后的标签会漏进正文，皔得像 HTML。
 const SUG_RE_G = /<sug>([\s\S]*?)<\/sug>/gi;
@@ -282,6 +314,8 @@ export default function ChatClient({ card, initialSession }) {
     }
     const sid = sessionId;
     sidRef.current = sid;
+    // 旧版单会话 → 多会话一次性迁移（跑在最前面，保证下面读到已迁移的数据）
+    migrateV2toV3();
 
     // 1) 本会话消息（多会话按 sid 隔离）
     let saved = readJSON(mkey(card.id, sid), []);

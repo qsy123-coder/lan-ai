@@ -96,9 +96,6 @@ export default function SessionList({
           <h2>对话</h2>
           <span className="sp-count">{sessions.length}</span>
           <span className="sp-gap" />
-          <button className="sp-txt-btn press" onClick={() => onNew?.()} title="同卡新开一个会话">
-            ＋ 新对话
-          </button>
           <button
             className={`sp-txt-btn press ${manage ? "on" : ""}`}
             onClick={() => {
@@ -131,6 +128,29 @@ export default function SessionList({
             </button>
           ) : null}
         </div>
+
+        <button
+          type="button"
+          className="sp-new press"
+          onClick={() => onNew?.()}
+          title="同一张卡新开一个会话"
+          style={{
+            flex: "none",
+            margin: "0 10px 10px",
+            height: 44,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+            width: "calc(100% - 20px)",
+            fontSize: 14,
+            border: "1px solid var(--ch-accent)",
+            color: "var(--ch-accent)",
+            background: "var(--ch-accent-weak)",
+          }}
+        >
+          ＋ 新对话
+        </button>
 
         <div className="sp-body">
           {sessions.length === 0 ? (
@@ -202,15 +222,11 @@ export default function SessionList({
 
         <footer className="sp-foot">
           <Link href="/" className="sp-foot-link" onClick={onClose}>
-            去挑新角色
+            首页
           </Link>
           <button className="sp-foot-link press" onClick={onOpenSettings}>
             会话设置
           </button>
-          <span className="sp-foot-gap" />
-          <Link href="/" className="sp-foot-link sp-foot-nav" onClick={onClose}>
-            导航
-          </Link>
         </footer>
       </aside>
     </>

@@ -307,26 +307,26 @@ export default function ChatClient({ card, initialSession }) {
   }, []);
 
   useEffect(() => {
+    // 旧版单会话 → 多会话一次性迁移（最先跑，保证下面能选到旧会话）
+    migrateV2toV3();
     if (!sessionId) {
-      // 首次进入：沿用 URL 的 s，否则新开一个会话
-      setSessionId(initialSession || newSid());
+      // 有 URL 指定的会话 → 用它；否则默认打开该卡最近的一个会话；都没有才新建
+      if (initialSession) {
+        setSessionId(initialSession);
+        return;
+      }
+      const list0 = readJSON(SKEY, []);
+      const mine0 = (Array.isArray(list0) ? list0 : [])
+        .filter((x) => String(x.cardId) === String(card.id))
+        .sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
+      setSessionId(mine0[0]?.sessionId || newSid());
       return;
     }
     const sid = sessionId;
     sidRef.current = sid;
-    // 旧版单会话 → 多会话一次性迁移（跑在最前面，保证下面读到已迁移的数据）
-    migrateV2toV3();
 
-    // 1) 本会话消息（多会话按 sid 隔离）
-    let saved = readJSON(mkey(card.id, sid), []);
-    // 2) 单会话旧版兼容：v2 消息迁移到当前会话（仅一次）
-    if (!saved.length) {
-      const legacy = readJSON(`lg.msgs.v2.${card.id}`, []);
-      if (Array.isArray(legacy) && legacy.length) {
-        saved = legacy;
-        localStorage.setItem(mkey(card.id, sid), JSON.stringify(legacy));
-      }
-    }
+    // 1) 本会话消息（多会话按 sid 隔离；新会话就是空的，绝不从别处复制）
+    const saved = readJSON(mkey(card.id, sid), []);
     setMsgs(saved);
 
     // 3) 会话索引：upsert 当前会话
@@ -346,9 +346,12 @@ export default function ChatClient({ card, initialSession }) {
     localStorage.setItem(SKEY, JSON.stringify(next));
     setSessions(next);
 
-    // 4) 完全空白且未删除过 → 从 seeds.json 恢复（带的 chatId 也一并恢复）
+    // 3) seeds.json 只在该卡「首次打开且完全空白」时恢复一次，之后新会话不再复制
     const deleted = readJSON(DKEY, []);
-    if (!saved.length && !deleted.some((x) => String(x) === String(card.id))) {
+    const seedsFlag = "lg.seeds.restored." + card.id;
+    if (!saved.length && !deleted.some((x) => String(x) === String(card.id))
+        && !localStorage.getItem(seedsFlag)) {
+      try { localStorage.setItem(seedsFlag, "1"); } catch {}
       let alive = true;
       fetch("/seeds.json", { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : null))

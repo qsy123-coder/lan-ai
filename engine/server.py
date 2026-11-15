@@ -266,6 +266,28 @@ def create_chat(cookie, card_id):
         return None, "%s: %s" % (type(e).__name__, str(e)[:80])
 
 
+def delete_chat(cookie, chat_id):
+    """chat.deleteChat → (ok, err)。真正删除上游会话（连带其完整存档历史）。
+
+    2026-11-15 实测：chat.deleteChat {"chatId": ...} → {"success":true,"message":"会话已经删除"}；
+    删除后 createByCard 会返回全新 chatId。这是「删对话即真忘」的关键——
+    不删上游会话的话，本地删了消息/记忆，模型仍能从上游存档读到旧剧情。
+    """
+    url = BASE + "/api/trpc/chat.deleteChat"
+    rid = "web-dc-%d" % int(time.time() * 1000)
+    try:
+        r = creq.post(url, data=json.dumps({"json": {"chatId": str(chat_id)}}).encode(),
+                      headers=headers_of(cookie, request_id=rid), impersonate="chrome",
+                      proxies=proxies(), timeout=30)
+        if r.status_code != 200:
+            return False, "HTTP %s" % r.status_code
+        j = json.loads(r.text)
+        ok = bool(j.get("result", {}).get("data", {}).get("json", {}).get("success"))
+        return ok, "" if ok else "no success"
+    except Exception as e:
+        return False, "%s: %s" % (type(e).__name__, str(e)[:80])
+
+
 # 仅作硬上限；实际预算由 build_body 按模型 ctx 动态计算。
 MAX_HISTORY_MSGS = 200
 MAX_HISTORY_CHARS = 120000
@@ -667,6 +689,33 @@ def drop_chat(st, name):
     a["chat_id"] = None
     a["card_id"] = None
     save_state(st)
+
+
+def drop_site_chats_for_card(card_id):
+    """删除某张卡在所有账号上的上游会话，并清掉本地缓存。
+
+    上游 chatId 在 dzmm 服务端保存完整对话历史；只要会话还在，即使本地把
+    消息/记忆都删了，模型照样能从上游存档读到旧剧情（2026-11-15 实测）。
+    所以这里先调 chat.deleteChat 真正删掉上游会话，再清缓存，下次 createByCard
+    会新开一个干净会话（存档为空），模型才真正忘记。
+    """
+    st = load_state()
+    pool = load_pool()
+    sc = st.setdefault("site_chats", {})
+    suffix = ":%s" % int(card_id)
+    keys = [k for k in list(sc.keys()) if k.endswith(suffix)]
+    for k in keys:
+        ent = sc.get(k) or {}
+        acct = ent.get("account")
+        cid = ent.get("chatId")
+        if acct in pool and cid:
+            ok, err = delete_chat(pool[acct]["cookie"], cid)
+            log("删除上游会话 %s（%s/%s）-> %s %s" % (
+                str(cid)[:8], acct, card_id, ok, err))
+        sc.pop(k, None)
+    if keys:
+        save_state(st)
+    return keys
 
 
 # ---------------------------------------------------------------- 前台站点接入
@@ -1546,6 +1595,7 @@ class Handler(BaseHTTPRequestHandler):
                 mem = memlib.default_memory(card_id)
                 mem["suppressed"] = sorted(set(removed))[:200]
                 memlib.save_memory(MEMORY_DIR, mem)
+                drop_site_chats_for_card(card_id)
                 return self._json(200, {"memory": mem})
             if payload.get("rebuild"):
                 # 前端删了某条消息后触发：manual 锚点保留，auto 从当前历史重抽，
@@ -1558,6 +1608,10 @@ class Handler(BaseHTTPRequestHandler):
                 mem["summary"] = ""
                 mem["summarizedUpTo"] = 0
                 memlib.save_memory(MEMORY_DIR, mem)
+                # 删光所有消息 = 用户想从零开始：丢弃上游会话，否则模型仍能从
+                # 上游 chatId 的存档里读到被删掉的剧情（实测「删了还记得」的根因）。
+                if not history:
+                    drop_site_chats_for_card(card_id)
                 return self._json(200, {"memory": mem})
             if isinstance(payload.get("pinned"), list):
                 old_ids = memlib.pin_ids(mem.get("pinned"))

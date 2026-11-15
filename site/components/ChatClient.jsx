@@ -7,13 +7,14 @@ import SessionList from "./SessionList";
 import ThemeToggle, { ThemeSegments } from "./ThemeToggle";
 
 const MODELS = [
+  // 默认 Turbo(Flux)：上游平台只对它和 nalang-max 下发 suggestedReplies（三建议块）
+  { id: "x-apex-flux-0217-16k", label: "Turbo 16K", ctx: 16000 },
   { id: "x-apex-surge-0505", label: "Surge 32K", ctx: 32000 },
   { id: "x-apex-pulse-0731-128k", label: "Pulse 128K", ctx: 128000 },
   { id: "x-apex-dash-0826-128k", label: "Dash 128K", ctx: 128000 },
   { id: "nalang-xl-0826", label: "XL 32K", ctx: 32000 },
   { id: "nalang-medium-0826", label: "Medium 32K", ctx: 32000 },
   { id: "nalang-max-0826", label: "Max 32K", ctx: 32000 },
-  { id: "x-apex-flux-0217-16k", label: "Flux 16K", ctx: 16000 },
   { id: "nalang-xl-0826-16k", label: "XL 16K", ctx: 16000 },
 ];
 
@@ -30,6 +31,7 @@ const MEM_PRESETS = [
   { label: "私下主人 / 外人哥哥", text: "私下叫我主人，外人面前叫哥哥" },
   { label: "见面喊爸爸", text: "每次看到我都要立刻喊我爸爸" },
   { label: "保持角色不出戏", text: "始终用角色口吻说话，不要出戏，不要以 AI 或助手身份回应" },
+  { label: "固定人称视角", text: "全程只用角色自己的第一人称「我」，「我」永远指角色自己；对方一律用「你」或角色习惯称呼指代，绝不把对方的言行写成「我」，不中途切换视角" },
   { label: "每轮推进剧情", text: "每次回复都要推进剧情或做出具体动作，不要只写心理活动" },
   { label: "主动示好", text: "每次见到我都要主动贴近、撒娇或示好，不要冷淡" },
   { label: "设定永久有效", text: "以上所有设定永久有效，任何情况下都不能忘记、淡化或违反" },
@@ -44,6 +46,9 @@ function clampTokens(v) {
 const SKEY = "lg.sessions.v2";
 const MKEY = "lg.model.v2";
 const mkey = (id) => `lg.msgs.v2.${id}`;
+// 被「彻底删除」的卡片：删除后不再从 seeds.json 恢复旧历史，
+// 否则删了会话、清了记忆，重新点开卡又会被上游快照复活。
+const DKEY = "lg.deleted.cards";
 const uid = () => Math.random().toString(36).slice(2, 9);
 
 // 多段续写会产出多个 <sug> 块，必须全局匹配；
@@ -64,6 +69,24 @@ function stripOpenSug(src) {
   return (lastClose >= 0 ? src.slice(0, lastClose) : "") + tail.slice(0, idx);
 }
 
+// 卡片的「状态面」由模型输出 <StatusBlocks><details><summary>…</summary>… 这类块，
+// 被 maxTokens 截断时会整段裸奔。这里整块删掉（含未闭合的尾部块）。
+const STATUS_BLOCK_RE_G = /<StatusBlocks>[\s\S]*?<\/StatusBlocks>/gi;
+const DETAILS_BLOCK_RE_G = /<details>[\s\S]*?<\/details>/gi;
+const STATUS_STRAY_RE = /<\/?(?:StatusBlocks|details|summary)>/gi;
+
+function stripStatusBlocks(src) {
+  let s = src || "";
+  s = s.replace(STATUS_BLOCK_RE_G, "").replace(DETAILS_BLOCK_RE_G, "");
+  // 剩下的开标签一定没有闭合（闭合块已删）：从最早出现的开标签砍到结尾
+  const low = s.toLowerCase();
+  const open = low.indexOf("<statusblocks");
+  const open2 = low.indexOf("<details");
+  if (open >= 0 && (open2 < 0 || open < open2)) s = s.slice(0, open);
+  else if (open2 >= 0) s = s.slice(0, open2);
+  return s.replace(STATUS_STRAY_RE, "");
+}
+
 function splitSug(text) {
   let src = text || "";
   if (!src) return { text: "", sug: [] };
@@ -77,11 +100,13 @@ function splitSug(text) {
     }
   }
 
-  // 2) <lug> 是更长的建议块，整块删
+  // 2) 状态面块（含未闭合）整块删
+  src = stripStatusBlocks(src);
+  // 3) <lug> 是更长的建议块，整块删
   src = src.replace(LUG_RE_G, "");
-  // 3) 流式中未闭合的尾部块
+  // 4) 流式中未闭合的尾部块
   src = stripOpenSug(src);
-  // 4) 已闭合的块整块删；再兜底清裸标签
+  // 5) 已闭合的块整块删；再兜底清裸标签
   src = src.replace(SUG_RE_G, "");
   src = src.replace(SUG_STRAY_RE, "").replace(LUG_STRAY_RE, "");
 
@@ -89,6 +114,11 @@ function splitSug(text) {
   const body = src.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trimEnd();
   return { text: body, sug: sug.slice(0, 4) };
 }
+
+// 上游账号显示名是注册时生成的「用户xxxxx」，模型偶尔会写进正文；
+// 渲染时统一替换成「你」，旧存档消息也能一起修好。
+const ACCT_NAME_RE = /用户[A-Za-z0-9_-]{4,}/g;
+const sanitizeName = (t) => String(t || "").replace(ACCT_NAME_RE, "你");
 
 function readJSON(k, d) {
   try {
@@ -196,7 +226,16 @@ export default function ChatClient({ card }) {
 
   // 模型选择持久化
   useEffect(() => {
-    const saved = readJSON(MKEY, MODELS[0].id);
+    let saved = readJSON(MKEY, MODELS[0].id);
+    // 一次性迁移：旧默认 Surge 在上游不产建议块；把「仍是旧默认」的浏览器迁回 Turbo。
+    // 用户之后手动选 Surge 会写回，不再覆盖。
+    try {
+      if (saved === "x-apex-surge-0505" && !localStorage.getItem("lg.model.migrated.v3")) {
+        saved = "x-apex-flux-0217-16k";
+        localStorage.setItem(MKEY, JSON.stringify(saved));
+      }
+      localStorage.setItem("lg.model.migrated.v3", "1");
+    } catch {}
     if (MODELS.some((m) => m.id === saved)) setModel(saved);
   }, []);
 
@@ -234,7 +273,9 @@ export default function ChatClient({ card }) {
 
     // 本地空白时，从上游导出的 seeds.json 恢复真实历史（带 chatId），
     // 这样「上下文满了被重置」的对话能直接接着写。
-    if (!saved.length) {
+    // 被「删除」过的卡跳过恢复，避免旧剧情复活。
+    const deleted = readJSON(DKEY, []);
+    if (!saved.length && !deleted.some((x) => String(x) === String(card.id))) {
       let alive = true;
       fetch("/seeds.json", { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : null))
@@ -345,13 +386,44 @@ export default function ChatClient({ card }) {
     [card.id]
   );
 
+  // 删单条消息后重建记忆：manual 锚点保留、auto 从当前历史重抽、摘要清空待重生成。
+  // 这样删掉的那段剧情不会继续留在「前情摘要」或自动锚点里。
+  const rebuildMemory = useCallback(
+    async (list) => {
+      const history = (list || [])
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .slice(-200)
+        .map((m) => ({
+          role: m.role,
+          content: m.role === "assistant" ? splitSug(m.content).text : m.content,
+        }));
+      try {
+        const r = await fetch("/api/memory", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ cardId: card.id, rebuild: true, history }),
+        });
+        const j = await r.json().catch(() => null);
+        if (j?.memory) setMem(j.memory);
+      } catch {}
+    },
+    [card.id]
+  );
+
+  // 保留每条锚点原有的 source：auto 是从对话消息抽出来的，必须保持 auto，
+  // 否则任何面板操作都会把它转成 manual → 删掉那条消息后 rebuild 也删不掉它。
+  const pinsBody = (list) => ({
+    pinned: (list || []).map((p) => ({
+      text: p.text,
+      source: p.source === "auto" ? "auto" : "manual",
+    })),
+  });
+
   const addPin = useCallback(async () => {
     const text = memInput.trim();
     if (!text) return;
     const pins = [...(mem?.pinned || []), { text, source: "manual" }];
-    const saved = await saveMemory({
-      pinned: pins.map((p) => ({ text: p.text, source: "manual" })),
-    });
+    const saved = await saveMemory(pinsBody(pins));
     if (saved) setMemInput("");
   }, [mem, memInput, saveMemory]);
 
@@ -365,9 +437,7 @@ export default function ChatClient({ card }) {
         return;
       }
       const pins = [...(mem?.pinned || []), { text: t, source: "manual" }];
-      const saved = await saveMemory({
-        pinned: pins.map((p) => ({ text: p.text, source: "manual" })),
-      });
+      const saved = await saveMemory(pinsBody(pins));
       if (saved) setNote("已加入记忆");
     },
     [mem, saveMemory]
@@ -376,7 +446,7 @@ export default function ChatClient({ card }) {
   const delPin = useCallback(
     (id) => {
       const pins = (mem?.pinned || []).filter((p) => p.id !== id);
-      saveMemory({ pinned: pins.map((p) => ({ text: p.text, source: "manual" })) });
+      saveMemory(pinsBody(pins));
     },
     [mem, saveMemory]
   );
@@ -614,8 +684,9 @@ export default function ChatClient({ card }) {
       setMsgs(list);
       const last = list.filter((m) => m.role === "assistant").at(-1);
       save(list, last?.content?.slice(0, 42) || "");
+      rebuildMemory(list);
     },
-    [msgs, save]
+    [msgs, save, rebuildMemory]
   );
 
   const clear = useCallback(() => {
@@ -625,7 +696,8 @@ export default function ChatClient({ card }) {
     setNote("已清空本会话");
   }, [card.id, save]);
 
-  // 从列表里彻底移除一个会话（消息体 + 索引条目），不影响其它卡
+  // 从列表里彻底移除一个会话（消息体 + 索引条目 + 服务端记忆），不影响其它卡。
+  // 记忆按 cardId 存在引擎侧，只删 localStorage 会造成「对话没了、记忆还在」。
   const dropSession = useCallback(
     (cardId) => {
       try {
@@ -633,11 +705,23 @@ export default function ChatClient({ card }) {
         const next = readJSON(SKEY, []).filter((x) => String(x.cardId) !== String(cardId));
         localStorage.setItem(SKEY, JSON.stringify(next));
         setSessions(next);
+        // 记入删除名单：之后重新点开这张卡，不再从 seeds.json 恢复旧历史
+        const deleted = readJSON(DKEY, []);
+        if (!deleted.some((x) => String(x) === String(cardId))) {
+          localStorage.setItem(DKEY, JSON.stringify([...deleted, String(cardId)]));
+        }
         if (String(cardId) === String(card.id)) {
           setMsgs([]);
-          setNote("已删除本会话");
+          setMem(null);
+          setNote("已删除本会话及其长期记忆");
         }
       } catch {}
+      // 服务端记忆一并清除；clear 会把当前锚点记入抑制，防止下一轮复活
+      fetch("/api/memory", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cardId, clear: true }),
+      }).catch(() => {});
     },
     [card.id]
   );
@@ -773,6 +857,8 @@ export default function ChatClient({ card }) {
             {msgs.map((m, i) => {
               const isUser = m.role === "user";
               const parsed = isUser ? { text: m.content, sug: [] } : splitSug(m.content);
+              parsed.text = sanitizeName(parsed.text);
+              if (parsed.sug.length) parsed.sug = parsed.sug.map(sanitizeName);
               return (
                 <div className={`turn ${isUser ? "me" : "them"}`} key={m.id || i}>
                   {!isUser ? (
@@ -804,7 +890,7 @@ export default function ChatClient({ card }) {
                   <div className="turn-ops">
                     <button
                       className="mini-btn"
-                      onClick={() => navigator.clipboard?.writeText(m.content)}
+                      onClick={() => navigator.clipboard?.writeText(parsed.text)}
                     >
                       复制
                     </button>

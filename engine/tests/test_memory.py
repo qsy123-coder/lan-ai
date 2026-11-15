@@ -224,6 +224,52 @@ class SummaryTest(unittest.TestCase):
         self.assertIn("旧摘要", p)
 
 
+class SuppressionTest(unittest.TestCase):
+    """删除过的锚点不许在下一轮 auto 抽取里复活。"""
+
+    def test_deleted_pin_not_re_extracted(self):
+        hist = [{"role": "user", "content": "以后私底下叫我主人，外人面前叫哥哥"},
+                {"role": "assistant", "content": "好"}]
+        mem = m.default_memory(426322)
+        mem["pinned"] = m.merge_pins([], m.extract_pins(hist))
+        ids = m.pin_ids(mem["pinned"])
+        removed = {sorted(ids)[-1]}
+        m.update_suppressed(mem, removed)
+        mem["pinned"] = [p for p in mem["pinned"] if p["id"] not in removed]
+
+        fresh = m.apply_suppression(m.extract_pins(hist), mem.get("suppressed"))
+        remerged = m.merge_pins(mem["pinned"], fresh)
+        self.assertEqual([p["text"] for p in remerged],
+                         [p["text"] for p in mem["pinned"]])
+
+    def test_manual_readd_unsuppresses(self):
+        mem = m.default_memory(1)
+        pid = m.pin_id("私下叫主人")
+        mem["pinned"] = [{"id": pid, "text": "私下叫主人",
+                          "source": "manual", "at": 0}]
+        m.update_suppressed(mem, {pid})
+        # 手动重新添加同文本 → 解除抑制
+        mem["pinned"] = m.merge_pins([], [{"text": "私下叫主人", "source": "manual"}])
+        m.update_suppressed(mem, set())
+        self.assertNotIn(pid, mem["suppressed"])
+
+
+class RefusalTest(unittest.TestCase):
+    def test_refusal_detected(self):
+        for t in ["抱歉，我无法生成这种内容。",
+                  "我不能。",
+                  "对不起，我不能继续。",
+                  "作为AI助手，我无法提供。",
+                  "I'm sorry, I cannot continue."]:
+            self.assertTrue(m.looks_like_refusal(t), t)
+
+    def test_normal_summary_not_refusal(self):
+        good = ("他先到了海边，妹妹在等他，两人约好今晚一起回家。这一段剧情写了很多句，"
+                "角色关系稳定，称呼规则也都还在，中间没有遗漏任何一次她对他的称呼变化，"
+                "接着他们又聊起了明天的安排，气氛很自然。")
+        self.assertFalse(m.looks_like_refusal(good))
+
+
 class FileTest(unittest.TestCase):
     def test_roundtrip(self):
         with tempfile.TemporaryDirectory() as d:

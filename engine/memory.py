@@ -59,7 +59,7 @@ def memory_path(memory_dir, card_id):
 
 def default_memory(card_id):
     return {"version": VERSION, "cardId": int(card_id), "pinned": [],
-            "summary": "", "summarizedUpTo": 0, "updatedAt": 0}
+            "summary": "", "summarizedUpTo": 0, "updatedAt": 0, "suppressed": []}
 
 
 def load_memory(out_dir, card_id):
@@ -75,6 +75,8 @@ def load_memory(out_dir, card_id):
             "summary": str(data.get("summary") or "")[:SUMMARY_MAX],
             "summarizedUpTo": _as_int(data.get("summarizedUpTo")),
             "updatedAt": _as_int(data.get("updatedAt")),
+            "suppressed": [s for s in (data.get("suppressed") or [])
+                           if isinstance(s, str) and s][:200],
         })
         return mem
     except Exception:
@@ -186,6 +188,34 @@ def merge_pins(existing, incoming):
     return trim(out)
 
 
+# ---------------------------------------------------------------- 抑制（删除不复活）
+
+def pin_ids(pins):
+    """取一组锚点的稳定 id 集合（缺 id 时按文本归一化补算）。"""
+    return {p.get("id") or pin_id(p.get("text", ""))
+            for p in (pins or []) if p.get("text")}
+
+
+def apply_suppression(pins, suppressed):
+    """把用户手动删除过的锚点从 auto 抽取结果里剔除，防止下一轮复活。"""
+    block = set(suppressed or [])
+    return [p for p in (pins or [])
+            if (p.get("id") or pin_id(p.get("text", ""))) not in block]
+
+
+def update_suppressed(mem, removed_ids):
+    """把被删除的锚点 id 记入 suppressed；用户手动重新添加同文本则解除抑制。"""
+    cur = set(mem.get("suppressed") or [])
+    for i in removed_ids:
+        if i:
+            cur.add(i)
+    manual = {p.get("id") or pin_id(p.get("text", ""))
+              for p in (mem.get("pinned") or [])
+              if p.get("source") == "manual" and p.get("text")}
+    mem["suppressed"] = sorted(cur - manual)[:200]
+    return mem
+
+
 # ---------------------------------------------------------------- 摘要
 
 def should_summarize(total_msgs, mem, min_new=16, keep_recent=12):
@@ -272,6 +302,26 @@ def clean_summary(text):
     t = (text or "").strip()
     t = re.sub(r"^(前情摘要|摘要)[:：]\s*", "", t)
     return t[:SUMMARY_MAX]
+
+
+# 摘要模型（严格审核档）对 NSFW 剧情会拒答。拒答文本通常很短，或一开头就是
+# 道歉/「我不能」；识别出来，避免把拒答当摘要写进记忆，污染后续每一轮。
+# 只锚定开头，不在正文里搜「不能/拒绝」——摘要里描述剧情会合法出现这些词。
+REFUSAL_PREFIX_RE = re.compile(
+    r"^\s*(抱歉|对不起|很抱歉|作为\s*(AI|人工智能|助手)|我不能|我无法|无法|"
+    r"不能提供|无法提供|i'?m\s+sorry|i\s+cannot|i\s+can'?t|sorry|as\s+an\s+ai|"
+    r"i\s+apologize)",
+    re.IGNORECASE)
+
+
+def looks_like_refusal(text):
+    t = (text or "").strip()
+    if not t:
+        return True
+    # 摘要要求 300-500 字，过短的基本都是拒答/截断，不是正常摘要
+    if len(t) < 40:
+        return True
+    return bool(REFUSAL_PREFIX_RE.match(t[:60]))
 
 
 # ---------------------------------------------------------------- 预算组装

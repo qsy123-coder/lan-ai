@@ -59,6 +59,13 @@ next build 通过
 横向溢出：1440 / 390 均 scrollW == vw
 ```
 
+真实鼠标点击（CDP `Input.dispatchMouseEvent`，不是 `element.click()`）：
+
+```text
+首页「分类」tab -> /category，21 张分类卡
+第一张分类卡 -> /?cat=truelove，筛选条「分类：纯爱 · 113 张」，113 张卡
+```
+
 ## 已知限制
 
 - 分类封面是官方分类图，不受「隐藏敏感内容」开关影响（只有角色卡按 `isSensitive` 遮罩）。

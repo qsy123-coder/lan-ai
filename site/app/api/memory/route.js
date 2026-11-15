@@ -14,9 +14,14 @@ function engineHeaders() {
 
 export async function GET(req) {
   if (denyIfNoPass(req)) return Response.json({ error: "unauthorized" }, { status: 401 });
-  const cardId = new URL(req.url).searchParams.get("cardId") || "";
+  const u = new URL(req.url);
+  const cardId = u.searchParams.get("cardId") || "";
+  const sessionId = u.searchParams.get("sessionId") || "";
+  let q = `cardId=${encodeURIComponent(cardId)}`;
+  // 多会话：必须把 sessionId 透传给引擎，否则引擎会退回卡片级旧记忆
+  if (sessionId) q += `&sessionId=${encodeURIComponent(sessionId)}`;
   try {
-    const r = await fetch(`${ENGINE}/site/memory?cardId=${encodeURIComponent(cardId)}`, {
+    const r = await fetch(`${ENGINE}/site/memory?${q}`, {
       headers: engineHeaders(),
       cache: "no-store",
     });

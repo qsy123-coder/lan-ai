@@ -80,6 +80,8 @@ SITE_TOKEN = os.environ.get("SITE_TOKEN", "")   # 设了就必须带 x-site-toke
 USERS_PATH = os.path.join(OUT_DIR, "users.json")
 USER_PREPAY = 3.2
 USER_SETTLE = 2.1
+# 演示站没接邮件服务：默认把 8 位验证码回给前端；线上要真邮件时设 AUTH_DEV_CODE=0
+AUTH_DEV_CODE = os.environ.get("AUTH_DEV_CODE", "1") != "0"
 
 # —— 广场：种子在 site/data/forum.json，运行态 out/forum.json
 FORUM_SEED = os.path.join(ROOT, "site", "data", "forum.json")
@@ -1808,6 +1810,47 @@ class Handler(BaseHTTPRequestHandler):
                     pass
             memlib.save_memory(MEMORY_DIR, mem)
             return self._json(200, {"memory": mem})
+        if path == "/site/user/signup/request":
+            if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
+                return self._json(401, {"error": "bad token"})
+            payload = self._body()
+            res, err = userslib.signup_request(
+                USERS_PATH, payload.get("email"), payload.get("password"), payload.get("name") or "")
+            if err:
+                return self._json(400, {"error": err})
+            out = {"ok": True, "email": res["email"]}
+            if AUTH_DEV_CODE:
+                out["devCode"] = res["code"]
+            return self._json(200, out)
+        if path == "/site/user/signup/verify":
+            if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
+                return self._json(401, {"error": "bad token"})
+            payload = self._body()
+            user, token, err = userslib.signup_verify(
+                USERS_PATH, payload.get("email"), payload.get("code"))
+            if err:
+                return self._json(400, {"error": err})
+            return self._json(200, {"user": user, "token": token})
+        if path == "/site/user/reset/request":
+            if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
+                return self._json(401, {"error": "bad token"})
+            payload = self._body()
+            res, err = userslib.reset_request(USERS_PATH, payload.get("email"))
+            if err:
+                return self._json(400, {"error": err})
+            out = {"ok": True, "email": res["email"]}
+            if AUTH_DEV_CODE:
+                out["devCode"] = res["code"]
+            return self._json(200, out)
+        if path == "/site/user/reset/verify":
+            if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
+                return self._json(401, {"error": "bad token"})
+            payload = self._body()
+            user, err = userslib.reset_verify(
+                USERS_PATH, payload.get("email"), payload.get("code"), payload.get("password"))
+            if err:
+                return self._json(400, {"error": err})
+            return self._json(200, {"ok": True, "user": user})
         if path == "/site/user/register":
             if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
                 return self._json(401, {"error": "bad token"})

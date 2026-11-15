@@ -82,10 +82,25 @@ export default function Nav() {
   const [hideSensitive, setHideSensitive] = useState(true);
   // 手机端抽屉
   const [drawer, setDrawer] = useState(false);
+  // 当前登录用户（游客为 null）
+  const [me, setMe] = useState(null);
 
   useEffect(() => {
     setHideSensitive(localStorage.getItem("hideSensitive") !== "0");
   }, []);
+
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/auth/me", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => {
+        if (alive) setMe((j && j.user) || null);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [p]);
 
   // 抽屉打开时锁滚动 + Esc 关闭
   useEffect(() => {
@@ -130,6 +145,7 @@ export default function Nav() {
 
   return (
     <div className={`topnav-wrap ${hideOnPhone ? "nav-hide-phone" : ""}`}>
+      <style>{`@media (max-width: 860px){.nav-auth{display:none!important}}`}</style>
       <nav className="topnav" aria-label="主导航">
         {/* 手机端汉堡：只在窄屏出现 */}
         <button
@@ -223,6 +239,24 @@ export default function Nav() {
               </svg>
             )}
           </button>
+
+          <Link
+            href={me ? "/me" : "/sign-in"}
+            className="nav-auth"
+            title={me ? `${me.name} · ${Number(me.credit).toFixed(2)} credit` : "登录"}
+            style={{
+              fontSize: 12,
+              color: "inherit",
+              padding: "0 8px",
+              opacity: 0.82,
+              whiteSpace: "nowrap",
+              maxWidth: 96,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {me ? me.name : "登录"}
+          </Link>
 
           <ThemeToggle />
 

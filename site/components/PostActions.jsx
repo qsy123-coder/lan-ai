@@ -110,7 +110,7 @@ export default function PostActions({ post, loggedIn = false }) {
         </form>
       ) : (
         <p className="post-login">
-          <Link href="/login">登录</Link>后点赞和评论。
+          <Link href="/sign-in">登录</Link>后点赞和评论。
         </p>
       )}
       {note ? <p className="post-note">{note}</p> : null}

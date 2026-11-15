@@ -46,7 +46,7 @@ export default async function NewPostPage() {
               <p>注册即送 100 credit，登录后回到这里继续。</p>
             </div>
             <div className="me-actions">
-              <Link href="/login" className="me-btn primary press">登录 / 注册</Link>
+              <Link href="/sign-in" className="me-btn primary press">登录 / 注册</Link>
               <Link href="/forum" className="me-btn ghost press">先逛逛</Link>
             </div>
           </div>

@@ -1,17 +1,11 @@
-import Nav from "../../components/Nav";
-import LoginForm from "../../components/LoginForm";
+import { redirect } from "next/navigation";
 import { requirePass } from "../../lib/gate";
-import "../account.css";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "登录 · 澜" };
 
-export default async function LoginPage() {
+export default async function LoginPage({ searchParams }) {
   await requirePass();
-  return (
-    <div className="shell">
-      <Nav />
-      <LoginForm />
-    </div>
-  );
+  const sp = (await searchParams) || {};
+  const s = sp.s ? `?s=${encodeURIComponent(String(sp.s))}` : "";
+  redirect(`/sign-in${s}`);
 }

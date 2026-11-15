@@ -448,6 +448,7 @@ asyncio.run(main())
 | 2026-11-15 | `fix/memory-delete` | 同卡多会话（每会话独立账号/上游）+ 删对话真删上游 `chat.deleteChat` + 记忆按会话独立 + 「导入旧记忆」+ 抽屉/首页 UI + seeds 注入拦截 + `/api/memory` 透传 sessionId | 已部署线上，API 实测通过（UI 点击未全部点测） |
 | 2026-11-15 | `feat/category-page` | 分类页：按 dzmm `category.list` 复刻 21 个分类 + 首页 `?cat=` 标签筛选 + 分类封面代理 | 已完成 |
 | 2026-11-15 | `feat/forum` | 广场/论坛：三栏 + 发帖/评论/赞踩 + 分区/标签/搜索；`notes/039` | 已完成 |
+| 2026-11-15 | `feat/signin-otp` | 登录逆向 + 邮箱 OTP 注册/重置 + `/sign-in` 页面 + Nav 登录入口；`notes/040` | 已完成（UI 已点测） |
 
 > 规矩：分支从 `main` 切出；任务完成后 `git checkout main && git merge <branch>`，
 > 或推远端开 PR。**合并由用户决定**，不要自行合并到 `main`。

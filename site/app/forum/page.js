@@ -91,7 +91,7 @@ export default async function ForumPage({ searchParams }) {
             {user ? (
               <Link href="/forum/new" className="me-btn primary press">发帖</Link>
             ) : (
-              <Link href="/login" className="me-btn ghost press">登录发帖</Link>
+              <Link href="/sign-in" className="me-btn ghost press">登录发帖</Link>
             )}
           </header>
 

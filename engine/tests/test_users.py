@@ -78,6 +78,44 @@ class UserTest(unittest.TestCase):
         u.logout(self.path, token)
         self.assertIsNone(u.session_user(self.path, token))
 
+    def test_signup_otp(self):
+        res, err = u.signup_request(self.path, "otp@example.com", "password123", "阿澜")
+        self.assertIsNone(err)
+        self.assertEqual(len(res["code"]), 8)
+        user, token, err = u.signup_verify(self.path, "otp@example.com", "00000000")
+        self.assertIsNone(user)
+        self.assertIn("验证码", err)
+        user, token, err = u.signup_verify(self.path, "otp@example.com", res["code"])
+        self.assertIsNone(err)
+        self.assertEqual(user["credit"], 100.0)
+        self.assertEqual(user["name"], "阿澜")
+        self.assertIsNotNone(u.session_user(self.path, token))
+        # 同一个邮箱不能再次发起注册
+        _, err2 = u.signup_request(self.path, "otp@example.com", "password123")
+        self.assertIn("已注册", err2)
+        # 验证码只能用一次
+        _, _, err3 = u.signup_verify(self.path, "otp@example.com", res["code"])
+        self.assertIsNotNone(err3)
+
+    def test_reset_otp(self):
+        user, token, _ = u.register(self.path, "reset@example.com", "password123")
+        res, err = u.reset_request(self.path, "reset@example.com")
+        self.assertIsNone(err)
+        bad, err2 = u.reset_verify(self.path, "reset@example.com", "00000000", "newpassword123")
+        self.assertIsNone(bad)
+        self.assertIn("验证码", err2)
+        ok, err3 = u.reset_verify(self.path, "reset@example.com", res["code"], "newpassword123")
+        self.assertIsNone(err3)
+        self.assertIsNotNone(ok)
+        # 旧密码失效，新密码可登录；旧会话被清
+        old, _, old_err = u.login(self.path, "reset@example.com", "password123")
+        self.assertIsNone(old)
+        self.assertIsNotNone(old_err)
+        new, new_token, new_err = u.login(self.path, "reset@example.com", "newpassword123")
+        self.assertIsNone(new_err)
+        self.assertIsNotNone(new_token)
+        self.assertIsNone(u.session_user(self.path, token))
+
     def test_vip_levels(self):
         user, token, _ = u.register(self.path, "a@b.com", "password123")
         self.assertEqual(user["vip"], 0)

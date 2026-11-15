@@ -177,7 +177,7 @@ export default async function MePage() {
               <p>注册即送 100 credit；游客对话仍可用，但不会产生积分记录。</p>
             </div>
             <div className="me-actions">
-              <Link href="/login" className="me-btn primary press">登录 / 注册</Link>
+              <Link href="/sign-in" className="me-btn primary press">登录 / 注册</Link>
               <Link href="/pricing" className="me-btn ghost press">会员与价格</Link>
             </div>
           </section>

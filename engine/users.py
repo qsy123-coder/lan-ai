@@ -5,7 +5,9 @@
   "version": 1,
   "users": {"u_x": {"id","email","name","salt","hash","credit","createdAt"}},
   "sessions": {"<token>": {"uid","exp"}},
-  "ledger": {"u_x": [{"ts","type","amount","balance","note"}]}
+  "ledger": {"u_x": [{"ts","type","amount","balance","note"}]},
+  "pending_signups": {"<email>": {"salt","hash","name","code","exp","tries"}},
+  "reset_codes": {"<email>": {"code","exp","tries"}}
 }
 
 只依赖标准库。注册送 100 credit；生成按预扣 3.2 / 结算 2.1 记账。
@@ -26,6 +28,8 @@ VERSION = 1
 INITIAL_CREDIT = 100.0
 SESSION_TTL = 30 * 24 * 3600
 LEDGER_KEEP = 200
+OTP_TTL = 600
+OTP_TRIES = 5
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 # 北京时间固定 UTC+8（不依赖 tzdata，Windows 也能跑）
@@ -52,7 +56,8 @@ def _today(now=None):
 
 
 def _empty():
-    return {"version": VERSION, "users": {}, "sessions": {}, "ledger": {}}
+    return {"version": VERSION, "users": {}, "sessions": {}, "ledger": {},
+            "pending_signups": {}, "reset_codes": {}}
 
 
 def load(path):
@@ -63,7 +68,7 @@ def load(path):
         return _empty()
     if not isinstance(data, dict):
         return _empty()
-    for k in ("users", "sessions", "ledger"):
+    for k in ("users", "sessions", "ledger", "pending_signups", "reset_codes"):
         if not isinstance(data.get(k), dict):
             data[k] = {}
     data["version"] = VERSION
@@ -161,8 +166,47 @@ def _make_session(data, uid):
     return token
 
 
+def _new_code():
+    return "%08d" % secrets.randbelow(100000000)
+
+
+def _create_user(data, email, salt_hex, hash_hex, name=""):
+    uid = "u_" + secrets.token_hex(6)
+    user = {
+        "id": uid,
+        "email": email,
+        "name": (name or "").strip()[:24] or email.split("@")[0],
+        "salt": salt_hex,
+        "hash": hash_hex,
+        "credit": 0.0,
+        "createdAt": _now(),
+    }
+    data["users"][uid] = user
+    _add_entry(data, uid, "grant", INITIAL_CREDIT, "注册赠礼")
+    token = _make_session(data, uid)
+    return user, token
+
+
+def _check_code(record, code, now):
+    if not record:
+        return "验证码已过期，请重新获取"
+    if int(record.get("exp") or 0) <= now:
+        return "验证码已过期，请重新获取"
+    if int(record.get("tries") or 0) >= OTP_TRIES:
+        return "验证码次数过多，请重新获取"
+    if not hmac.compare_digest(str(record.get("code") or ""), str(code or "")):
+        record["tries"] = int(record.get("tries") or 0) + 1
+        return "验证码不对"
+    return None
+
+
+def _prune_codes(mapping, now):
+    for key in [k for k, v in mapping.items() if int(v.get("exp") or 0) <= now]:
+        mapping.pop(key, None)
+
+
 def register(path, email, password, name=""):
-    """返回 (user, token, error)。"""
+    """返回 (user, token, error)。保留即时注册，给旧接口兼容。"""
     email = (email or "").strip().lower()
     password = password or ""
     if not EMAIL_RE.match(email):
@@ -174,22 +218,111 @@ def register(path, email, password, name=""):
         for u in data["users"].values():
             if u.get("email") == email:
                 return None, None, "这个邮箱已注册"
-        uid = "u_" + secrets.token_hex(6)
         salt = secrets.token_bytes(16)
-        user = {
-            "id": uid,
-            "email": email,
-            "name": (name or "").strip()[:24] or email.split("@")[0],
-            "salt": salt.hex(),
-            "hash": _hash(password, salt),
-            "credit": 0.0,
-            "createdAt": _now(),
-        }
-        data["users"][uid] = user
-        _add_entry(data, uid, "grant", INITIAL_CREDIT, "注册赠礼")
-        token = _make_session(data, uid)
+        user, token = _create_user(data, email, salt.hex(), _hash(password, salt), name)
         save(path, data)
         return _public(user, 0), token, None
+
+
+def signup_request(path, email, password, name=""):
+    """创建待验证注册，返回 (payload, error)；payload 带演示用 code。"""
+    email = (email or "").strip().lower()
+    password = password or ""
+    if not EMAIL_RE.match(email):
+        return None, "邮箱格式不对"
+    if len(password) < 8:
+        return None, "密码至少 8 位"
+    with LOCK:
+        data = load(path)
+        for u in data["users"].values():
+            if u.get("email") == email:
+                return None, "这个邮箱已注册"
+        now = _now()
+        _prune_codes(data["pending_signups"], now)
+        salt = secrets.token_bytes(16)
+        code = _new_code()
+        data["pending_signups"][email] = {
+            "salt": salt.hex(),
+            "hash": _hash(password, salt),
+            "name": (name or "").strip()[:24],
+            "code": code,
+            "exp": now + OTP_TTL,
+            "tries": 0,
+            "createdAt": now,
+        }
+        save(path, data)
+        return {"email": email, "code": code}, None
+
+
+def signup_verify(path, email, code):
+    """验证注册码并建号，返回 (user, token, error)。"""
+    email = (email or "").strip().lower()
+    with LOCK:
+        data = load(path)
+        now = _now()
+        rec = data["pending_signups"].get(email)
+        err = _check_code(rec, code, now)
+        if err:
+            if rec and int(rec.get("exp") or 0) <= now:
+                data["pending_signups"].pop(email, None)
+            save(path, data)
+            return None, None, err
+        for u in data["users"].values():
+            if u.get("email") == email:
+                data["pending_signups"].pop(email, None)
+                save(path, data)
+                return None, None, "这个邮箱已注册"
+        user, token = _create_user(data, email, rec["salt"], rec["hash"], rec.get("name"))
+        data["pending_signups"].pop(email, None)
+        save(path, data)
+        return _public(user, 0), token, None
+
+
+def reset_request(path, email):
+    """发送重设密码验证码，返回 (payload, error)。"""
+    email = (email or "").strip().lower()
+    with LOCK:
+        data = load(path)
+        user = next((u for u in data["users"].values() if u.get("email") == email), None)
+        if not user:
+            return None, "邮箱未注册"
+        now = _now()
+        _prune_codes(data["reset_codes"], now)
+        code = _new_code()
+        data["reset_codes"][email] = {"code": code, "exp": now + OTP_TTL, "tries": 0}
+        save(path, data)
+        return {"email": email, "code": code}, None
+
+
+def reset_verify(path, email, code, password):
+    """验证重置码并改密码，返回 (user, error)。"""
+    email = (email or "").strip().lower()
+    password = password or ""
+    if len(password) < 8:
+        return None, "密码至少 8 位"
+    with LOCK:
+        data = load(path)
+        now = _now()
+        rec = data["reset_codes"].get(email)
+        err = _check_code(rec, code, now)
+        if err:
+            if rec and int(rec.get("exp") or 0) <= now:
+                data["reset_codes"].pop(email, None)
+            save(path, data)
+            return None, err
+        user = next((u for u in data["users"].values() if u.get("email") == email), None)
+        if not user:
+            data["reset_codes"].pop(email, None)
+            save(path, data)
+            return None, "邮箱未注册"
+        salt = secrets.token_bytes(16)
+        user["salt"] = salt.hex()
+        user["hash"] = _hash(password, salt)
+        for token in [t for t, s in data["sessions"].items() if s.get("uid") == user["id"]]:
+            data["sessions"].pop(token, None)
+        data["reset_codes"].pop(email, None)
+        save(path, data)
+        return _public(user, vip_level(data, user["id"])), None
 
 
 def login(path, email, password):

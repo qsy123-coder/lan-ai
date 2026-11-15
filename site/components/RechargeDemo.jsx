@@ -43,7 +43,7 @@ export default function RechargeDemo({ loggedIn = false }) {
   if (!loggedIn) {
     return (
       <p className="price-hint">
-        登录后可演示充值：<Link href="/login">去登录</Link>
+        登录后可演示充值：<Link href="/sign-in">去登录</Link>
       </p>
     );
   }

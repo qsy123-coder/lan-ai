@@ -232,6 +232,7 @@ export default function ChatClient({ card, initialSession }) {
   const chatIdRef = useRef(null);   // 恢复的历史属于哪个上游会话
   const seedAcctRef = useRef(null);  // 该会话在哪个号下
   const sidRef = useRef(initialSession || "");  // 当前会话 id（回调里读最新值）
+  const isNewRef = useRef(false);  // 本会话是否刚由「＋新对话」创建（用于跳过 seeds 恢复）
   // 流式平滑渲染：上游按 ~80ms 一包吐出，直接渲染会「一顿一顿」。
   // 这里把累积文本放进 ref，用 rAF 以稳定节奏逐字揭示（追平 backlog），
   // 让画面连续，而不是按上游包的节奏跳动。
@@ -346,13 +347,17 @@ export default function ChatClient({ card, initialSession }) {
     localStorage.setItem(SKEY, JSON.stringify(next));
     setSessions(next);
 
-    // 3) seeds.json 只在该卡「首次打开且完全空白」时恢复一次，之后新会话不再复制
+    // 3) seeds 快照只在该卡「第一次打开且完全空白」时恢复一次。
+    //    「＋新对话」创建的会话（justNew）一律跳过；标记无条件落盘，避免以后重复注入。
+    const justNew = isNewRef.current;
+    isNewRef.current = false;
     const deleted = readJSON(DKEY, []);
     const seedsFlag = "lg.seeds.restored." + card.id;
-    if (!saved.length && !deleted.some((x) => String(x) === String(card.id))
-        && !localStorage.getItem(seedsFlag)) {
-      try { localStorage.setItem(seedsFlag, "1"); } catch {}
-      let alive = true;
+    const seedsDone = !!localStorage.getItem(seedsFlag);
+    try { localStorage.setItem(seedsFlag, "1"); } catch {}
+    let alive = true;
+    if (!justNew && !saved.length && !seedsDone
+        && !deleted.some((x) => String(x) === String(card.id))) {
       fetch("/seeds.json", { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : null))
         .then((all) => {
@@ -371,10 +376,10 @@ export default function ChatClient({ card, initialSession }) {
           localStorage.setItem(mkey(card.id, sid), JSON.stringify(restored));
         })
         .catch(() => {});
-      return () => {
-        alive = false;
-      };
     }
+    return () => {
+      alive = false;
+    };
   }, [card.id, card.name, card.cover, sessionId, initialSession]);
 
   const loadPool = useCallback(async () => {
@@ -798,6 +803,7 @@ export default function ChatClient({ card, initialSession }) {
   const newSession = useCallback(() => {
     const sid = newSid();
     sidRef.current = sid;
+    isNewRef.current = true;   // 新会话：绝不做 seeds 恢复，保持空白
     chatIdRef.current = null;
     seedAcctRef.current = null;
     setSessionId(sid);

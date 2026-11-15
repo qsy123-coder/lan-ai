@@ -28,6 +28,7 @@ from curl_cffi import requests as creq
 
 import memory as memlib
 import users as userslib
+import forum as forumlib
 
 BASE = "https://www.dzmm.ai"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -79,6 +80,10 @@ SITE_TOKEN = os.environ.get("SITE_TOKEN", "")   # 设了就必须带 x-site-toke
 USERS_PATH = os.path.join(OUT_DIR, "users.json")
 USER_PREPAY = 3.2
 USER_SETTLE = 2.1
+
+# —— 广场：种子在 site/data/forum.json，运行态 out/forum.json
+FORUM_SEED = os.path.join(ROOT, "site", "data", "forum.json")
+FORUM_DATA = os.path.join(OUT_DIR, "forum.json")
 
 STATE_LOCK = threading.Lock()
 RUN_LOCK = threading.Lock()
@@ -1631,6 +1636,33 @@ class Handler(BaseHTTPRequestHandler):
             if not user:
                 return self._json(401, {"error": "unauthorized"})
             return self._json(200, {"user": user, "checkin": state})
+        if path == "/site/forum":
+            if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
+                return self._json(401, {"error": "bad token"})
+            qs = parse_qs(urlparse(self.path).query)
+            token = (qs.get("token") or [""])[0]
+            user = userslib.session_user(USERS_PATH, token) if token else None
+            uid = user["id"] if user else None
+            data = forumlib.list_posts(
+                FORUM_SEED, FORUM_DATA,
+                (qs.get("topic") or [""])[0],
+                (qs.get("tag") or [""])[0],
+                (qs.get("sort") or ["latest"])[0],
+                (qs.get("q") or [""])[0],
+                uid)
+            return self._json(200, {"posts": data["posts"], "meta": data["meta"], "user": user})
+        if path == "/site/forum/post":
+            if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
+                return self._json(401, {"error": "bad token"})
+            qs = parse_qs(urlparse(self.path).query)
+            token = (qs.get("token") or [""])[0]
+            user = userslib.session_user(USERS_PATH, token) if token else None
+            uid = user["id"] if user else None
+            post = forumlib.get_post(
+                FORUM_SEED, FORUM_DATA, (qs.get("id") or [""])[0], uid)
+            if not post:
+                return self._json(404, {"error": "帖子不存在"})
+            return self._json(200, {"post": post, "user": user})
         return self._json(404, {"error": "not found"})
 
     def do_POST(self):
@@ -1819,6 +1851,46 @@ class Handler(BaseHTTPRequestHandler):
             if err:
                 return self._json(401 if "登录" in err else 400, {"error": err})
             return self._json(200, {"user": user, "entry": entry, "streak": streak})
+        if path == "/site/forum/post":
+            if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
+                return self._json(401, {"error": "bad token"})
+            payload = self._body()
+            user = userslib.session_user(USERS_PATH, payload.get("token"))
+            if not user:
+                return self._json(401, {"error": "请先登录"})
+            tags = payload.get("tags") or []
+            if isinstance(tags, str):
+                tags = [t.strip() for t in tags.replace("，", ",").split(",") if t.strip()]
+            post, err = forumlib.create_post(
+                FORUM_SEED, FORUM_DATA, user, payload.get("title"),
+                payload.get("body"), tags, payload.get("topic") or "")
+            if err:
+                return self._json(400, {"error": err})
+            return self._json(200, {"post": post})
+        if path == "/site/forum/comment":
+            if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
+                return self._json(401, {"error": "bad token"})
+            payload = self._body()
+            user = userslib.session_user(USERS_PATH, payload.get("token"))
+            if not user:
+                return self._json(401, {"error": "请先登录"})
+            res, err = forumlib.add_comment(
+                FORUM_SEED, FORUM_DATA, user, payload.get("postId"), payload.get("body"))
+            if err:
+                return self._json(400, {"error": err})
+            return self._json(200, res)
+        if path == "/site/forum/like":
+            if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
+                return self._json(401, {"error": "bad token"})
+            payload = self._body()
+            user = userslib.session_user(USERS_PATH, payload.get("token"))
+            if not user:
+                return self._json(401, {"error": "请先登录"})
+            post, err = forumlib.like(
+                FORUM_SEED, FORUM_DATA, user["id"], payload.get("postId"), payload.get("value"))
+            if err:
+                return self._json(400, {"error": err})
+            return self._json(200, {"post": post})
         if path == "/site/chat":
             if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
                 return self._json(401, {"error": "bad token"})

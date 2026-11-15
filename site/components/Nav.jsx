@@ -11,7 +11,7 @@ const NAV = [
   { href: "/", label: "首页", icon: "home" },
   // 消息就是 /chat：三栏 + 会话抽屉已经在 ChatClient 里，不再单独做 /messages。
   { href: "/chat", label: "消息", icon: "msg" },
-  { href: "/forum", label: "论坛", icon: "forum", soon: true },
+  { href: "/forum", label: "论坛", icon: "forum" },
   { href: "/me", label: "我的", icon: "me" },
 ];
 

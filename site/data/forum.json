@@ -1,0 +1,151 @@
+{
+ "version": 1,
+ "topics": [
+  "角色与创作",
+  "互动交友",
+  "生活交流",
+  "站务与求助",
+  "真人专区",
+  "妹子认证"
+ ],
+ "groups": [
+  { "name": "夏日同居同好会", "members": 1280 },
+  { "name": "古风王朝", "members": 864 },
+  { "name": "深夜树洞", "members": 532 },
+  { "name": "调教研究所", "members": 419 }
+ ],
+ "hotTags": [
+  { "tag": "剧情", "count": 520 },
+  { "tag": "调教", "count": 468 },
+  { "tag": "男娘", "count": 455 },
+  { "tag": "妹妹", "count": 388 },
+  { "tag": "古风", "count": 301 },
+  { "tag": "交友", "count": 266 }
+ ],
+ "posts": [
+  {
+   "id": "p_1001",
+   "title": "【站务】广场开张：发帖前先看这里",
+   "body": "广场是角色之外的公共区，聊卡、聊剧情、找搭子都行。\n\n三条底线：\n1. 不挂人、不引战，争论回帖里解决；\n2. 真人专区只聊日常，不发未授权的照片；\n3. 资源与卡名可以讨论，站外链接先看版规。\n\n新号先签到，发帖和评论都需要登录。",
+   "author": "澜·站务",
+   "authorLevel": 3,
+   "topic": "站务与求助",
+   "tags": ["站务", "公告"],
+   "pinned": true,
+   "createdAt": 1794583000,
+   "likes": 42,
+   "dislikes": 1,
+   "votes": {},
+   "comments": [
+    { "id": "c_1001a", "author": "夜航船", "authorLevel": 1, "body": "收到，先签个到。", "createdAt": 1794583300 },
+    { "id": "c_1001b", "author": "半盏茶", "authorLevel": 2, "body": "建议置顶一份卡名索引，找卡方便。", "createdAt": 1794583600 }
+   ]
+  },
+  {
+   "id": "p_1002",
+   "title": "妹妹发现你收藏她的照片，第一句话会说什么？",
+   "body": "场景：她翻你的手机相册，翻到一张她睡着时的侧脸。\n\n你回家时，她坐在沙发上，手机扣在腿上，抬头看你。\n\n想看她怎么开口——是装作没看见，还是直接把手机推过来？\n\n欢迎用角色卡实测，把最像的一句回在楼下。",
+   "author": "澜边散步",
+   "authorLevel": 2,
+   "topic": "角色与创作",
+   "tags": ["剧情", "妹妹"],
+   "pinned": false,
+   "createdAt": 1794582000,
+   "likes": 128,
+   "dislikes": 3,
+   "votes": {},
+   "comments": [
+    { "id": "c_1002a", "author": "橘子汽水", "authorLevel": 1, "body": "“哥哥，你拍我干嘛……删掉。”然后耳朵红了。", "createdAt": 1794582300 },
+    { "id": "c_1002b", "author": "白昼梦", "authorLevel": 2, "body": "我试出来的是先沉默，再把手机递过来，说“你自己看”。", "createdAt": 1794582500 },
+    { "id": "c_1002c", "author": "澜边散步", "authorLevel": 2, "body": "对，关键是别让她一次把话说完，留半句更好接。", "createdAt": 1794582800 }
+   ]
+  },
+  {
+   "id": "p_1003",
+   "title": "找长期搭子：都市 / 古风都能接",
+   "body": "主要跑都市日常和古风长线，偏好慢热、有来有回的节奏。\n\n时间：工作日晚上 9 点后，周末全天。\n\n不催更、不挂机，剧情卡住了就一起改设定。有意的回帖带一句你最近在跑的卡。",
+   "author": "晚风入怀",
+   "authorLevel": 1,
+   "topic": "互动交友",
+   "tags": ["交友", "长期"],
+   "pinned": false,
+   "createdAt": 1794581000,
+   "likes": 36,
+   "dislikes": 0,
+   "votes": {},
+   "comments": [
+    { "id": "c_1003a", "author": "山月", "authorLevel": 1, "body": "最近在跑《夏日,妹妹,同居》，也是慢热线。", "createdAt": 1794581400 }
+   ]
+  },
+  {
+   "id": "p_1004",
+   "title": "深夜树洞：你最近一次心动是什么时候",
+   "body": "不是角色的那种，是你自己的。\n\n我的是上周加班到十一点，楼下便利店只剩最后一瓶热牛奶，店员把它推过来说“给你留的”。\n\n就一句话，记到现在。",
+   "author": "凌晨两点",
+   "authorLevel": 1,
+   "topic": "生活交流",
+   "tags": ["树洞", "日常"],
+   "pinned": false,
+   "createdAt": 1794579000,
+   "likes": 89,
+   "dislikes": 2,
+   "votes": {},
+   "comments": [
+    { "id": "c_1004a", "author": "小满", "authorLevel": 1, "body": "地铁上有人帮我捡起掉在地上的票，抬头那一下。", "createdAt": 1794579400 },
+    { "id": "c_1004b", "author": "凌晨两点", "authorLevel": 1, "body": "这种小事最杀人。", "createdAt": 1794579800 }
+   ]
+  },
+  {
+   "id": "p_1005",
+   "title": "调教卡推荐：这几张的节奏感很好",
+   "body": "不是越狠越好，关键是“给选择再收走”的节奏。\n\n最近跑得顺的三张：\n- 先立规则，再让角色自己踩线；\n- 惩罚要具体，别只写“惩罚”；\n- 每轮留一个可拒绝的出口，张力反而更高。\n\n卡名放楼下，自己搜。",
+   "author": "绳结",
+   "authorLevel": 2,
+   "topic": "角色与创作",
+   "tags": ["调教", "推荐"],
+   "pinned": false,
+   "createdAt": 1794577000,
+   "likes": 151,
+   "dislikes": 6,
+   "votes": {},
+   "comments": [
+    { "id": "c_1005a", "author": "灰雀", "authorLevel": 1, "body": "“可拒绝的出口”这点很同意，不然很快就没张力了。", "createdAt": 1794577400 },
+    { "id": "c_1005b", "author": "绳结", "authorLevel": 2, "body": "对，拒绝本身也是戏。", "createdAt": 1794577800 }
+   ]
+  },
+  {
+   "id": "p_1006",
+   "title": "妹子认证流程（2026-11 版）",
+   "body": "认证只用于真人专区发言，不进池、不影响角色卡。\n\n流程：\n1. 登录后私信站务，发一句当天的口令；\n2. 按回复里的手势拍一张不露脸的照片；\n3. 审核通过后给“妹子认证”标签。\n\n不收费，不存原图，审核完即删。",
+   "author": "澜·站务",
+   "authorLevel": 3,
+   "topic": "妹子认证",
+   "tags": ["认证", "站务"],
+   "pinned": false,
+   "createdAt": 1794575000,
+   "likes": 12,
+   "dislikes": 0,
+   "votes": {},
+   "comments": [
+    { "id": "c_1006a", "author": "软糖", "authorLevel": 1, "body": "口令是每天几点更新？", "createdAt": 1794575400 }
+   ]
+  },
+  {
+   "id": "p_1007",
+   "title": "真人专区试运行：只聊日常，不发图",
+   "body": "试运行一周，先只开“日常”和“求助”两个话题。\n\n不发图、不交换联系方式、不线下约。违规直接移出专区。\n\n想聊什么在楼下提。",
+   "author": "澜·站务",
+   "authorLevel": 3,
+   "topic": "真人专区",
+   "tags": ["真人", "日常"],
+   "pinned": false,
+   "createdAt": 1794573000,
+   "likes": 23,
+   "dislikes": 1,
+   "votes": {},
+   "comments": [
+    { "id": "c_1007a", "author": "晚风入怀", "authorLevel": 1, "body": "支持，先把边界立住再谈热闹。", "createdAt": 1794573400 }
+   ]
+  }
+ ]
+}

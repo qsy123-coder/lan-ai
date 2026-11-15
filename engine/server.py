@@ -59,8 +59,9 @@ MODELS = [
     {"id": "nalang-xl-0826-16k", "label": "XL 16K", "ctx": 16000,
      "hint": "16K，短对话"},
 ]
-DEFAULT_MODEL = "x-apex-surge-0505"
-SUMMARY_MODEL = os.environ.get("MEMORY_SUMMARY_MODEL", "x-apex-dash-0826-16k")
+# 默认 Turbo(Flux)：上游平台只对它和 nalang-max 下发 suggestedReplies（三建议块）
+DEFAULT_MODEL = "x-apex-flux-0217-16k"
+SUMMARY_MODEL = os.environ.get("MEMORY_SUMMARY_MODEL", "x-apex-surge-0505")
 MEMORY_MODEL_SUMMARY = os.environ.get("MEMORY_MODEL_SUMMARY", "1") != "0"
 
 ROOT = os.environ.get("DZMM_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -75,6 +76,66 @@ STATE_LOCK = threading.Lock()
 RUN_LOCK = threading.Lock()
 STOP = threading.Event()
 LOG_BUFFER = []
+
+# 会话级串行锁：只锁「同一个号 × 同一张卡」对应的 chatId，避免上游 409「该对话正在生成中」；
+# 不同号/不同卡的生成可以并行。全局 RUN_LOCK 只用于 /run 批量任务，不参与站点聊天。
+CHAT_LOCKS_GUARD = threading.Lock()
+CHAT_LOCKS = {}
+
+
+def chat_lock_for(name, card_id):
+    key = (name, card_id)
+    with CHAT_LOCKS_GUARD:
+        lock = CHAT_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            CHAT_LOCKS[key] = lock
+        return lock
+
+# 上游 418 是出口 IP 级风控：一旦命中就冷却一段时间，期间直接拒绝新请求，
+# 避免用户连点重试把 IP 打进更长的封禁。GATE_COOLDOWN 秒后自动放行。
+GATE_UNTIL = [0.0]
+GATE_COOLDOWN = float(os.environ.get("GATE_COOLDOWN", "120"))
+
+
+def note_gate():
+    GATE_UNTIL[0] = time.time() + GATE_COOLDOWN
+
+
+def gate_cooldown_left():
+    return max(0, int(GATE_UNTIL[0] - time.time()))
+
+
+# 出口轮换：服务器上跑 mihomo（mixed-port 7890 / external-controller 9090），
+# 418 时通过它的 API 换一个节点，再继续换号重试。
+MIHOMO_API = os.environ.get("MIHOMO_API", "")
+MIHOMO_SECRET = os.environ.get("MIHOMO_SECRET", "")
+EGRESS_ROTATE = os.environ.get("EGRESS_ROTATE", "1") != "0"
+
+
+def rotate_egress():
+    """把 mihomo GLOBAL 切到下一个节点；成功返回节点名，不可用返回 None。"""
+    if not EGRESS_ROTATE or not MIHOMO_API:
+        return None
+    h = {}
+    if MIHOMO_SECRET:
+        h["Authorization"] = "Bearer " + MIHOMO_SECRET
+    try:
+        r = creq.get(MIHOMO_API + "/proxies/GLOBAL", headers=h, timeout=5)
+        j = r.json()
+        now = j.get("now")
+        cands = [n for n in (j.get("all") or [])
+                 if n not in ("DIRECT", "REJECT", "COMPATIBLE", "GLOBAL")]
+        if not cands:
+            return None
+        idx = (cands.index(now) + 1) % len(cands) if now in cands else 0
+        nxt = cands[idx]
+        creq.put(MIHOMO_API + "/proxies/GLOBAL", headers=h, json={"name": nxt}, timeout=5)
+        log("出口切换：%s -> %s" % (now, nxt))
+        return nxt
+    except Exception as e:
+        log("出口切换失败：%s" % str(e)[:120], "warn")
+        return None
 
 
 # ---------------------------------------------------------------- 基础工具
@@ -361,7 +422,8 @@ def normalize_history(history):
     return merged
 
 
-def build_body(chat_id, card_id, model, max_tokens, prompt, history=None, memory=None):
+def build_body(chat_id, card_id, model, max_tokens, prompt, history=None, memory=None,
+               want_sug=None):
     """head（卡片开场）→ 记忆块（锚点+摘要）→ 预算内 tail → 当前 user。
 
     裁剪与注入统一在这里做，前端不再自己 head/tail。
@@ -373,6 +435,13 @@ def build_body(chat_id, card_id, model, max_tokens, prompt, history=None, memory
         m["content"] = _clean_surrogates(m["content"])
     # 上游只认 content，记忆必须并进当前消息，否则不进模型视野。
     content = _clean_surrogates(memlib.content_prefix(memory) + prompt)
+    # 上游账号资料里的显示名是注册时自动生成的（形如「用户d57640」），
+    # 模型会把它当称呼写进正文。明确禁止，统一用「你」/角色习惯称呼。
+    content += USER_NAME_RULE
+    if want_sug is None:
+        want_sug = SUG_INSTR
+    if want_sug:
+        content += SUG_FORMAT_HINT
     prompts.append({"role": "user", "content": content})
     # 调试：把本次真正发给模型的 content 落盘，便于核对记忆是否注入了
     try:
@@ -434,16 +503,18 @@ def extract_text(obj):
 
 
 def generate(cookie, chat_id, card_id, model, max_tokens, prompt, emit, history=None,
-             memory=None):
+             memory=None, want_sug=True, stop_event=None):
     """流式生成。返回 {status: ok|exhausted|card_error|auth_error|error, ...}"""
+    stop = stop_event if stop_event is not None else STOP
     url = BASE + "/api/chat"
     rid = "web-%d-%s" % (int(time.time() * 1000), os.urandom(3).hex())
     h = headers_of(cookie, referer=BASE + "/chat?c=" + chat_id, request_id=rid)
     body = json.dumps(build_body(chat_id, card_id, model, max_tokens, prompt, history,
-                                 memory),
+                                 memory, want_sug=want_sug),
                       ensure_ascii=False).encode("utf-8", "replace")
 
     text_parts = []
+    suggest = []
     classification = None
     done = False
     try:
@@ -464,7 +535,7 @@ def generate(cookie, chat_id, card_id, model, max_tokens, prompt, emit, history=
     buf = []
     try:
         for raw in r.iter_lines():
-            if STOP.is_set():
+            if stop.is_set():
                 break
             line = raw.decode("utf-8", "ignore") if isinstance(raw, bytes) else raw
             if not line:
@@ -490,14 +561,20 @@ def generate(cookie, chat_id, card_id, model, max_tokens, prompt, emit, history=
                 # 不做 per-piece 清洗：emoji 的代理对可能被拆在两个 token 里，
                 # 单片 replace 会把合法对也打成 "?"。lone surrogate 由 _emit 用 ensure_ascii 转义兜底。
                 text_parts.append(piece)
-                emit("delta", {"text": piece})
+                emit("delta", {"text": _sanitize_user_names(piece)})
             if t in ("complete", "done", "finish") or obj.get("finishReason"):
+                if t == "complete":
+                    d = obj.get("data") or {}
+                    sr = d.get("suggestedReplies") or {}
+                    items = sr.get("items") if isinstance(sr, dict) else None
+                    if isinstance(items, list):
+                        suggest = [str(x).strip() for x in items if str(x).strip()][:3]
                 done = True
                 break
     except Exception as e:
         log("stream error: %s" % str(e)[:120], "warn")
 
-    text = "".join(text_parts)
+    text = _append_sug("".join(text_parts), suggest)
     if classification:
         return {"status": "exhausted", "reason": classification, "text": text}
     if not done and not text:
@@ -529,7 +606,7 @@ def pick_account(st, pool, min_credit, per_account, max_per_account):
         if credit is None:
             continue
         if credit < min_credit:
-            a["exhausted"] = True
+            # 本轮跳过即可，不能写死持久状态
             continue
         cands.append((credit, name))
     if not cands:
@@ -554,12 +631,19 @@ def ensure_chat(st, pool, name, emit):
             emit("chat", {"account": name, "chatId": cid, "cardId": card})
             log("%s 建会话成功 card=%s chat=%s" % (name, card, cid[:8]))
             return cid, card
+        if err and err.startswith("HTTP 401"):
+            log("%s 账号失效（%s）" % (name, err), "warn")
+            break
+        # 闸门/连接层失败与卡片无关：一次出口抖动就把 11 张卡永久拉黑，
+        # 等于整号废掉。这类错误立即停，不写 dead_cards。
+        if is_gate(err) or is_network(err):
+            log("%s 建会话遇瞬时错误（%s），不拉黑卡片" % (name, err), "warn")
+            break
+        # 明确的卡片级错误（404 卡不存在 / 403 该号不可用）：拉黑换下一张
         dead.add(card)
         a["dead_cards"] = sorted(dead)
         save_state(st)
         log("%s 卡片 %s 不可用（%s），换下一张" % (name, card, err), "warn")
-        if err and err.startswith("HTTP 401"):
-            break
     return None, None
 
 
@@ -583,6 +667,23 @@ def is_gate(err):
     """418 / captcha = IP 级风控闸门，跟账号额度无关，不能拿来判账号死活。"""
     e = (err or "").lower()
     return "418" in e or "captcha" in e
+
+
+def is_network(err):
+    """上游连接层失败（节点坏 / TLS 被掐 / 超时）：跟账号无关，绝不能判账号死亡。
+
+    2026-11-15 实测：mihomo 出口节点全挂时，createByCard 抛
+    `SSLError ... Connection closed abruptly`，旧逻辑把整号 11 张卡全拉黑、
+    并把可用号标成 exhausted，usable 从 2 变 0。
+    """
+    e = (err or "").lower()
+    keys = ("sslerror", "ssl routines", "ssl_connect", "unexpected eof",
+            "connection closed", "connection reset", "connection refused",
+            "connection aborted", "recv failure", "boringssl",
+            "timed out", "timeout", "curl:", "(35)", "(56)", "(7)",
+            "temporary failure", "name or service not known", "getaddrinfo",
+            "eof occurred")
+    return any(k in e for k in keys)
 
 
 def ensure_chat_for_card(st, pool, name, card_id, emit):
@@ -625,6 +726,75 @@ def _strip_sug(text):
     t = SUG_BLOCK_RE.sub("", text or "")
     return SUG_STRAY_RE.sub("", t).strip()
 
+# 建议回复（每轮末尾的三条快捷句）：
+# 上游平台按模型决定是否 armed（实测 Flux/Turbo 会吐 <sug> 与 suggestedReplies，
+# Surge/Pulse 不吐）。客户端在 content 末尾追加格式要求，保证各模型都有；
+# 再把 complete 事件里的 suggestedReplies 兜底补成 <sug> 块（正文已有则跳过）。
+SUG_INSTR = os.environ.get("SUG_INSTR", "1") != "0"
+SUG_FORMAT_HINT = (
+    "\n\n【格式要求】正文结束后另起一行输出 <sug>建议一|建议二|建议三</sug>："
+    "三条建议用竖线分隔，不加引号、不加其它标签。"
+)
+
+
+def _append_sug(text, items):
+    """把 suggestedReplies.items 补成 <sug>a|b|c</sug>；正文已有 sug 块则不动。"""
+    t = (text or "").rstrip()
+    if not items:
+        return t
+    if SUG_BLOCK_RE.search(t):
+        return t
+    return t + "\n\n<sug>" + "|".join(items[:3]) + "</sug>"
+
+
+# 上游账号显示名是注册时自动生成的「用户xxxxx」（如用户d57640），模型会把它当称呼。
+USER_NAME_RULE = (
+    "\n\n【称呼】对方在账号资料里的显示名（形如「用户xxxxx」）只是自动生成的账号名，"
+    "不是称呼，正文里严禁出现；一律用「你」或角色自己的习惯称呼（爸爸/主人/哥哥等）指代对方。"
+)
+USER_NAME_RE = re.compile(r"用户[A-Za-z0-9_-]{4,}")
+
+
+def _sanitize_user_names(text):
+    """把模型误写进正文的账号显示名（用户xxxxx）替换成「你」。"""
+    return USER_NAME_RE.sub("你", text or "")
+
+
+
+SUG_MODEL = os.environ.get("SUG_MODEL", "x-apex-flux-0217-16k")
+SUG_MODEL_BACKUP = os.environ.get("SUG_MODEL_BACKUP", "nalang-max-0826")
+
+
+def suggest_followup(pool, st, name, text, stop_event=None):
+    """主回复没吐 <sug> 时，用同一账号的通用会话补三条接话建议。
+
+    必须用「平台会 armed 建议块」的模型（实测 Flux / Max 会下发 suggestedReplies，
+    Surge / Pulse / Dash 不会）—— 靠模型自觉遵守格式提示只有约 50% 命中率。
+    输出很短，按 token 结算的实际扣费远低于一次正常生成。
+    """
+    cid, card = ensure_chat(st, pool, name, lambda *a, **k: None)
+    if not cid:
+        return []
+    tail = _tail_prompt(_strip_sug(text), 800)
+    prompt = (
+        "下面是角色对话的最后一段。请给出三条简短的接话建议（每条不超过 20 字）。\n\n"
+        + tail
+    )
+    for m in (SUG_MODEL, SUG_MODEL_BACKUP):
+        res = generate(pool[name]["cookie"], cid, card, m, 400, prompt,
+                       lambda *a, **k: None, want_sug=False, stop_event=stop_event)
+        body = res.get("text") or ""
+        hit = SUG_BLOCK_RE.search(body)
+        if not hit:
+            continue
+        inner = hit.group(0)[len("<sug>"):-len("</sug>")]
+        items = [x.strip() for x in inner.split('|')]
+        items = [x for x in items if x][:3]
+        if items:
+            log("建议兜底 %s：%d 条" % (m, len(items)))
+            return items
+    return []
+
 
 def _tail_prompt(text, limit=1200):
     """给续写轮次一点上下文锚点，避免跑题。"""
@@ -633,15 +803,16 @@ def _tail_prompt(text, limit=1200):
 
 
 def generate_long(cookie, chat_id, card_id, model, max_tokens, prompt, emit,
-                  history=None, rounds=3, memory=None):
+                  history=None, rounds=3, memory=None, stop_event=None):
     """
     多轮续写：首轮用原始 prompt，之后每轮把「累积正文」当 assistant 历史回灌。
     任一环节失败就带着已有正文返回 ok，不丢内容。
     """
     text = ""
     hist = list(history or [])
+    stop = stop_event if stop_event is not None else STOP
     for i in range(max(1, int(rounds))):
-        if STOP.is_set():
+        if stop.is_set():
             break
         if i == 0:
             this_prompt = prompt
@@ -655,18 +826,18 @@ def generate_long(cookie, chat_id, card_id, model, max_tokens, prompt, emit,
         emit("round", {"index": i + 1, "rounds": rounds, "chars": len(text)})
         try:
             res = generate(cookie, chat_id, card_id, model, max_tokens, this_prompt, emit,
-                           history=this_hist, memory=memory)
+                           history=this_hist, memory=memory, stop_event=stop_event)
         except Exception as e:
             log("round %d failed: %s" % (i + 1, repr(e)[:200]), "warn")
             if text:
                 return {"status": "ok", "text": text, "done": True, "partial": True}
             return {"status": "error", "error": repr(e)[:200]}
         if res.get("status") == "ok":
-            piece = (res.get("text") or "").strip()
+            piece = _sanitize_user_names((res.get("text") or "").strip())
             if piece:
                 if i > 0:
                     text = (text.rstrip() + "\n\n" + piece).strip()
-                    emit("delta", {"text": "\n\n" + piece})
+                    emit("delta", {"text": "\n\n" + _sanitize_user_names(piece)})
                 else:
                     text = piece
             continue
@@ -691,12 +862,12 @@ def chat_id_ok(pool, name, chat_id):
         return False
 
 
-def start_summary(pool, name, card_id, mem, history):
+def start_summary(pool, name, card_id, mem, history, stop_event=None):
     """把摘要放到后台线程：不占 SSE 连接、不阻塞下一条消息。"""
     def run():
         try:
             st2 = load_state()
-            maybe_summarize(pool, name, st2, card_id, mem, history)
+            maybe_summarize(pool, name, st2, card_id, mem, history, stop_event=stop_event)
         except Exception as e:
             log("后台摘要失败：%s" % str(e)[:160], "warn")
 
@@ -704,7 +875,7 @@ def start_summary(pool, name, card_id, mem, history):
     t.start()
 
 
-def maybe_summarize(pool, name, st, card_id, mem, history):
+def maybe_summarize(pool, name, st, card_id, mem, history, stop_event=None):
     """压缩旧消息；失败降级为规则摘要，绝不阻塞主流程。"""
     msgs = memlib.sanitize_history(history)
     if not memlib.should_summarize(len(msgs), mem):
@@ -735,12 +906,13 @@ def maybe_summarize(pool, name, st, card_id, mem, history):
                         ch, running, pins,
                         recent=recent if i == len(chunks) - 1 else None)
                     res = generate(pool[name]["cookie"], batch_cid, batch_card,
-                                   SUMMARY_MODEL, 800, prompt, lambda *a, **k: None)
+                                   SUMMARY_MODEL, 800, prompt, lambda *a, **k: None,
+                                   want_sug=False, stop_event=stop_event)
                     if res.get("status") != "ok":
                         ok_all = False
                         break
                     piece = memlib.clean_summary(res.get("text"))
-                    if not piece:
+                    if not piece or memlib.looks_like_refusal(piece):
                         ok_all = False
                         break
                     running = piece
@@ -763,10 +935,11 @@ def maybe_summarize(pool, name, st, card_id, mem, history):
     return mem
 
 
-def run_site_chat(payload, emit):
+def run_site_chat(payload, emit, stop_event=None):
     """前台聊天：指定 cardId，自动挑号 → 建会话 → 流式生成 → 结算。"""
     pool = load_pool()
     st = load_state()
+    rotated = False   # 本轮是否已经换过出口（最多换一次，避免抖动）
     try:
         card_id = int(payload.get("cardId"))
     except Exception:
@@ -780,12 +953,20 @@ def run_site_chat(payload, emit):
     ctx = model_ctx(model)
     max_tokens = clamp_tokens(payload.get("maxTokens"), ctx)
 
+    # 上游 418 冷却期内直接拒绝，不再打上游（避免用户连点把封禁拉长）
+    left = gate_cooldown_left()
+    if left > 0:
+        emit("end", {"reason": "gate",
+                     "message": "上游风控冷却中（约 %d 秒后再试）。这是出口 IP 级限制，额度和账号都还在。" % left})
+        return
+
     history = payload.get("history")
     # —— 长期记忆：磁盘为底，合并「历史 + 本轮新消息」里出现的设定
     mem = memlib.load_memory(MEMORY_DIR, card_id)
     before_ids = [p.get("id") for p in (mem.get("pinned") or [])]
     pin_source = list(history or []) + [{"role": "user", "content": prompt}]
-    merged = memlib.merge_pins(mem.get("pinned"), memlib.extract_pins(pin_source))
+    fresh = memlib.apply_suppression(memlib.extract_pins(pin_source), mem.get("suppressed"))
+    merged = memlib.merge_pins(mem.get("pinned"), fresh)
     if [p["id"] for p in merged] != before_ids:
         mem["pinned"] = merged
         memlib.save_memory(MEMORY_DIR, mem)
@@ -824,6 +1005,7 @@ def run_site_chat(payload, emit):
         return
 
     gate_hits = 0
+    busy_hits = 0
     for credit, name in cands:
         a = account_state(st, name)
         emit("account", {"name": name, "credit": a.get("credit")})
@@ -837,14 +1019,28 @@ def run_site_chat(payload, emit):
             cid, chat_err = ensure_chat_for_card(st, pool, name, card_id, emit)
         if not cid:
             if is_gate(chat_err):
-                # 闸门是 IP 级：立刻停整轮，不清零、不标记任何账号
+                # 闸门是 IP 级：先换出口节点再重试一次；换不了才进冷却。
                 gate_hits += 1
                 emit("switch", {"from": name, "reason": "gate", "detail": chat_err})
-                if gate_hits >= 2:
-                    emit("end", {"reason": "gate",
-                                 "message": "上游触发验证码闸门（HTTP 418），出口 IP 被限。稍后再试，额度和账号都还在。"})
-                    return
-                continue
+                if not rotated:
+                    rotated = True
+                    if rotate_egress():
+                        continue
+                note_gate()
+                emit("end", {"reason": "gate",
+                             "message": "上游风控（HTTP 418），出口 IP 被临时限制。冷却约 %d 秒后自动放行，额度和账号都还在。"
+                                        % int(GATE_COOLDOWN)})
+                return
+            if is_network(chat_err):
+                # 连接层失败（节点坏/TLS 断）：换出口重试一次，绝不把账号标成耗尽
+                emit("switch", {"from": name, "reason": "network", "detail": chat_err})
+                if not rotated:
+                    rotated = True
+                    if rotate_egress():
+                        continue
+                emit("end", {"reason": "network",
+                             "message": "上游连接失败（出口节点异常），请稍后再试。账号额度未受影响。"})
+                return
             # 真正的账号/卡片问题才标记
             a["exhausted"] = True
             save_state(st)
@@ -855,29 +1051,48 @@ def run_site_chat(payload, emit):
             rounds = int(payload.get("rounds") or 0)
         except (TypeError, ValueError):
             rounds = 0
-        if rounds <= 1:
-            res = generate(pool[name]["cookie"], cid, card_id, model, max_tokens, prompt,
-                           emit, history=history, memory=mem)
-        else:
-            res = generate_long(pool[name]["cookie"], cid, card_id, model, max_tokens,
-                                prompt, emit, history=history, memory=mem,
-                                rounds=min(rounds, 8))
+        # 会话级锁：同一 chatId（号×卡）并发生成会被上游 409「该对话正在生成中」。
+        # 抢不到就换下一个号：既不上游 409，也不排队干等。
+        lock = chat_lock_for(name, card_id)
+        if not lock.acquire(blocking=False):
+            busy_hits += 1
+            emit("switch", {"from": name, "reason": "busy", "detail": "该账号正在生成中"})
+            continue
+        try:
+            if rounds <= 1:
+                res = generate(pool[name]["cookie"], cid, card_id, model, max_tokens, prompt,
+                               emit, history=history, memory=mem, stop_event=stop_event)
+            else:
+                res = generate_long(pool[name]["cookie"], cid, card_id, model, max_tokens,
+                                    prompt, emit, history=history, memory=mem,
+                                    rounds=min(rounds, 8), stop_event=stop_event)
+        finally:
+            lock.release()
         if res.get("status") == "exhausted" and res.get("reason") == "internal":
             # classification=internal 不扣费；createByCard 幂等去重拿回同一 chatId，直接换号
             emit("switch", {"from": name, "reason": "internal", "detail": "upstream internal"})
             continue
         if res["status"] == "ok":
+            # 建议兜底放在结算前：这次短生成的扣费也能体现在 credit 里
+            final_text = _sanitize_user_names(res["text"])
+            if SUG_INSTR and not SUG_BLOCK_RE.search(final_text):
+                try:
+                    sug_items = suggest_followup(pool, st, name, final_text, stop_event=stop_event)
+                    if sug_items:
+                        final_text = _append_sug(final_text, sug_items)
+                except Exception as e:
+                    log("建议补全失败：%s" % str(e)[:120], "warn")
             ok, credit2, uid, err = get_me(pool[name]["cookie"])
             if ok:
                 a["credit"] = round(credit2, 2)
                 a["exhausted"] = credit2 < MIN_PREPAY
                 save_state(st)
-            emit("complete", {"text": res["text"], "account": name, "chatId": cid,
+            emit("complete", {"text": final_text, "account": name, "chatId": cid,
                               "cardId": card_id, "credit": a.get("credit")})
             # 用户已经拿到正文；摘要丢到后台，失败也不影响这次回复
             try:
                 if memlib.should_summarize(len(memlib.sanitize_history(history)), mem):
-                    start_summary(pool, name, card_id, mem, history)
+                    start_summary(pool, name, card_id, mem, history, stop_event=stop_event)
             except Exception as e:
                 log("记忆更新失败：%s" % str(e)[:160], "warn")
             return
@@ -892,14 +1107,27 @@ def run_site_chat(payload, emit):
         if is_gate(res.get("error")):
             gate_hits += 1
             emit("switch", {"from": name, "reason": "gate", "detail": res.get("error")})
-            if gate_hits >= 2:
-                emit("end", {"reason": "gate",
-                             "message": "上游触发验证码闸门（HTTP 418），出口 IP 被限。稍后再试，额度和账号都还在。"})
-                return
-            continue
+            if not rotated:
+                rotated = True
+                if rotate_egress():
+                    continue
+            note_gate()
+            emit("end", {"reason": "gate",
+                         "message": "上游风控（HTTP 418），出口 IP 被临时限制。冷却约 %d 秒后自动放行，额度和账号都还在。"
+                                    % int(GATE_COOLDOWN)})
+            return
+        if is_network(res.get("error")):
+            # 生成阶段的连接层失败：不换号、不扣费，直接提示节点异常
+            emit("switch", {"from": name, "reason": "network", "detail": res.get("error")})
+            emit("end", {"reason": "network",
+                         "message": "上游连接失败（出口节点异常），请稍后再试。账号额度未受影响。"})
+            return
         emit("switch", {"from": name, "reason": res["status"], "detail": res.get("error")})
 
-    emit("end", {"reason": "all_failed", "message": "所有账号都没能完成这次生成"})
+    if busy_hits >= len(cands):
+        emit("end", {"reason": "busy", "message": "当前可用账号都在生成中，请稍等几秒再试"})
+    else:
+        emit("end", {"reason": "all_failed", "message": "所有账号都没能完成这次生成"})
 
 
 def run_job(payload, emit):
@@ -934,7 +1162,7 @@ def run_job(payload, emit):
         a = account_state(st, name)
         if ok:
             a["credit"] = round(credit, 2)
-            a["exhausted"] = credit < min_credit
+            a["exhausted"] = credit < MIN_PREPAY
             a["last_error"] = ""
         else:
             a["last_error"] = err
@@ -968,7 +1196,8 @@ def run_job(payload, emit):
 
         before = a.get("credit") or 0.0
         emit("log", {"msg": "%s 生成中（card=%s，余额 %.2f）" % (name, card_id, before)})
-        res = generate(pool[name]["cookie"], chat_id, card_id, model, max_tokens, prompt, emit)
+        res = generate(pool[name]["cookie"], chat_id, card_id, model, max_tokens, prompt, emit,
+                       want_sug=False)
 
         if res["status"] == "exhausted":
             emit("switch", {"from": name, "reason": "credit", "detail": res.get("reason")})
@@ -1096,8 +1325,9 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(chunk)
             self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, OSError):
-            # 浏览器断开 → 立即停跑，避免继续烧 credit
-            STOP.set()
+            # 浏览器断开 → 立即停掉当前请求，避免继续烧 credit。
+            # 站点聊天用各自的 stop_event，批量任务用全局 STOP，互不干扰。
+            (getattr(self, "_stop", None) or STOP).set()
 
     # ---- 路由
     def do_GET(self):
@@ -1221,6 +1451,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(409, {"error": "已有任务在跑"})
             payload = self._body()
             STOP.clear()
+            self._stop = STOP
             try:
                 self._sse_start()
                 try:
@@ -1244,10 +1475,27 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(400, {"error": "cardId required"})
             mem = memlib.load_memory(MEMORY_DIR, card_id)
             if payload.get("clear"):
+                # 清空时把现有锚点记入 suppressed：否则下一轮 auto 抽取会从
+                # 还留在历史里的原句把它们重新捞回来，表现为「删了又出现」。
+                removed = memlib.pin_ids(mem.get("pinned"))
                 mem = memlib.default_memory(card_id)
+                mem["suppressed"] = sorted(set(removed))[:200]
+                memlib.save_memory(MEMORY_DIR, mem)
+                return self._json(200, {"memory": mem})
+            if payload.get("rebuild"):
+                # 前端删了某条消息后触发：manual 锚点保留，auto 从当前历史重抽，
+                # 摘要清空待下一轮重新生成——让被删剧情的记忆贡献随之消失。
+                history = payload.get("history") or []
+                manual = [p for p in mem.get("pinned") if p.get("source") == "manual"]
+                fresh = memlib.apply_suppression(memlib.extract_pins(history),
+                                                 mem.get("suppressed"))
+                mem["pinned"] = memlib.merge_pins(manual, fresh)
+                mem["summary"] = ""
+                mem["summarizedUpTo"] = 0
                 memlib.save_memory(MEMORY_DIR, mem)
                 return self._json(200, {"memory": mem})
             if isinstance(payload.get("pinned"), list):
+                old_ids = memlib.pin_ids(mem.get("pinned"))
                 pins = []
                 for p in payload["pinned"]:
                     if isinstance(p, str):
@@ -1255,6 +1503,8 @@ class Handler(BaseHTTPRequestHandler):
                     elif isinstance(p, dict) and p.get("text"):
                         pins.append({"text": p["text"], "source": "manual"})
                 mem["pinned"] = memlib.merge_pins([], pins)
+                # 用户删掉的那几条（old 有、new 没有）加入抑制，防止复活
+                memlib.update_suppressed(mem, old_ids - memlib.pin_ids(mem["pinned"]))
             if isinstance(payload.get("summary"), str):
                 mem["summary"] = memlib.clean_summary(payload["summary"])
             if payload.get("summarizedUpTo") is not None:
@@ -1267,22 +1517,19 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/site/chat":
             if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
                 return self._json(401, {"error": "bad token"})
-            if not RUN_LOCK.acquire(blocking=False):
-                return self._json(409, {"error": "已有任务在跑"})
             payload = self._body()
-            STOP.clear()
+            # 站点聊天不再用全局 RUN_LOCK：并发请求各自持独立的会话锁与 stop_event，
+            # 避免第二个用户点进来就吃 409「已有任务在跑」。
+            self._stop = threading.Event()
             try:
                 self._sse_start()
+                run_site_chat(payload, self._emit, stop_event=self._stop)
+            except Exception as e:
+                log("site chat crashed: %s" % traceback.format_exc()[-1800:], "error")
                 try:
-                    run_site_chat(payload, self._emit)
-                except Exception as e:
-                    log("site chat crashed: %s" % traceback.format_exc()[-1800:], "error")
-                    try:
-                        self._emit("end", {"reason": "crash", "message": str(e)[:200]})
-                    except Exception:
-                        pass
-            finally:
-                RUN_LOCK.release()
+                    self._emit("end", {"reason": "crash", "message": str(e)[:200]})
+                except Exception:
+                    pass
             return
         return self._json(404, {"error": "not found"})
 

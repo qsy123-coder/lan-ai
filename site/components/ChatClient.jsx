@@ -723,8 +723,9 @@ export default function ChatClient({ card, initialSession }) {
             setStreaming("");
             save(list, final.slice(0, 42));
             // 摘要在后台线程生成，complete 之后引擎不会再推 memory 事件；
-            // 4 秒后主动拉一次，记忆面板才能看到新摘要（PRD §5.3）。
+            // 4s / 15s 各拉一次，长摘要也能在面板里出现（PRD §5.3）。
             setTimeout(() => { loadMemory(); }, 4000);
+            setTimeout(() => { loadMemory(); }, 15000);
             const mine =
               d.userCredit != null ? ` · 我的积分 ${Number(d.userCredit).toFixed(2)}` : "";
             setNote(

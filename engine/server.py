@@ -130,9 +130,10 @@ MODELS = [
 ]
 # 默认 Turbo(Flux)：上游平台只对它和 nalang-max 下发 suggestedReplies（三建议块）
 DEFAULT_MODEL = "x-apex-flux-0217-16k"
-# 摘要默认用 Surge（非严格审核档）。旧的 dash 档 strictModeration=true，
-# 遇到 NSFW 卡会整段拒答，导致「概览/前情摘要」生成不出来；Surge 与主对话同档。
-SUMMARY_MODEL = os.environ.get("MEMORY_SUMMARY_MODEL", "x-apex-surge-0505")
+# 摘要默认用 Pulse 128K。实测（notes/047）：Surge 32K 在露骨剧情上会返回空流或
+# 直接续写剧情（0 字 / 1000+ 字角色扮演），Dash 128K 因 strictModeration 稳定拒答；
+# 只有 Pulse 128K 两轮都稳定产出正经摘要，且单价更低（0.2 积分/1K）。
+SUMMARY_MODEL = os.environ.get("MEMORY_SUMMARY_MODEL", "x-apex-pulse-0731-128k")
 MEMORY_MODEL_SUMMARY = os.environ.get("MEMORY_MODEL_SUMMARY", "1") != "0"
 
 ROOT = os.environ.get("DZMM_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1102,7 +1103,8 @@ def maybe_summarize(pool, name, st, card_id, mem, history, stop_event=None):
 
     pins = [p.get("text", "") for p in (mem.get("pinned") or []) if p.get("text")]
     recent = msgs[end:end + 2]
-    existing = mem.get("summary") or ""
+    # 旧摘要若本身是拒答/续写，不再喂回模型（否则脏文本会被一轮轮放大）。
+    existing = memlib.usable_existing(mem.get("summary"))
     chunks = memlib.chunk_messages(window, 6000)
     if len(chunks) > 4:
         # 段数过多时，前几段用规则摘要压一次，模型只处理最后 4 段，控制成本
@@ -1111,7 +1113,12 @@ def maybe_summarize(pool, name, st, card_id, mem, history, stop_event=None):
         chunks = chunks[-4:]
 
     text = ""
-    if MEMORY_MODEL_SUMMARY and name in pool and chunks:
+    why = ""
+    if not MEMORY_MODEL_SUMMARY:
+        why = "model_summary_off"
+    elif name not in pool:
+        why = "no_pool"
+    elif chunks:
         try:
             batch_cid, batch_card = ensure_chat(st, pool, name, lambda *a, **k: None)
             if batch_cid:
@@ -1126,24 +1133,40 @@ def maybe_summarize(pool, name, st, card_id, mem, history, stop_event=None):
                                    want_sug=False, stop_event=stop_event)
                     if res.get("status") != "ok":
                         ok_all = False
+                        why = "status=%s/%s" % (res.get("status"), res.get("reason") or "")
                         break
                     piece = memlib.clean_summary(res.get("text"))
-                    if not piece or memlib.looks_like_refusal(piece):
+                    if not piece:
                         ok_all = False
+                        why = "empty"
+                        break
+                    if memlib.looks_like_refusal(piece):
+                        ok_all = False
+                        why = "refusal: %s" % piece[:40].replace("\n", " ")
+                        break
+                    if memlib.looks_like_roleplay(piece):
+                        ok_all = False
+                        why = "roleplay: %s" % piece[:40].replace("\n", " ")
                         break
                     running = piece
                 if ok_all:
                     text = running
+            else:
+                why = "no_chat"
         except Exception as e:
+            why = "exception: %s" % str(e)[:80]
             log("摘要生成失败，降级规则摘要：%s" % str(e)[:160], "warn")
 
     if not text:
         text = memlib.rule_summary(window, mem.get("summary"), pins)
-        log("摘要降级为规则摘要（%d 条）" % len(window), "warn")
+        log("摘要降级为规则摘要（%d 条）%s"
+            % (len(window), ("：" + why) if why else ""), "warn")
 
     if text:
-        # 重新读一次，避免覆盖这期间新写入的锚点
-        latest = memlib.load_memory(MEMORY_DIR, card_id)
+        # 重新读一次，避免覆盖这期间新写入的锚点。
+        # 必须带 sessionId：多会话记忆按会话落盘，写回卡级文件会让本次会话面板永远
+        # 看不到新摘要（历史遗留 bug，见 notes/047）。
+        latest = memlib.load_memory(MEMORY_DIR, card_id, mem.get("sessionId"))
         latest["summary"] = text
         latest["summarizedUpTo"] = max(int(latest.get("summarizedUpTo") or 0), end)
         memlib.save_memory(MEMORY_DIR, latest)

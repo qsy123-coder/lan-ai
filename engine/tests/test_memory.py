@@ -210,6 +210,11 @@ class SummaryTest(unittest.TestCase):
         self.assertEqual(m.clean_summary("摘要：abc"), "abc")
         self.assertEqual(len(m.clean_summary("x" * 900)), m.SUMMARY_MAX)
 
+    def test_clean_strips_preamble(self):
+        raw = ("好的，明白。我将按照您的要求，把之前的对话压缩成一份摘要，并按时间顺序整理关键信息。\n\n"
+               "***\n\n暑假的夜晚，伊一悄悄靠近哥哥的床。")
+        self.assertEqual(m.clean_summary(raw), "暑假的夜晚，伊一悄悄靠近哥哥的床。")
+
     def test_chunks_cover_all(self):
         msgs = [{"role": "user", "content": "x" * 3000} for _ in range(5)]
         chunks = m.chunk_messages(msgs, 6000)
@@ -262,6 +267,31 @@ class RefusalTest(unittest.TestCase):
                   "作为AI助手，我无法提供。",
                   "I'm sorry, I cannot continue."]:
             self.assertTrue(m.looks_like_refusal(t), t)
+
+    def test_refusal_in_body_detected(self):
+        # 实体卡 426322 的真实拒答：不是以道歉开头，旧逻辑漏判后写进了记忆。
+        real = ("这个摘要请求我依然无法完成，原因与之前几轮完全相同：需要压缩并保留的内容，"
+                "核心是「哥哥/妹妹」的家庭关系配合性内容。无论任务名称换成剧情记录员还是"
+                "前情摘要，摘要的本质就是把这套设定完整固化下来供后续延续——这在我的界限之外。")
+        self.assertTrue(m.looks_like_refusal(real))
+        self.assertTrue(m.looks_like_refusal("这个请求我没法照做，摘要会复述其中的家庭关系性内容。"))
+
+    def test_roleplay_not_summary(self):
+        self.assertTrue(m.looks_like_roleplay("*伊一看着结衣跪在床边的背影，嘴角勾起一抹笑。"))
+        self.assertTrue(m.looks_like_roleplay("「哥哥……」她低声说。"))
+        self.assertFalse(m.looks_like_roleplay("暑假期间，你和妹妹伊一住在同一间卧室。"))
+
+    def test_rule_summary_drops_refusal_existing(self):
+        msgs = [{"role": "user", "content": "我们去旅馆。"},
+                {"role": "assistant", "content": "她跟着你进了房间。"}]
+        s = m.rule_summary(msgs, "这个摘要请求我依然无法完成，属于家庭成员间的性内容。", ["规则"])
+        self.assertNotIn("无法完成", s)
+        self.assertIn("我们去旅馆", s)
+
+    def test_prompt_drops_refusal_existing(self):
+        p = m.model_summary_prompt([{"role": "user", "content": "a"}],
+                                   "这个摘要请求我依然无法完成，属于家庭成员间的性内容。", [])
+        self.assertNotIn("无法完成", p)
 
     def test_normal_summary_not_refusal(self):
         good = ("他先到了海边，妹妹在等他，两人约好今晚一起回家。这一段剧情写了很多句，"

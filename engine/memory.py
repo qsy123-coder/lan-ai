@@ -244,8 +244,9 @@ def summary_window(messages, mem, keep_recent=12):
 def rule_summary(messages, existing="", pins=None):
     """零成本降级摘要：旧摘要 + 被裁消息首句 + 锚点。"""
     chunks = []
+    existing = usable_existing(existing)
     if existing:
-        chunks.append(existing.strip()[:250])
+        chunks.append(existing[:250])
     # 规则优先：即使后面被截断，称呼/设定也必须留下
     if pins:
         chunks.append("称呼/规则：" + "；".join(p[:40] for p in pins[:5]))
@@ -298,8 +299,9 @@ def transcript_of(messages, limit=8000):
 
 def model_summary_prompt(messages, existing="", pins=None, recent=None):
     parts = [SUMMARY_SYSTEM]
+    existing = usable_existing(existing)
     if existing:
-        parts.append("【已有摘要】\n" + existing.strip()[:500])
+        parts.append("【已有摘要】\n" + existing[:500])
     if pins:
         parts.append("【必须保留的设定】\n" + "\n".join("- " + p for p in pins[:10]))
     parts.append("【新增对话】\n" + transcript_of(messages))
@@ -312,17 +314,29 @@ def model_summary_prompt(messages, existing="", pins=None, recent=None):
 def clean_summary(text):
     t = (text or "").strip()
     t = re.sub(r"^(前情摘要|摘要)[:：]\s*", "", t)
-    return t[:SUMMARY_MAX]
+    # 模型偶尔先回一句「好的，明白，我将按您的要求…」再给正文，这层客套不进记忆；
+    # 客套后面的 *** / --- 分隔线一并去掉（实测 Pulse 会这样开头）。
+    t = re.sub(r"^(好的|明白|收到)[^\n]{0,80}(\n+|$)", "", t)
+    t = re.sub(r"^(\*{3,}|-{3,})\s*(\n+|$)", "", t)
+    return t.strip()[:SUMMARY_MAX]
 
 
-# 摘要模型（严格审核档）对 NSFW 剧情会拒答。拒答文本通常很短，或一开头就是
-# 道歉/「我不能」；识别出来，避免把拒答当摘要写进记忆，污染后续每一轮。
-# 只锚定开头，不在正文里搜「不能/拒绝」——摘要里描述剧情会合法出现这些词。
+# 摘要模型对 NSFW 剧情会拒答，但拒答形态不固定：有的以道歉开头，有的先说
+# 「这个摘要请求我依然无法完成」（实体卡 426322 实测），还有的干脆接着演剧情。
+# 三类都要识别，否则拒答/续写会被当摘要写进记忆，污染后续每一轮。
+# 只扫前 200 字（摘要正文里讲剧情时「不能/拒绝」是合法用词，不全文搜）。
 REFUSAL_PREFIX_RE = re.compile(
     r"^\s*(抱歉|对不起|很抱歉|作为\s*(AI|人工智能|助手)|我不能|我无法|无法|"
     r"不能提供|无法提供|i'?m\s+sorry|i\s+cannot|i\s+can'?t|sorry|as\s+an\s+ai|"
     r"i\s+apologize)",
     re.IGNORECASE)
+REFUSAL_BODY_RE = re.compile(
+    r"(无法|不能|没法|不会|不便).{0,8}(完成|提供|生成|协助|满足|照做|进行|继续|配合)|"
+    r"(拒绝|恕不).{0,6}(提供|协助|完成)|"
+    r"as\s+an\s+ai|i\s+(cannot|can'?t|won'?t)\b|i'?m\s+(sorry|unable)",
+    re.IGNORECASE)
+# 模型把「摘要」理解成「继续演」时的开头特征：动作星号 / 全角括号动作 / 直接台词。
+ROLEPLAY_HEAD_RE = re.compile(r"^\s*(\*|（\s*[^）]{0,40}）|「|\"|“)")
 
 
 def looks_like_refusal(text):
@@ -332,7 +346,29 @@ def looks_like_refusal(text):
     # 摘要要求 300-500 字，过短的基本都是拒答/截断，不是正常摘要
     if len(t) < 40:
         return True
-    return bool(REFUSAL_PREFIX_RE.match(t[:60]))
+    return bool(REFUSAL_PREFIX_RE.match(t[:60]) or REFUSAL_BODY_RE.search(t[:200]))
+
+
+def looks_like_roleplay(text):
+    """开头是动作/台词的输出基本是模型接着演，不是摘要。"""
+    t = (text or "").strip()
+    return bool(t) and bool(ROLEPLAY_HEAD_RE.match(t[:60]))
+
+
+def usable_existing(existing):
+    """旧摘要本身是拒答/续写时不再喂回模型，避免脏文本被一轮轮放大。
+
+    与 looks_like_refusal 的区别：这里不看长度——旧摘要本来就可能是几百字的
+    正常摘要，短不等于脏；只按拒答/续写特征判。
+    """
+    t = (existing or "").strip()
+    if not t:
+        return ""
+    if REFUSAL_PREFIX_RE.match(t[:60]) or REFUSAL_BODY_RE.search(t[:200]):
+        return ""
+    if looks_like_roleplay(t):
+        return ""
+    return t
 
 
 # ---------------------------------------------------------------- 预算组装

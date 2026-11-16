@@ -37,6 +37,10 @@ const SORTERS = {
   guess: (a, b) => (b.popularity ?? 0) - (a.popularity ?? 0),
 };
 
+// 卡片库已扩到 2 万+，首页不能一次性渲染全量（HTML 会到数 MB）。
+// 服务端分页：每页 120 张，?p=N 翻页；筛选/搜索/排序在分页前完成。
+const PER_PAGE = 120;
+
 export default async function Home({ searchParams }) {
   await requirePass();
   const sp = (await searchParams) || {};
@@ -45,6 +49,8 @@ export default async function Home({ searchParams }) {
   const tab = (sp.tab || "").toString();
   const pill = (sp.pill || "").toString();
   const cat = (sp.cat || "").toString();
+  const pRaw = parseInt((sp.p || "1").toString(), 10);
+  const p = Number.isFinite(pRaw) && pRaw > 0 ? pRaw : 1;
 
   const all = lightCards();
   const categories = categoriesWithCounts(all);
@@ -66,22 +72,26 @@ export default async function Home({ searchParams }) {
   if (sorter) cards = [...cards].sort(sorter);
 
   const total = cards.length;
+  const pages = Math.max(1, Math.ceil(total / PER_PAGE));
+  const page = Math.min(p, pages);
+  const view = cards.slice((page - 1) * PER_PAGE, page * PER_PAGE);
   const tags = allTags(all).slice(0, 12);
   const noSource = ["game", "draw", "group"].includes(tab);
 
   const qs = (patch) => {
-    const merged = { q, tag, tab, pill, cat, ...patch };
+    const merged = { q, tag, tab, pill, cat, p: 0, ...patch };
     const u = new URLSearchParams();
     if (merged.q) u.set("q", merged.q);
     if (merged.tag) u.set("tag", merged.tag);
     if (merged.tab) u.set("tab", merged.tab);
     if (merged.pill) u.set("pill", merged.pill);
     if (merged.cat) u.set("cat", merged.cat);
+    if (merged.p > 1) u.set("p", String(merged.p));
     const s = u.toString();
     return s ? `/?${s}` : "/";
   };
 
-  const covers = cards.reduce((m, c) => {
+  const covers = view.reduce((m, c) => {
     if (c.cover) m[c.id] = `/api/img?u=${encodeURIComponent(c.cover)}&w=320`;
     return m;
   }, {});
@@ -143,7 +153,30 @@ export default async function Home({ searchParams }) {
             <p>没有匹配的角色卡。</p>
           </div>
         ) : (
-          <HomeGrid cards={cards} covers={covers} />
+          <>
+            <HomeGrid cards={view} covers={covers} />
+            {pages > 1 ? (
+              <nav className="home-pager" aria-label="分页">
+                {page > 1 ? (
+                  <Link className="home-pager-btn" href={qs({ p: page - 1 })} rel="prev">
+                    ← 上一页
+                  </Link>
+                ) : (
+                  <span className="home-pager-btn off">← 上一页</span>
+                )}
+                <span className="home-pager-info">
+                  第 {page} / {pages} 页 · 共 {total} 张
+                </span>
+                {page < pages ? (
+                  <Link className="home-pager-btn" href={qs({ p: page + 1 })} rel="next">
+                    下一页 →
+                  </Link>
+                ) : (
+                  <span className="home-pager-btn off">下一页 →</span>
+                )}
+              </nav>
+            ) : null}
+          </>
         )}
 
         {tags.length ? (

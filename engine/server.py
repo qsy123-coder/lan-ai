@@ -39,9 +39,75 @@ MIN_PREPAY = 3.2           # 每条预扣，低于此值必被拒
 # 实测可用的角色卡（notes/005 §4）；某个号用不了会自动拉黑换下一张。
 # 前置的 9 张是 notes/005 实测通过的；DEAD_TAIL 两张在 card.getById 下已返回 json:null
 # （2026-11-12 实测，notes/010 §2），对 createByCard 可能仍有效，故只降级不删除。
-CARDS = [3821218, 3856830, 3858435, 3859027, 3860041,
-         3860611, 3861267, 3865272, 3867710,
-         3856159, 3860761]
+FALLBACK_CARDS = [3821218, 3856830, 3858435, 3859027, 3860041,
+                  3860611, 3861267, 3865272, 3867710,
+                  3856159, 3860761]
+CARDS = FALLBACK_CARDS      # 兼容旧引用；实际建会话用 card_candidates()
+
+# 建会话候选卡池：从卡片库按「热度 70% + 最新 30%」取前 N 张，再拼上实测可用卡。
+# 卡片库 2026-11-17 已扩到 2.5 万张（notes/045）；全量扫会产生大量 createByCard 请求，
+# 所以只取有限候选，失败的卡由 dead_cards 逐号记住。
+#   CARDS_FILE       卡片库路径（默认 DZMM_ROOT/captures/site/cards.json，服务器 /opt/lan/cards.json）
+#   CARD_POOL_LIMIT  候选张数（默认 80）
+_CARD_CACHE = {"key": None, "ids": list(FALLBACK_CARDS)}
+
+
+def _card_file():
+    p = os.environ.get("CARDS_FILE")
+    if p:
+        return p
+    for cand in (os.path.join(ROOT, "captures", "site", "cards.json"),
+                 os.path.join(ROOT, "cards.json")):
+        if os.path.exists(cand):
+            return cand
+    return os.path.join(ROOT, "captures", "site", "cards.json")
+
+
+def _num(v):
+    try:
+        return float(v or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def card_candidates():
+    """卡片库 → 建会话候选 id 列表（按 mtime 缓存，库更新后下一次调用自动重载）。"""
+    path = _card_file()
+    try:
+        st = os.stat(path)
+    except OSError:
+        return list(FALLBACK_CARDS)
+    limit = max(1, int(os.environ.get("CARD_POOL_LIMIT") or 80))
+    key = (path, st.st_mtime_ns, st.st_size, limit)
+    if _CARD_CACHE["key"] == key:
+        return _CARD_CACHE["ids"]
+    try:
+        with io.open(path, encoding="utf-8") as f:
+            rows = json.load(f)
+        rows = [c for c in rows
+                if isinstance(c, dict) and c.get("id") and c.get("name")]
+        pop = sorted(rows, key=lambda c: (_num(c.get("popularity")),
+                                          _num(c.get("likes"))), reverse=True)
+        ids = []
+        for c in pop[:max(0, int(limit * 0.7))]:
+            cid = int(c["id"])
+            if cid not in ids:
+                ids.append(cid)
+        newest = sorted(rows, key=lambda c: str(c.get("publishedAt") or ""), reverse=True)
+        for c in newest:
+            if len(ids) >= limit:
+                break
+            cid = int(c["id"])
+            if cid not in ids:
+                ids.append(cid)
+    except Exception as e:
+        log("卡片库读取失败 %s（%s），用内置卡池" % (path, type(e).__name__), "warn")
+        return list(FALLBACK_CARDS)
+    for cid in FALLBACK_CARDS:
+        if cid not in ids:
+            ids.append(cid)
+    _CARD_CACHE["key"], _CARD_CACHE["ids"] = key, ids
+    return ids
 
 # ctx = 上游模型上下文（chat.models 实测）。长对话优先选 32K 以上。
 MODELS = [
@@ -660,7 +726,7 @@ def ensure_chat(st, pool, name, emit):
         return a["chat_id"], a["card_id"]
     cookie = pool[name]["cookie"]
     dead = set(a.get("dead_cards") or [])
-    for card in CARDS:
+    for card in card_candidates():
         if card in dead:
             continue
         cid, err = create_chat(cookie, card)
@@ -1537,7 +1603,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/health":
             return self._json(200, {"ok": True, "root": ROOT, "proxy": PROXY,
                                     "running": RUN_LOCK.locked(),
-                                    "models": MODELS, "cards": CARDS})
+                                    "models": MODELS, "cards": card_candidates()})
         if path == "/site/pool":
             pool = load_pool()
             st = load_state()

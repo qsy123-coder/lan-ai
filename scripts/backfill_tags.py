@@ -143,6 +143,16 @@ def run_batch(cards, limit, gap, rotate=False, rotations_left=0, rotate_wait=6.0
                         return added, True, dead, rotations_left
                 continue
             return added, True, dead, rotations_left
+        except Exception as e:
+            # 连接层抖动（SSLError / 超时 / 节点挂掉）不是卡片问题：换节点或跳过，别整批崩掉
+            safe("!! 请求异常 %s：%s" % (cid, str(e)[:120]))
+            if rotate and rotations_left > 0:
+                rotations_left -= 1
+                if not rotate_node(rotate_wait):
+                    time.sleep(cooldown)
+                continue
+            time.sleep(5)
+            continue
         if d and d.get("tags"):
             idx[cid]["tags"] = d["tags"]
             # 顺手把 feed 没给全的字段补齐
@@ -161,6 +171,8 @@ def run_batch(cards, limit, gap, rotate=False, rotations_left=0, rotate_wait=6.0
             c["_tags_checked"] = True
             safe("[%2d/%2d] =%s  无标签" % (i + 1, min(limit, len(todo)), cid))
         log({"cardId": cid, "note": note, "tags": len(d["tags"]) if d and d.get("tags") else 0})
+        if added and added % 10 == 0:
+            flush(cards)          # 分批落盘：连接层崩掉也不丢本轮已补
         time.sleep(gap)
     return added, False, dead, rotations_left
 

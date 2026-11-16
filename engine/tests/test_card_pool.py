@@ -42,9 +42,9 @@ class CardPoolTest(unittest.TestCase):
              "publishedAt": "2026-11-10T00:00:00Z"},
         ])
         ids = s.card_candidates()
-        # 70% × 4 = 2 张按热度：1、3；再按最新补到 4：4、2
-        self.assertEqual(ids[:4], [1, 3, 4, 2])
-        self.assertEqual(ids[4:], list(s.FALLBACK_CARDS))
+        # 兜底卡先排（实测可用），再按热度 70%（1、3）与最新补齐（4、2）
+        self.assertEqual(ids[:len(s.FALLBACK_CARDS)], list(s.FALLBACK_CARDS))
+        self.assertEqual(ids[len(s.FALLBACK_CARDS):], [1, 3, 4, 2])
 
     def test_missing_file_falls_back(self):
         os.environ["CARDS_FILE"] = os.path.join(self.tmp, "nope.json")
@@ -53,11 +53,12 @@ class CardPoolTest(unittest.TestCase):
     def test_reloads_on_change(self):
         self.write([{"id": 10, "name": "a", "popularity": 1,
                      "publishedAt": "2026-01-01T00:00:00Z"}])
-        self.assertEqual(s.card_candidates()[0], 10)
+        n = len(s.FALLBACK_CARDS)
+        self.assertEqual(s.card_candidates()[n], 10)
         time.sleep(0.02)
         self.write([{"id": 11, "name": "b", "popularity": 2,
                      "publishedAt": "2026-02-01T00:00:00Z"}])
-        self.assertEqual(s.card_candidates()[0], 11)
+        self.assertEqual(s.card_candidates()[n], 11)
 
     def test_skips_rows_without_name(self):
         self.write([
@@ -65,7 +66,7 @@ class CardPoolTest(unittest.TestCase):
             {"id": 21, "name": "ok", "popularity": 1,
              "publishedAt": "2026-01-01T00:00:00Z"},
         ])
-        self.assertEqual(s.card_candidates()[0], 21)
+        self.assertEqual(s.card_candidates()[len(s.FALLBACK_CARDS)], 21)
 
 
 if __name__ == "__main__":

@@ -102,6 +102,9 @@ python -I scripts/backfill_tags.py --limit 400 --gap 1.2 --rotate --loop  # 撞�
 `getById` 一卡一发，25k 张按 1.2 s 约 8 小时；建议只补需要进分类的批次，
 `_tags_checked` 会记录「已确认无标签 / 已下架」，不会每轮重试。
 
+连接层抖动（节点挂掉 `SSLError (35)`）不再整批崩：单卡异常 → 换节点或跳过，
+每补 10 张落盘一次，崩了也不丢已补的结果。
+
 ## 6. 验收
 
 ```powershell

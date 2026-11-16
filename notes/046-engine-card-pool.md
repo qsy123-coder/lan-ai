@@ -16,7 +16,8 @@
 | 候选来源 | `CARDS_FILE` → 默认 `DZMM_ROOT/captures/site/cards.json`，服务器 `/opt/lan/cards.json` |
 | 取法 | 按 `popularityScore`/`likesCount` 取前 **70%**，再按 `publishedAt` 补 **30%** |
 | 上限 | `CARD_POOL_LIMIT`（默认 **80**） |
-| 兜底 | 11 张 `FALLBACK_CARDS` 永远追加在末尾（实测可用，不受库文件缺失影响） |
+| 顺序 | 11 张 `FALLBACK_CARDS` **排最前**（实测能建会话并出正文），新卡（未验证，可能 404「对话数据异常」）排后 |
+| 兜底 | 库文件缺失/解析失败时只用 11 张兜底卡 |
 | 缓存 | 按 `(path, mtime_ns, size, limit)` 缓存；cards.json 更新后下一次调用自动重载 |
 | 失败处理 | 读库异常 → 日志 warn + 只用兜底卡；单张失败仍由 `dead_cards` 逐号拉黑 |
 
@@ -36,7 +37,7 @@
 python -m py_compile engine/server.py
 python -m unittest discover -s engine/tests -q      # 51 tests OK
 python -I -c "import sys;sys.path.insert(0,'engine');import server as s;print(len(s.card_candidates()), s.card_candidates()[:5])"
-# 91 [3834755, 3738712, 1323657, 3508194, 3689641]   （80 候选 + 11 兜底，去重后 91）
+# 91 [3821218, 3856830, 3858435, 3859027, 3860041]   （11 兜底在前 + 80 新卡去重，共 91）
 ```
 
 线上（部署后）：

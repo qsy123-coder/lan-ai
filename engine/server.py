@@ -88,22 +88,25 @@ def card_candidates():
                 if isinstance(c, dict) and c.get("id") and c.get("name")]
         pop = sorted(rows, key=lambda c: (_num(c.get("popularity")),
                                           _num(c.get("likes"))), reverse=True)
-        ids = []
+        picked = []
         for c in pop[:max(0, int(limit * 0.7))]:
             cid = int(c["id"])
-            if cid not in ids:
-                ids.append(cid)
+            if cid not in picked:
+                picked.append(cid)
         newest = sorted(rows, key=lambda c: str(c.get("publishedAt") or ""), reverse=True)
         for c in newest:
-            if len(ids) >= limit:
+            if len(picked) >= limit:
                 break
             cid = int(c["id"])
-            if cid not in ids:
-                ids.append(cid)
+            if cid not in picked:
+                picked.append(cid)
     except Exception as e:
         log("卡片库读取失败 %s（%s），用内置卡池" % (path, type(e).__name__), "warn")
         return list(FALLBACK_CARDS)
-    for cid in FALLBACK_CARDS:
+    # 兜底卡排最前：它们是实测能建会话并出正文的（notes/005），
+    # 新卡未验证，可能 404「对话数据异常」，放后面避免每个号先烧一串失败请求。
+    ids = list(FALLBACK_CARDS)
+    for cid in picked:
         if cid not in ids:
             ids.append(cid)
     _CARD_CACHE["key"], _CARD_CACHE["ids"] = key, ids

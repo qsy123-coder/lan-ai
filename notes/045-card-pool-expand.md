@@ -77,6 +77,21 @@ python -I scripts/backfill_tags.py --limit 400 --gap 1.2 --rotate --loop
 - 分页条 `.home-pager`（上一页 / 第 N / M 页 · 共 X 张 / 下一页），样式追加在 `site/app/globals.css`；
 - 实测：`/` = 120 张 / 366 KB / 1.06 s；`/?p=999` = 43 张；`/?p=2` = 「第 2 / 215 页」。
 
+### 4.3 上线验收（2026-11-17 00:18，`https://43-135-10-175.sslip.io`）
+
+```
+/          200 366385B 1.10s  cards=120
+/?p=2      200 379850B 0.54s  cards=120
+/?p=999    200 138306B 0.49s  cards=43
+/category  200  68170B 0.48s
+/?cat=truelove 200 342252B 0.51s  cards=113
+第 2 / 215 页
+/health=200；/site/pool total=14039.34 usable=171 count=202
+```
+
+服务器备份：`/opt/lan/backup-202611170016/`（cards.json / page.js / globals.css）+ `/opt/lan/cards.json.bak-202611170016`。
+`cards.json` 两侧 sha256 一致：`1d390c07…afc518b`。
+
 ## 5. 补 tags（可选，按需分批）
 
 ```powershell

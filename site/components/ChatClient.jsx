@@ -722,6 +722,9 @@ export default function ChatClient({ card, initialSession }) {
             setMsgs(list);
             setStreaming("");
             save(list, final.slice(0, 42));
+            // 摘要在后台线程生成，complete 之后引擎不会再推 memory 事件；
+            // 4 秒后主动拉一次，记忆面板才能看到新摘要（PRD §5.3）。
+            setTimeout(() => { loadMemory(); }, 4000);
             const mine =
               d.userCredit != null ? ` · 我的积分 ${Number(d.userCredit).toFixed(2)}` : "";
             setNote(
@@ -758,7 +761,7 @@ export default function ChatClient({ card, initialSession }) {
         taRef.current?.focus();
       }
     },
-    [input, busy, msgs, card.id, model, maxTokens, rounds, save, kickReveal, stopReveal]
+    [input, busy, msgs, card.id, model, maxTokens, rounds, save, loadMemory, kickReveal, stopReveal]
   );
 
   const stop = useCallback(() => {

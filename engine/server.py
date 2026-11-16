@@ -1114,6 +1114,7 @@ def maybe_summarize(pool, name, st, card_id, mem, history, stop_event=None):
 
     text = ""
     why = ""
+    model_ok = False
     if not MEMORY_MODEL_SUMMARY:
         why = "model_summary_off"
     elif name not in pool:
@@ -1151,6 +1152,7 @@ def maybe_summarize(pool, name, st, card_id, mem, history, stop_event=None):
                     running = piece
                 if ok_all:
                     text = running
+                    model_ok = True
             else:
                 why = "no_chat"
         except Exception as e:
@@ -1159,7 +1161,7 @@ def maybe_summarize(pool, name, st, card_id, mem, history, stop_event=None):
 
     if not text:
         text = memlib.rule_summary(window, mem.get("summary"), pins)
-        log("摘要降级为规则摘要（%d 条）%s"
+        log("摘要降级为规则摘要（%d 条）%s，summarizedUpTo 不前进，下一轮重试"
             % (len(window), ("：" + why) if why else ""), "warn")
 
     if text:
@@ -1168,7 +1170,10 @@ def maybe_summarize(pool, name, st, card_id, mem, history, stop_event=None):
         # 看不到新摘要（历史遗留 bug，见 notes/047）。
         latest = memlib.load_memory(MEMORY_DIR, card_id, mem.get("sessionId"))
         latest["summary"] = text
-        latest["summarizedUpTo"] = max(int(latest.get("summarizedUpTo") or 0), end)
+        # 只有模型摘要成功才推进水位；降级规则摘要不推进，下一轮继续重试模型，
+        # 否则一次 418/no_chat 会把下一次模型摘要推迟 8 轮（notes/048）。
+        if model_ok:
+            latest["summarizedUpTo"] = max(int(latest.get("summarizedUpTo") or 0), end)
         memlib.save_memory(MEMORY_DIR, latest)
         mem.update(latest)
     return mem

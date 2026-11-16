@@ -101,7 +101,8 @@ Copy-Item accounts.json.bak-20261116003427 accounts.json -Force   # 回到 53 �
 1. **9 个无口令号**（uid 前缀 6e1020dd / f9f4913e / 2f296f0f / 3d06e356 / 648cb8b7 / d59f9496 / 28eee959 / 3715a3b5 / 7f0eb37b）
    需要农场侧补 `password` 后 `--offset` 单跑。
 2. **d147 credit=0** → 体检判 `exhausted`，不参与轮换；等 08:00 检查点后看是否回补（按 notes 事实 credit 不回补，只有 quota 回）。
-3. **cookie 每小时过期**：号池里的农场号 cookie 会在登录后 1h 失效。存量 b 系列靠引擎自动续期逻辑撑着，
-   农场号是否同样能续期尚未验证 —— 若 1 小时后大面积为 401，需要补一个批量重登脚本（本文件 §3 的 `--refresh-existing` 可直接复用，
-   建议挂每小时定时）。
+3. **cookie 每小时过期，但站点会按 refresh_token 自动续期**：`expires_in=3600` 只决定 cookie 里 access_token 的寿命；
+   实测 b001 / b019 的 `expires_at` 已过期 **139.8h / 124h**，`getMe` 依然 200 并返回 uid —— 说明上游按 cookie 里的
+   refresh_token 在服务端续期，引擎不需要自己存新 cookie。农场号同样带 refresh_token，理论上照旧可用；
+   观察 24h 若出现大面积 `not logged in`，再用 `--refresh-existing` 批量重登（本文件 §3 可直接复用）。
 4. 本机 `out/webstate.json` 未刷新（本机引擎没起）：要在本机控制台看 credit，先 `start.ps1` 再 `POST /refresh`。

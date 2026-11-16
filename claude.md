@@ -669,7 +669,7 @@ Remove-Item -Recurse -Force out\*,notes\*.tmp -ErrorAction SilentlyContinue     
 | 2026-11-17 | `feat/card-pool-expand` | 卡片池扩容：6 个 feed 深翻页 + 首页 120 张/页分页；838→25723 张，0 次 418（notes/045） | 已上线 |
 | 2026-11-17 | `feat/engine-card-pool` | 引擎建会话卡池改读 cards.json：热度 70% + 最新 30%，上限 80，11 张兜底（notes/046） | 待部署 |
 | 2026-11-17 | `fix/summary-nsfw-pulse` | 摘要模型 Surge→Pulse 128K + 拒答/续写识别 + 摘要按会话落盘；清卡 426322 脏摘要（notes/047） | 已上线（备份 backup-summary-20261117） |
-| 2026-11-17 | `fix/summary-retry-and-refresh` | 摘要失败不推进水位（下一轮重试）+ 前端 complete 后 4s 刷记忆面板（notes/048） | 开发中 |
+| 2026-11-17 | `fix/summary-retry-and-refresh` | 摘要失败不推进水位（下一轮重试）+ 前端 complete 后 4s 刷记忆面板（notes/048） | 已上线（备份 backup-site-20261117） |
 
 > 规矩：分支从 `main` 切出；质量门禁通过后可自行 commit / push / 部署 / 合并（见上「Claude 执行规范」）。
 > 不可逆操作（删数据 / 改库 / `.env.production` / force-push）前先确认。

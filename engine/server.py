@@ -1067,7 +1067,7 @@ def maybe_summarize(pool, name, st, card_id, mem, history, stop_event=None):
                                    want_sug=False, stop_event=stop_event)
                     if res.get("status") != "ok":
                         ok_all = False
-                        why = "status=%s" % res.get("status")
+                        why = "status=%s/%s" % (res.get("status"), res.get("reason") or "")
                         break
                     piece = memlib.clean_summary(res.get("text"))
                     if not piece:

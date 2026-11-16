@@ -64,12 +64,28 @@
 ## 5. 验证
 
 - `python -m py_compile engine/server.py engine/memory.py engine/users.py` 零错误。
-- `python -m unittest discover -s engine/tests -p "test_*.py"` → 51 tests OK。
-- 线上：重启 `lan-engine` 后用测试会话跑一次 `maybe_summarize`，确认：
-  1) 使用 Pulse；2) 输出是摘要不是续写；3) 摘要写进 `out/memory/426322/verify-*.json`（会话级），
-  卡级文件不被新建；4) 日志无「摘要降级」。
-- 清理：卡 426322 的卡级与会话记忆里被污染的摘要清零（备份 `backup-summary-<ts>`），
-  `summarizedUpTo` 置 0，下一轮重新生成。
+- `python -m unittest discover -s engine/tests -p "test_*.py"` → 52 tests OK。
+- 线上验证（`/tmp/lanprobe/verify_summary.py`，卡 426322，会话 `verify-20261117`）：
+  - d041：`SUMMARY_MODEL=x-apex-pulse-0731-128k`，`ctx=128000`，输出 371 字正经摘要
+    （称呼/主奴规则/结衣线都在），`refusal=False roleplay=False`，写入
+    `out/memory/426322/verify-20261117.json`，`summarizedUpTo=8`。
+  - d038：同一段内容返回 `status=exhausted/model_refused`（上游把拒答放在 SSE
+    classification 里），降级规则摘要；说明**摘要账号也可能被拒**，降级日志现在会带
+    `status=exhausted/model_refused` 便于识别。
+  - `clean_summary` 已剥掉「好的，明白，我将按您的要求…」+ `***` 客套前缀
+    （`test_clean_strips_preamble`）。
+- 清理：卡 426322 的卡级 `426322.json`（up=188）与会话 `93d5e47b-….json`（up=133）
+  的拒答摘要已清零（备份 `/opt/lan/backup-summary-20261117/`），全局扫描 `(none)`。
+- 部署：`server.py` 90097B / `memory.py` 21668B 上送 `/opt/lan/engine/`，
+  `systemctl restart lan-engine`，`/health` 200；`/` `/chat?card=426322` `/enter` `/about`
+  `/site/pool` 全 200。
+
+## 5.1 已知边界
+
+- 摘要仍跑在账号的**批处理会话**（`ensure_chat`，卡 3821218），不是用户这张卡；
+  模型可能带上那张卡的语气，但已用 `looks_like_roleplay` 挡掉「直接续写」。
+- `model_refused` 是账号级偶发；引擎当前不换号重试摘要，直接降级规则摘要。
+  若后续要提升覆盖率，可在 `maybe_summarize` 里失败后换第二个号重试一次。
 
 ## 6. 回滚
 

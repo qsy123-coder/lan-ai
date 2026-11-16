@@ -2,6 +2,7 @@
 accounts.json
 accounts.md
 accounts*.json
+accounts.json.bak*
 out/
 captures/
 patches/

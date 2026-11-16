@@ -4,10 +4,12 @@
 #   powershell -File scripts\clash.ps1 -List            # 所有节点
 #   powershell -File scripts\clash.ps1 -Best            # 切到延迟最低的节点
 #   powershell -File scripts\clash.ps1 -Set "节点名"     # 切到指定节点
+#   powershell -File scripts\clash.ps1 -Next            # 按节点表顺序切到下一个（撞 418 时轮换用）
 param(
   [switch]$Status,
   [switch]$List,
   [switch]$Best,
+  [switch]$Next,
   [string]$Set = ""
 )
 
@@ -71,7 +73,7 @@ $ver = Invoke-ClashApi -Path '/version'
 $proxies = Invoke-ClashApi -Path '/proxies'
 $g = $proxies.proxies.GLOBAL
 
-if ($Status -or (-not $List -and -not $Best -and -not $Set)) {
+if ($Status -or (-not $List -and -not $Best -and -not $Set -and -not $Next)) {
   "mihomo $($ver.version) | GLOBAL -> $($g.now) | 节点数 $($g.all.Count)"
   "前 12: " + (($g.all | Select-Object -First 12) -join ', ')
   return
@@ -95,6 +97,18 @@ if ($Best) {
     Invoke-ClashApi -Method PUT -Path '/proxies/GLOBAL' -Body (@{ name = $best } | ConvertTo-Json -Compress) | Out-Null
     "已切到 $best ($bestLat ms)"
   } else { "没有测出可用节点" }
+  return
+}
+
+if ($Next) {
+  $all = @($g.all)
+  $cur = $g.now
+  $i = [Array]::IndexOf([string[]]$all, [string]$cur)
+  if ($i -lt 0) { $i = -1 }
+  $pick = $all[($i + 1) % $all.Count]
+  Invoke-ClashApi -Method PUT -Path '/proxies/GLOBAL' -Body (@{ name = $pick } | ConvertTo-Json -Compress) | Out-Null
+  $g2 = (Invoke-ClashApi -Path '/proxies').proxies.GLOBAL
+  "GLOBAL $cur -> $($g2.now)"
   return
 }
 

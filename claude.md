@@ -667,6 +667,7 @@ Remove-Item -Recurse -Force out\*,notes\*.tmp -ErrorAction SilentlyContinue     
 | 2026-11-15 | `feat/sms-login` | 短信服务抽象（mock/webhook/twilio/smsbao）+ 手机号 OTP 登录/注册 + 手机号 tab（notes/042/043） | 已上线（mock provider；生产 UI 点测；备份 backup-sms-20261115230726） |
 | 2026-11-16 | `feat/import-farm-accounts` | 农场账号包入池：`--template-from` / `--refresh-existing`；+109 新号、40 个 d 号换过期 cookie，池 53→202，线上同步 202（notes/044） | 已上线 |
 | 2026-11-17 | `feat/card-pool-expand` | 卡片池扩容：6 个 feed 深翻页 + 首页 120 张/页分页；838→25723 张，0 次 418（notes/045） | 已上线 |
+| 2026-11-17 | `feat/engine-card-pool` | 引擎建会话卡池改读 cards.json：热度 70% + 最新 30%，上限 80，11 张兜底（notes/046） | 待部署 |
 | 2026-11-17 | `fix/summary-nsfw-pulse` | 摘要模型 Surge→Pulse 128K + 拒答/续写识别 + 摘要按会话落盘；清卡 426322 脏摘要（notes/047） | 已上线（备份 backup-summary-20261117） |
 
 > 规矩：分支从 `main` 切出；质量门禁通过后可自行 commit / push / 部署 / 合并（见上「Claude 执行规范」）。

@@ -210,6 +210,11 @@ class SummaryTest(unittest.TestCase):
         self.assertEqual(m.clean_summary("摘要：abc"), "abc")
         self.assertEqual(len(m.clean_summary("x" * 900)), m.SUMMARY_MAX)
 
+    def test_clean_strips_preamble(self):
+        raw = ("好的，明白。我将按照您的要求，把之前的对话压缩成一份摘要，并按时间顺序整理关键信息。\n\n"
+               "***\n\n暑假的夜晚，伊一悄悄靠近哥哥的床。")
+        self.assertEqual(m.clean_summary(raw), "暑假的夜晚，伊一悄悄靠近哥哥的床。")
+
     def test_chunks_cover_all(self):
         msgs = [{"role": "user", "content": "x" * 3000} for _ in range(5)]
         chunks = m.chunk_messages(msgs, 6000)

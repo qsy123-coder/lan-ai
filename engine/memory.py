@@ -314,7 +314,11 @@ def model_summary_prompt(messages, existing="", pins=None, recent=None):
 def clean_summary(text):
     t = (text or "").strip()
     t = re.sub(r"^(前情摘要|摘要)[:：]\s*", "", t)
-    return t[:SUMMARY_MAX]
+    # 模型偶尔先回一句「好的，明白，我将按您的要求…」再给正文，这层客套不进记忆；
+    # 客套后面的 *** / --- 分隔线一并去掉（实测 Pulse 会这样开头）。
+    t = re.sub(r"^(好的|明白|收到)[^\n]{0,80}(\n+|$)", "", t)
+    t = re.sub(r"^(\*{3,}|-{3,})\s*(\n+|$)", "", t)
+    return t.strip()[:SUMMARY_MAX]
 
 
 # 摘要模型对 NSFW 剧情会拒答，但拒答形态不固定：有的以道歉开头，有的先说

@@ -14,7 +14,7 @@
 | `competition.awardedCards` | `{}` | 549 行，只有 `{cardId, rank}`，需 `card.getById` 补全（连同 tags） |
 | `home.getHotTags` | `{}` | 100 条标签表（不是卡片） |
 | `card.getById` | `{"cardId":N}` | 单张完整对象，含 tags；下架返回 `json:null` |
-| `home.forYou` | `{}` | 401，要登录态，跳过 |
+| `home.forYou` | `{}` / `{"cursor":N}` | **带登录 cookie 可用**；一页 24 行，page=1000 仍有数据；tags 恒 `[]`，每页约 2–7 张新卡 |
 
 合法 `type`：`newest | highest_rated_1d | highest_rated_7d | highest_rated_30d | highest_rated_all | games`。
 schema 是 zod `.strict()`，多传未知键直接 400。

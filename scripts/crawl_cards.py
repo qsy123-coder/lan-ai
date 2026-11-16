@@ -72,17 +72,26 @@ class FetchError(Exception):
     pass
 
 
-def call(proc, payload, retries=3):
+class AuthError(Exception):
+    pass
+
+
+def call(proc, payload, retries=3, cookie=None):
     url = "%s/api/trpc/%s?batch=1&input=%s" % (
         BASE, proc, quote(json.dumps({"0": {"json": payload}}, ensure_ascii=False), safe=""))
     last = None
     for attempt in range(retries):
         try:
-            r = creq.get(url, headers=headers(), impersonate="chrome",
+            h = headers()
+            if cookie:
+                h["cookie"] = cookie
+            r = creq.get(url, headers=h, impersonate="chrome",
                          proxies=PROXY, timeout=40)
             text = r.text or ""
             if r.status_code in (418, 429) or "captcha_required" in text[:400]:
                 raise Gate("%s %s" % (r.status_code, text[:120]))
+            if r.status_code == 401:
+                raise AuthError("%s %s" % (r.status_code, text[:120]))
             if r.status_code != 200:
                 last = "HTTP %s" % r.status_code
                 time.sleep(3)
@@ -222,6 +231,10 @@ def crawl_source(st, key, proc, base_payload, cards, seen, args):
             safe("!! 请求失败 @ %s page=%d：%s" % (key, page, str(e)[:140]))
             save_state(st)
             return added_total, "error"
+        except AuthError as e:
+            safe("!! 401 需要登录 @ %s page=%d：%s，该源暂停" % (key, page, str(e)[:100]))
+            save_state(st)
+            return added_total, "auth"
         except Gate as e:
             safe("!! 418 闸门 @ %s page=%d（%s），已落盘 %d 张" % (key, page, e, len(cards)))
             save_state(st)
@@ -331,6 +344,101 @@ def fetch_awarded(st, cards, seen, args):
     return added
 
 
+def load_foryou_accounts(spec):
+    """spec = "g01" 或 "g01,b031,b033" 或 "auto"（取池里前 3 个）。"""
+    path = os.path.join(ROOT, "accounts.json")
+    if not os.path.exists(path):
+        return []
+    pool = json.load(io.open(path, encoding="utf-8-sig"))
+    if spec == "auto":
+        names = list(pool)[:3]
+    else:
+        names = [x.strip() for x in spec.split(",") if x.strip()]
+    out = []
+    for n in names:
+        c = (pool.get(n) or {}).get("cookie")
+        if c:
+            out.append((n, c))
+        else:
+            safe("!! 账号 %s 没有 cookie，跳过" % n)
+    return out
+
+
+def crawl_foryou(st, accounts, cards, seen, args):
+    """登录态个性化 feed：home.forYou 支持 cursor，page=1000 仍有 24 行。
+
+    cookie 失效（401）→ 该号标记结束；418 → 换节点重试。
+    """
+    total = 0
+    for name, cookie in accounts:
+        key = "home.forYou:%s" % name
+        s = src_state(st, key)
+        if s["done"]:
+            continue
+        page = s["next"]
+        rotations = 0
+        while not s["done"] and page <= args.foryou_pages:
+            payload = {} if page == 0 else {"cursor": page}
+            try:
+                rows = call("home.forYou", payload, cookie=cookie)
+            except AuthError as e:
+                s["done"] = True
+                safe("!! %s cookie 失效（%s）→ 该号跳过" % (name, str(e)[:90]))
+                save_state(st)
+                break
+            except FetchError as e:
+                safe("!! forYou 请求失败 @ %s page=%d：%s" % (name, page, str(e)[:120]))
+                save_state(st)
+                return total, "error"
+            except Gate as e:
+                safe("!! 418 闸门 @ forYou:%s page=%d（%s）" % (name, page, e))
+                save_state(st)
+                if not args.rotate or rotations >= args.rotations:
+                    return total, "gate"
+                rotations += 1
+                if not rotate_node(args.rotate_wait) or not probe_clean():
+                    safe("   [rotate] 出口仍被闸门，冷却 %ds" % args.cooldown)
+                    time.sleep(args.cooldown)
+                    if not probe_clean() and not rotate_node(args.rotate_wait):
+                        return total, "gate"
+                continue
+
+            s["requests"] += 1
+            if not rows:
+                s["done"] = True
+                break
+            new = 0
+            for c in rows:
+                cid = c.get("id")
+                if not cid or cid in seen:
+                    continue
+                ok, _why = usable(c)
+                if not ok:
+                    continue
+                cards.append(shape(c))
+                seen.add(cid)
+                new += 1
+            total += new
+            s["cardIds"] += new
+            s["next"] = page + 1
+            s["stale"] = 0 if new else s["stale"] + 1
+            safe("  %-28s page=%-4d rows=%-3d new=%-3d total=%d"
+                 % (key, page, len(rows), new, len(cards)))
+            log({"key": key, "page": page, "rows": len(rows), "new": new, "total": len(cards)})
+            if new:
+                flush(cards)
+                save_state(st)
+            if s["stale"] >= args.stale:
+                s["done"] = True
+                safe("  %-28s 连续 %d 页无新卡 → 该号结束" % (key, args.stale))
+                break
+            page += 1
+            time.sleep(args.gap)
+        save_state(st)
+        flush(cards)
+    return total, "done"
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pages", type=int, default=40, help="每个源最多翻到第几页（默认 40）")
@@ -338,6 +446,10 @@ def main():
     ap.add_argument("--stale", type=int, default=10, help="连续多少页无新卡即认为该源到头（默认 10）")
     ap.add_argument("--types", default=",".join(FEED_TYPES))
     ap.add_argument("--no-newbie", action="store_true")
+    ap.add_argument("--no-foryou", action="store_true")
+    ap.add_argument("--foryou-accounts", default="g01",
+                    help="登录态 home.forYou 用的账号，逗号分隔；auto = 池里前 3 个")
+    ap.add_argument("--foryou-pages", type=int, default=1000)
     ap.add_argument("--no-awarded", action="store_true")
     ap.add_argument("--awarded-limit", type=int, default=60)
     ap.add_argument("--rotate", action="store_true", help="撞 418 自动换节点续爬")
@@ -389,6 +501,17 @@ def main():
                 safe("!! 闸门未解除：冷却后重跑同一条命令即可续（进度已存 %s）"
                      % os.path.relpath(STATE, ROOT))
                 return 2
+        if not args.no_foryou:
+            accounts = load_foryou_accounts(args.foryou_accounts)
+            if accounts:
+                added, why = crawl_foryou(st, accounts, cards, seen, args)
+                total_added += added
+                safe("== %-28s +%d（%s）库内 %d" % ("home.forYou", added, why, len(cards)))
+                if why == "gate":
+                    safe("!! 闸门未解除：冷却后重跑同一条命令即可续")
+                    return 2
+            else:
+                safe("!! --foryou-accounts 没有可用 cookie，跳过")
         if not args.no_awarded:
             added = fetch_awarded(st, cards, seen, args)
             total_added += added

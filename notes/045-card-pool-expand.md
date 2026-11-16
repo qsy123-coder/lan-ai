@@ -56,6 +56,12 @@ python -I scripts/backfill_tags.py --limit 400 --gap 1.2 --rotate --loop
 | `home.getCards:games` | 43 | 0..41，page 42 空页 | 324 |
 | `home.newbie` | 3 | 0..1，page 2 空页 | 0 |
 | `competition.awardedCards` | 1 | 549 行 | 0（26 张缺卡 getById 全部下架/无效） |
+| `home.forYou`（g01，登录态） | 14 | 0..13，连续 10 页无新卡收尾 | 18 |
+| `home.forYou`（b031/b033/b034） | 各 10 | 0..9，各自 10 页无新卡 | 8 |
+
+> forYou 是**按号个性化**的有限池：4 个号合计只多 26 张，换号收益递减，不再扩号。卡库终值 **25749 张**。
+> 另外 `home.getCards` 对未知键（`tag`/`q`/`keyword`/`categoryId`/`userId`/`sort`）不再 400，而是**静默忽略**——
+> 拿这些键拿到的仍是 `newest` 原序列，不能当筛选器用。
 
 - 卡库 **838 → 25723 张**（+24885），唯一 id 25,723，无重复，`cover` 全非空。
 - `cards.json` 53 MB（`.gitignore` 已排除 `captures/`，不进 git）。

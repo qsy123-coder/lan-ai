@@ -842,6 +842,36 @@ def save_snapshot(card_id, session_id, messages):
     return p
 
 
+def snapshot_sessions(card_id=None):
+    """列出浏览器上传过快照的会话（out/history/<card>/<sid>.json）。"""
+    base = os.path.join(OUT_DIR, "history")
+    out = []
+    try:
+        cards = [str(int(card_id))] if card_id else os.listdir(base)
+    except Exception:
+        return out
+    for c in cards:
+        d = os.path.join(base, str(c))
+        if not os.path.isdir(d):
+            continue
+        for fn in os.listdir(d):
+            if not fn.endswith(".json"):
+                continue
+            p = os.path.join(d, fn)
+            try:
+                ts = int(os.path.getmtime(p))
+            except Exception:
+                ts = 0
+            try:
+                cid = int(c)
+            except (TypeError, ValueError):
+                continue
+            out.append({"cardId": cid, "sessionId": fn[:-5],
+                        "account": None, "chatId": None,
+                        "at": ts, "updatedAt": ts, "summary": ""})
+    return out
+
+
 def fetch_chat_messages(cookie, chat_id):
     """从上游 chat.getMessages 拉完整存档，返回 ([{role, content}], err)。
 
@@ -1894,6 +1924,12 @@ class Handler(BaseHTTPRequestHandler):
                                  "at": int(mem.get("updatedAt") or 0),
                                  "updatedAt": int(mem.get("updatedAt") or 0),
                                  "summary": (mem.get("summary") or "")[:80]})
+            # 浏览器上传过快照的会话也要出现在列表里（手机 → PC 同步）
+            for row in snapshot_sessions(_cid or None):
+                if row["sessionId"] in known:
+                    continue
+                known.add(row["sessionId"])
+                rows.append(row)
             rows.sort(key=lambda r: int(r.get("updatedAt") or r.get("at") or 0))
             return self._json(200, {"sessions": rows, "count": len(rows)})
         if path == "/site/user/me":

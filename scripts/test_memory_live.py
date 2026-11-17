@@ -89,14 +89,16 @@ def main():
     cid = None
     try:
         # 1) 新会话必须是空 chat
-        cid, err = s.fresh_chat_for_card(cookie, args.card, session_id=sid, account=acct)
+        cid, err = s.fresh_chat_for_card(cookie, args.card, session_id=sid)
         print("fresh chat=%s err=%s" % (str(cid)[:8], err))
         if not cid:
             return fail("fresh_chat_for_card: %s" % err)
         n = s.fetch_chat_count(cookie, cid)
-        print("fresh chat msgs=%s" % n)
-        if n != 0:
-            errors += fail("fresh chat not empty: %s" % n)
+        has_hist, herr = s.chat_has_history(cookie, cid)
+        print("fresh chat msgs=%s has_history=%s" % (n, has_hist))
+        # 新建会话自带一条卡片开场（assistant），不能按 0 条判空
+        if has_hist is not False:
+            errors += fail("fresh chat has history: %s %s" % (has_hist, herr))
 
         # 2) 换号接续：把上一场「刻晴 cos」原文塞进 recent_text，看回复是否接得上
         recent = ("用户：刻晴！最爱刻晴了，我要把你抱起来操\n"

@@ -1361,6 +1361,19 @@ def chat_id_ok(pool, name, chat_id):
     return fetch_chat_count(pool[name]["cookie"], chat_id) is not None
 
 
+def chat_has_history(cookie, chat_id):
+    """会话里是否已经有真实对话（至少一条 user 消息）。
+
+    不能按「条数 == 0」判空：createByCard 新建的会话**自带卡片开场**（一条
+    assistant），所以全新会话也是 1 条。有没有 user 消息才是分界。
+    返回 (has_history, err)；读取失败时 has_history 为 None。
+    """
+    msgs, err = fetch_chat_messages(cookie, chat_id)
+    if msgs is None:
+        return None, err
+    return any(m.get("role") == "user" for m in msgs), ""
+
+
 def chat_owner_session(chat_id):
     """反查 chatId 属于哪个会话（sessions.json）。"""
     if not chat_id:
@@ -1403,7 +1416,7 @@ def fresh_chat_for_card(cookie, card_id, session_id=None, active_chat=None):
     上游 chat.createByCard 按 (号, cardId) 去重：只要该号以前给这张卡建过会话，
     就直接返回那个旧会话（历史停在本会话/别的会话的某一轮）。直接续写旧会话就是
     「剧情倒退」的根因（notes/052：同一会话被拆成 15 个各停在不同轮次的上游会话）。
-    所以：非空 → 清掉重开；属于别的会话 → 不动它，换号。
+    所以：有 user 消息（旧剧情）→ 清掉重开；属于别的会话 → 不动它，换号。
     """
     active = active_chat
     if session_id:
@@ -1415,18 +1428,20 @@ def fresh_chat_for_card(cookie, card_id, session_id=None, active_chat=None):
         if active and cid == active:
             # 当前会话的正式会话：即使读失败也不能删，交给上层决定是否换号
             return None, "active_chat_reused"
-        n = fetch_chat_count(cookie, cid)
-        if n is None:
-            # 读不到条数时不能无限重试；按新会话用，并留日志
-            log("新会话条数未知，按空会话使用 %s（card=%s）" % (str(cid)[:8], card_id), "warn")
+        has_hist, herr = chat_has_history(cookie, cid)
+        if has_hist is None:
+            # 读不到时不能无限重试；按新会话用，并留日志
+            log("新会话状态未知，按空会话使用 %s（card=%s，%s）" % (
+                str(cid)[:8], card_id, herr), "warn")
             return cid, None
-        if n == 0:
+        if not has_hist:
+            # 全新会话只有卡片开场（一条 assistant），没有 user 消息
             return cid, None
         if chat_in_use(cid, except_session=(card_id, session_id) if session_id else None):
             return None, "chat_owned_by_other_session"
         ok, derr = delete_chat(cookie, cid)
-        log("清掉旧会话 %s（card=%s，%d 条旧剧情）-> %s %s" % (
-            str(cid)[:8], card_id, n, ok, derr))
+        log("清掉旧会话 %s（card=%s，已有对话历史）-> %s %s" % (
+            str(cid)[:8], card_id, ok, derr))
         if not ok:
             return None, "stale_chat_delete_failed: %s" % derr
     return None, "no_fresh_chat"

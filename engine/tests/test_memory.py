@@ -215,6 +215,28 @@ class SummaryTest(unittest.TestCase):
                "***\n\n暑假的夜晚，伊一悄悄靠近哥哥的床。")
         self.assertEqual(m.clean_summary(raw), "暑假的夜晚，伊一悄悄靠近哥哥的床。")
 
+    def test_summary_hash_anchor(self):
+        msgs = [{"role": "user", "content": "a"},
+                {"role": "assistant", "content": "b"}]
+        self.assertEqual(m.summary_up(msgs, {"summaryHash": m.msg_id(msgs[1])}), 2)
+        # 哈希在历史里找不到（被裁剪/换会话）→ 从头开始，避免错误跳过
+        self.assertEqual(m.summary_up(msgs, {"summaryHash": "deadbeef"}), 0)
+        # 老数据没有哈希：下标越界也回落到 0
+        self.assertEqual(m.summary_up(msgs, {"summarizedUpTo": 99}), 0)
+
+    def test_should_summarize_with_up(self):
+        self.assertTrue(m.should_summarize(40, {"summarizedUpTo": 0}, up=0))
+        self.assertFalse(m.should_summarize(40, {"summarizedUpTo": 0}, up=30))
+
+    def test_ensure_scene(self):
+        msgs = [{"role": "user", "content": "继续"},
+                {"role": "assistant", "content": "*她在玄关跪下，抬头看你。*"}]
+        t = m.ensure_scene("前情摘要正文", msgs)
+        self.assertIn("【当前场景】", t)
+        self.assertIn("玄关", t)
+        t2 = m.ensure_scene("正文\n【当前场景】已给", msgs)
+        self.assertEqual(t2.count("【当前场景】"), 1)
+
     def test_chunks_cover_all(self):
         msgs = [{"role": "user", "content": "x" * 3000} for _ in range(5)]
         chunks = m.chunk_messages(msgs, 6000)

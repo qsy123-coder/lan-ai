@@ -232,6 +232,8 @@ export default function ChatClient({ card, initialSession }) {
   const chatIdRef = useRef(null);   // 恢复的历史属于哪个上游会话
   const seedAcctRef = useRef(null);  // 该会话在哪个号下
   const sidRef = useRef(initialSession || "");  // 当前会话 id（回调里读最新值）
+  const busyRef = useRef(false);                // 同步锁：busy 是异步 state，防双击重复发送
+  const lastSendRef = useRef({ text: "", ts: 0 });  // 2 秒内同一句话不重复发
   const isNewRef = useRef(false);  // 本会话是否刚由「＋新对话」创建（用于跳过 seeds 恢复）
   // 流式平滑渲染：上游按 ~80ms 一包吐出，直接渲染会「一顿一顿」。
   // 这里把累积文本放进 ref，用 rAF 以稳定节奏逐字揭示（追平 backlog），
@@ -717,7 +719,12 @@ export default function ChatClient({ card, initialSession }) {
   const send = useCallback(
     async (textArg, historyArg) => {
       const text = (textArg ?? input).trim();
-      if (!text || busy) return;
+      // busy 是异步 state：双击时第二次调用读到的还是 false，必须用同步 ref 挡。
+      if (!text || busy || busyRef.current) return;
+      const now = Date.now();
+      if (lastSendRef.current.text === text && now - lastSendRef.current.ts < 2000) return;
+      lastSendRef.current = { text, ts: now };
+      busyRef.current = true;
       const base = historyArg ?? msgs;
       if (!textArg) setInput("");
       setBusy(true);
@@ -832,6 +839,7 @@ export default function ChatClient({ card, initialSession }) {
           setMsgs(list);
           save(list, accRef.current.slice(0, 42));
         }
+        busyRef.current = false;
         setBusy(false);
         setStreaming("");
         abort.current = null;

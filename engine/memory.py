@@ -65,7 +65,8 @@ def memory_path(memory_dir, card_id, session_id=None):
 
 def default_memory(card_id):
     return {"version": VERSION, "cardId": int(card_id), "pinned": [],
-            "summary": "", "summarizedUpTo": 0, "updatedAt": 0, "suppressed": []}
+            "summary": "", "summarizedUpTo": 0, "summaryHash": "",
+            "updatedAt": 0, "suppressed": []}
 
 
 def load_memory(out_dir, card_id, session_id=None):
@@ -80,6 +81,7 @@ def load_memory(out_dir, card_id, session_id=None):
             "pinned": [p for p in (data.get("pinned") or []) if isinstance(p, dict) and p.get("text")],
             "summary": str(data.get("summary") or "")[:SUMMARY_MAX],
             "summarizedUpTo": _as_int(data.get("summarizedUpTo")),
+            "summaryHash": str(data.get("summaryHash") or ""),
             "updatedAt": _as_int(data.get("updatedAt")),
             "suppressed": [s for s in (data.get("suppressed") or [])
                            if isinstance(s, str) and s][:200],
@@ -229,14 +231,42 @@ def update_suppressed(mem, removed_ids):
 
 # ---------------------------------------------------------------- 摘要
 
-def should_summarize(total_msgs, mem, min_new=16, keep_recent=12):
+def msg_id(m):
+    """一条消息的稳定指纹：编辑/裁剪后仍能找回摘要截止点。"""
+    m = m or {}
+    raw = ((m.get("role") or "") + "\n" + (m.get("content") or "")).encode("utf-8")
+    return hashlib.sha1(raw).hexdigest()[:16]
+
+
+def summary_up(messages, mem, keep_recent=12):
+    """摘要截止点：优先按消息指纹定位；找不到（历史被裁/重开）就从头来。
+
+    旧的 summarizedUpTo 是数组下标，客户端只保留 120 条后会漂移，导致摘要
+    停摆或跳过内容；有 summaryHash 时以它为准。
+    """
+    h = (mem or {}).get("summaryHash") or ""
+    msgs = messages or []
+    if h:
+        for i in range(len(msgs) - 1, -1, -1):
+            if msg_id(msgs[i]) == h:
+                return i + 1
+        return 0
+    up = _as_int((mem or {}).get("summarizedUpTo"))
+    return up if 0 <= up <= len(msgs) else 0
+
+
+def should_summarize(total_msgs, mem, min_new=16, keep_recent=12, up=None):
     """消息总数比上次摘要多出 min_new 条，且确有可压缩区间。"""
-    up = int(mem.get("summarizedUpTo") or 0)
+    if up is None:
+        up = _as_int((mem or {}).get("summarizedUpTo"))
+        if up < 0 or up > total_msgs:
+            up = 0
     return total_msgs - up >= min_new and total_msgs - keep_recent > up
 
 
-def summary_window(messages, mem, keep_recent=12):
-    up = int(mem.get("summarizedUpTo") or 0)
+def summary_window(messages, mem, keep_recent=12, up=None):
+    if up is None:
+        up = summary_up(messages, mem, keep_recent)
     end = max(up, len(messages) - keep_recent)
     return messages[up:end], end
 
@@ -307,7 +337,8 @@ def model_summary_prompt(messages, existing="", pins=None, recent=None):
     parts.append("【新增对话】\n" + transcript_of(messages))
     if recent:
         parts.append("【当前场景（不要摘要，只用于衔接）】\n" + transcript_of(recent, 1200))
-    parts.append("只输出摘要正文，不要标题，不要解释。")
+    parts.append("最后单独一行写「【当前场景】地点、在场人物、正在发生的事、下一步」，30-60 字。"
+                 "只输出摘要正文，不要标题，不要解释。")
     return "\n\n".join(parts)
 
 
@@ -353,6 +384,26 @@ def looks_like_roleplay(text):
     """开头是动作/台词的输出基本是模型接着演，不是摘要。"""
     t = (text or "").strip()
     return bool(t) and bool(ROLEPLAY_HEAD_RE.match(t[:60]))
+
+
+SCENE_MARK = "【当前场景】"
+
+
+def ensure_scene(text, messages):
+    """保证摘要末尾带「当前场景」：换号/新 chat 时，模型的第一手依据就是它。"""
+    t = (text or "").strip()
+    if SCENE_MARK in t:
+        return t[:SUMMARY_MAX]
+    last = ""
+    for m in reversed(messages or []):
+        if m.get("role") == "assistant" and (m.get("content") or "").strip():
+            last = re.sub(r"\s+", " ", m["content"]).strip()
+            break
+    if not last:
+        return t[:SUMMARY_MAX]
+    add = "\n" + SCENE_MARK + last[:80]
+    room = max(0, SUMMARY_MAX - len(add))
+    return (t[:room].rstrip() + add)[:SUMMARY_MAX]
 
 
 def usable_existing(existing):

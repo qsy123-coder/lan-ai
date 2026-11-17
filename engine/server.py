@@ -532,7 +532,7 @@ def normalize_history(history):
 
 
 def build_body(chat_id, card_id, model, max_tokens, prompt, history=None, memory=None,
-               want_sug=None):
+               want_sug=None, recent_text=None):
     """head（卡片开场）→ 记忆块（锚点+摘要）→ 预算内 tail → 当前 user。
 
     裁剪与注入统一在这里做，前端不再自己 head/tail。
@@ -543,7 +543,11 @@ def build_body(chat_id, card_id, model, max_tokens, prompt, history=None, memory
     for m in prompts:
         m["content"] = _clean_surrogates(m["content"])
     # 上游只认 content，记忆必须并进当前消息，否则不进模型视野。
-    content = _clean_surrogates(memlib.content_prefix(memory) + prompt)
+    prefix = memlib.content_prefix(memory)
+    if recent_text:
+        # 换号/新 chat 时上游没有前文，只靠摘要会串回旧场景；补最近几轮原文兜底。
+        prefix += "【刚才的对话·原文·用于衔接，不要复述】\n" + recent_text + "\n\n"
+    content = _clean_surrogates(prefix + prompt)
     # 上游账号资料里的显示名是注册时自动生成的（形如「用户d57640」），
     # 模型会把它当称呼写进正文。明确禁止，统一用「你」/角色习惯称呼。
     content += USER_NAME_RULE
@@ -612,14 +616,14 @@ def extract_text(obj):
 
 
 def generate(cookie, chat_id, card_id, model, max_tokens, prompt, emit, history=None,
-             memory=None, want_sug=True, stop_event=None):
+             memory=None, want_sug=True, stop_event=None, recent_text=None):
     """流式生成。返回 {status: ok|exhausted|card_error|auth_error|error, ...}"""
     stop = stop_event if stop_event is not None else STOP
     url = BASE + "/api/chat"
     rid = "web-%d-%s" % (int(time.time() * 1000), os.urandom(3).hex())
     h = headers_of(cookie, referer=BASE + "/chat?c=" + chat_id, request_id=rid)
     body = json.dumps(build_body(chat_id, card_id, model, max_tokens, prompt, history,
-                                 memory, want_sug=want_sug),
+                                 memory, want_sug=want_sug, recent_text=recent_text),
                       ensure_ascii=False).encode("utf-8", "replace")
 
     text_parts = []
@@ -1160,8 +1164,20 @@ def _tail_prompt(text, limit=1200):
     return t[-limit:] if len(t) > limit else t
 
 
+def recent_turns_text(history, n=4, limit=500):
+    """换号/新 chat 时给模型的最近几轮原文（上游没有这些历史）。"""
+    msgs = memlib.sanitize_history(history)[-n:]
+    lines = []
+    for m in msgs:
+        who = "用户" if m.get("role") == "user" else "角色"
+        c = re.sub(r"\s+", " ", m.get("content") or "").strip()
+        if c:
+            lines.append("%s：%s" % (who, c[:limit]))
+    return "\n".join(lines)
+
+
 def generate_long(cookie, chat_id, card_id, model, max_tokens, prompt, emit,
-                  history=None, rounds=3, memory=None, stop_event=None):
+                  history=None, rounds=3, memory=None, stop_event=None, recent_text=None):
     """
     多轮续写：首轮用原始 prompt，之后每轮把「累积正文」当 assistant 历史回灌。
     任一环节失败就带着已有正文返回 ok，不丢内容。
@@ -1184,7 +1200,8 @@ def generate_long(cookie, chat_id, card_id, model, max_tokens, prompt, emit,
         emit("round", {"index": i + 1, "rounds": rounds, "chars": len(text)})
         try:
             res = generate(cookie, chat_id, card_id, model, max_tokens, this_prompt, emit,
-                           history=this_hist, memory=memory, stop_event=stop_event)
+                           history=this_hist, memory=memory, stop_event=stop_event,
+                           recent_text=recent_text if i == 0 else None)
         except Exception as e:
             log("round %d failed: %s" % (i + 1, repr(e)[:200]), "warn")
             if text:
@@ -1236,9 +1253,10 @@ def start_summary(pool, name, card_id, mem, history, stop_event=None):
 def maybe_summarize(pool, name, st, card_id, mem, history, stop_event=None):
     """压缩旧消息；失败降级为规则摘要，绝不阻塞主流程。"""
     msgs = memlib.sanitize_history(history)
-    if not memlib.should_summarize(len(msgs), mem):
+    up = memlib.summary_up(msgs, mem)
+    if not memlib.should_summarize(len(msgs), mem, up=up):
         return mem
-    window, end = memlib.summary_window(msgs, mem)
+    window, end = memlib.summary_window(msgs, mem, up=up)
     if not window:
         return mem
 
@@ -1304,6 +1322,7 @@ def maybe_summarize(pool, name, st, card_id, mem, history, stop_event=None):
         text = memlib.rule_summary(window, mem.get("summary"), pins)
         log("摘要降级为规则摘要（%d 条）%s，summarizedUpTo 不前进，下一轮重试"
             % (len(window), ("：" + why) if why else ""), "warn")
+    text = memlib.ensure_scene(text, window)
 
     if text:
         # 重新读一次，避免覆盖这期间新写入的锚点。
@@ -1315,6 +1334,8 @@ def maybe_summarize(pool, name, st, card_id, mem, history, stop_event=None):
         # 否则一次 418/no_chat 会把下一次模型摘要推迟 8 轮（notes/048）。
         if model_ok:
             latest["summarizedUpTo"] = max(int(latest.get("summarizedUpTo") or 0), end)
+            latest["summaryHash"] = (memlib.msg_id(msgs[end - 1])
+                                     if 0 < end <= len(msgs) else "")
         memlib.save_memory(MEMORY_DIR, latest)
         mem.update(latest)
     return mem
@@ -1395,8 +1416,9 @@ def run_site_chat(payload, emit, stop_event=None):
     # —— 多会话：会话必须固定绑定一个账号（上游存档按账号隔离）。
     # 已绑定的会话强制走它自己的号 + chatId；未绑定的会话优先选「本卡还没被
     # 其它会话占用的号」，保证新会话的上游存档是干净独立的。
+    prev_sess = get_session(card_id, session_id) if session_id else None
     if session_id:
-        sess = get_session(card_id, session_id)
+        sess = prev_sess
         if sess and sess.get("account") and sess.get("account") in pool \
                 and sess.get("chatId"):
             want_acct = sess["account"]
@@ -1481,13 +1503,24 @@ def run_site_chat(payload, emit, stop_event=None):
             emit("switch", {"from": name, "reason": "busy", "detail": "该账号正在生成中"})
             continue
         try:
+            # 换号 = 新 chat：上游没有前文，只靠摘要会串回旧场景，补最近几轮原文。
+            prev_chat = (prev_sess or {}).get("chatId")
+            prev_acct = (prev_sess or {}).get("account")
+            switched = bool(prev_chat) and (prev_chat != cid or prev_acct != name)
+            recent_text = (recent_turns_text(history)
+                           if history and (switched or not prev_chat) else None)
+            log("site: card=%s session=%s account=%s chat=%s switched=%s recent=%d"
+                % (card_id, str(session_id or "")[:8], name, str(cid)[:8],
+                   switched, len(recent_text or "")))
             if rounds <= 1:
                 res = generate(pool[name]["cookie"], cid, card_id, model, max_tokens, prompt,
-                               emit, history=history, memory=mem, stop_event=stop_event)
+                               emit, history=history, memory=mem, stop_event=stop_event,
+                               recent_text=recent_text)
             else:
                 res = generate_long(pool[name]["cookie"], cid, card_id, model, max_tokens,
                                     prompt, emit, history=history, memory=mem,
-                                    rounds=min(rounds, 8), stop_event=stop_event)
+                                    rounds=min(rounds, 8), stop_event=stop_event,
+                                    recent_text=recent_text)
         finally:
             lock.release()
         if res.get("status") == "exhausted" and res.get("reason") == "internal":
@@ -1523,7 +1556,9 @@ def run_site_chat(payload, emit, stop_event=None):
                               "userCredit": user_credit})
             # 用户已经拿到正文；摘要丢到后台，失败也不影响这次回复
             try:
-                if memlib.should_summarize(len(memlib.sanitize_history(history)), mem):
+                _msgs = memlib.sanitize_history(history)
+                _up = memlib.summary_up(_msgs, mem)
+                if memlib.should_summarize(len(_msgs), mem, up=_up):
                     start_summary(pool, name, card_id, mem, history, stop_event=stop_event)
             except Exception as e:
                 log("记忆更新失败：%s" % str(e)[:160], "warn")

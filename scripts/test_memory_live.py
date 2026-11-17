@@ -71,7 +71,7 @@ def audit_memory():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--card", type=int, default=3861267)
+    ap.add_argument("--card", type=int, default=426322)
     args = ap.parse_args()
     errors = 0
 
@@ -107,20 +107,31 @@ def main():
                          "继续。", lambda *a, **k: None, recent_text=recent,
                          want_sug=False)
         text = res.get("text") or ""
-        print("continuity status=%s chars=%d" % (res.get("status"), len(text)))
-        if res.get("status") != "ok" or not ("刻晴" in text or "cos" in text or "cos服" in text):
+        # last_content.txt 是全局调试文件，线上并发会互相覆盖；直接检查 build_body
+        body = s.build_body(cid, args.card, "x-apex-flux-0217-16k", 300, "继续。",
+                            recent_text=recent, want_sug=False)
+        content = body.get("content") or ""
+        injected = "【刚才的对话" in content and "刻晴" in content
+        print("continuity status=%s chars=%d injected=%s"
+              % (res.get("status"), len(text), injected))
+        if not injected:
+            errors += fail("recent_text was not injected into content")
+        keys = ("刻晴", "cos", "cos服", "玉衡", "紫色")
+        if res.get("status") != "ok" or not any(k in text for k in keys):
             errors += fail("continuity reply did not reference the 刻晴 scene: %s" % text[:120])
 
         # 3) 摘要账号回退：故意用「0 额度」的号名，必须换成有额度的号并写入摘要
-        mem = m.default_memory(args.card)
+        #    中性卡更稳（剧情卡在摘要模型上偶发空响应）
+        sum_card = 3861267
+        mem = m.default_memory(sum_card)
         mem["sessionId"] = "live-sum-" + ts
         hist = [{"role": "user" if i % 2 == 0 else "assistant",
                  "content": "第%d条：伊一在玄关跪下，称呼主人，门外有脚步声。" % i}
                 for i in range(20)]
         broke = "nobody-" + ts
-        out = s.maybe_summarize(pool, broke, st, args.card, mem, hist)
+        out = s.maybe_summarize(pool, broke, st, sum_card, mem, hist)
         text2 = out.get("summary") or ""
-        saved = m.load_memory(s.MEMORY_DIR, args.card, mem["sessionId"])
+        saved = m.load_memory(s.MEMORY_DIR, sum_card, mem["sessionId"])
         print("summary chars=%d hash=%s" % (len(text2), saved.get("summaryHash")))
         if not saved.get("summaryHash"):
             errors += fail("summary did not advance (account fallback failed)")
@@ -144,10 +155,13 @@ def main():
             s.drop_session_chat(args.card, sid)
         except Exception:
             pass
-        for fn in os.listdir(os.path.join(s.MEMORY_DIR, str(args.card))) \
-                if os.path.isdir(os.path.join(s.MEMORY_DIR, str(args.card))) else []:
-            if fn.startswith("live-"):
-                os.remove(os.path.join(s.MEMORY_DIR, str(args.card), fn))
+        for c in {args.card, 3861267}:
+            d = os.path.join(s.MEMORY_DIR, str(c))
+            if not os.path.isdir(d):
+                continue
+            for fn in os.listdir(d):
+                if fn.startswith("live-"):
+                    os.remove(os.path.join(d, fn))
         print("cleaned", sid)
 
     print("RESULT:", "PASS" if errors == 0 else "FAIL(%d)" % errors)

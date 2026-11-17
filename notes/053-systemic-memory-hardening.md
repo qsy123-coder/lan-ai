@@ -54,8 +54,19 @@ cd /opt/lan && DZMM_PROXY= /opt/lan/venv/bin/python scripts/test_memory_live.py
 
 ## 4. 验证记录
 
-- 本地 `py_compile` 零错误；`unittest` **75 tests OK**。
-- 线上真实测试：待执行（部署后运行，结果回填本节）。
+- 本地 `py_compile` 零错误；`unittest` **75 tests OK**（含 test_summary_fallback 4 例）。
+- 线上真实测试 `scripts/test_memory_live.py`（2026-11-17 14:00，账号 d002，卡 426322）：
+  - fresh chat：`msgs=1 has_history=False`（1 条是卡片开场，不算历史）；
+  - 换号接续：`injected=True`，真实回复引用刻晴/cos（`status=ok chars=979`）；
+  - 摘要账号回退：故意传 `nobody-<ts>`，日志
+    `摘要改用账号 d002（原号 nobody-… 不可用）`，摘要 228 字、`summaryHash` 前进、
+    含【当前场景】、不是拒答；
+  - 全站体检：28 份记忆，`rule=2`，`refusal/truncated=0`；
+  - `RESULT: PASS`，测试会话与临时记忆已清理。
+- 注：`last_content.txt` 是全局调试文件，线上并发会互相覆盖；真实测试改为直接断言
+  `build_body()` 的 `content`。
+- 注：fresh chat 判空不能按「0 条」——`createByCard` 自带卡片开场；已改为
+  `chat_has_history()`（有没有 user 消息），由 7015577 一并修复。
 
 ## 5. 回滚
 

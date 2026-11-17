@@ -821,13 +821,23 @@ def fetch_chat_messages(cookie, chat_id):
     """
     url = "%s/api/trpc/chat.getMessages?batch=1&input=%s" % (
         BASE, quote(json.dumps({"0": {"json": {"chatId": chat_id}}})))
-    try:
-        r = creq.get(url, headers=headers_of(cookie), impersonate="chrome",
-                     proxies=proxies(), timeout=45)
-    except Exception as e:
-        return None, "%s: %s" % (type(e).__name__, str(e)[:80])
-    if r.status_code != 200:
-        return None, "HTTP %s" % r.status_code
+    r, last = None, ""
+    # 代理节点偶发 SSL 掉线；读存档不影响账号状态，失败时直连重试一次。
+    for use_proxy in ((True, False) if PROXY else (False,)):
+        try:
+            r = creq.get(url, headers=headers_of(cookie), impersonate="chrome",
+                         proxies=proxies() if use_proxy else None, timeout=35)
+        except Exception as e:
+            last = "%s: %s" % (type(e).__name__, str(e)[:80])
+            r = None
+            continue
+        if r.status_code == 200:
+            break
+        last = "HTTP %s" % r.status_code
+        if r.status_code in (401, 403, 404):
+            break
+    if r is None or r.status_code != 200:
+        return None, last or "request failed"
     try:
         data = json.loads(r.text)[0]["result"]["data"]["json"]
     except Exception:

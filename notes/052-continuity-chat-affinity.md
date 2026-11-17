@@ -50,10 +50,11 @@
 
 - **会话亲和**：一个会话只允许续写「sessions.json 里登记的那个号 + 那个 chat」。
   其它情况一律新建**空**会话；不再因为换号去接别的 chat。
-- `fresh_chat_for_card()`：`createByCard` 返回的会话先 `chat.getMessages` 数条数。
-  - 0 条 → 用；
-  - 非空且属于**本会话** → `deleteChat` 后重开；
-  - 非空且属于**别的会话** → 不删，换号（`chat_owned_by_other_session`）；
+- `fresh_chat_for_card()`：`createByCard` 返回的会话先 `chat.getMessages` 看**有没有
+  user 消息**（不能按「条数==0」判空：新建会话自带一条卡片开场的 assistant）。
+  - 无 user 消息（全新）→ 用；
+  - 有 user 消息且属于**本会话** → `deleteChat` 后重开；
+  - 有 user 消息且属于**别的会话** → 不删，换号（`chat_owned_by_other_session`）；
   - 返回的正是当前正式会话 → 不删，换号（`active_chat_reused`）。
   `chat_in_use()` 负责「这条 chat 是否被别的会话登记」，避免误删。
 - `ensure_chat_for_card(fresh=True)`：跳过本地缓存，走上面的空会话流程；用
@@ -87,9 +88,13 @@
 
 ## 3. 验证
 
-- `py_compile` 三文件零错误；`unittest` **71 tests OK**（新增 4 个
+- `py_compile` 三文件零错误；`unittest` **75 tests OK**（新增 4 个
   `fresh_chat_for_card` 用例、`chat_in_use`/`chat_owner_session`、`recent_turns_text`
   留尾、`content_prefix` 场景行保留）。
+- 首次线上冒烟抓到一个实现错误并已修：最初按「消息条数 == 0」判空，但
+  `createByCard` 新建会话自带卡片开场（1 条 assistant），于是每个号都被判成
+  「旧会话」→ 删了重开 → 3 次后 `no_fresh_chat`，整池不可用。现改为「有 user
+  消息才算旧会话」。
 - 站点 `next build` 通过（本地运行副本 `%LOCALAPPDATA%\dzmm-site`，BUILD_EXIT=0）。
 - 线上冒烟：日志出现 `site: card=… session=… chat=… switched=… fresh=True recent=…`；
   换号时出现 `清掉旧会话 …（card=…，N 条旧剧情）-> True`；同一 session 只保留

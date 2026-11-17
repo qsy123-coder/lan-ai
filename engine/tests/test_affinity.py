@@ -52,18 +52,20 @@ class FreshChatTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.old_paths = (s.SESSIONS_PATH, s.STATE_PATH)
-        self.old_fns = (s.create_chat, s.fetch_chat_count, s.chat_in_use, s.delete_chat)
+        self.old_fns = (s.create_chat, s.chat_has_history, s.chat_in_use, s.delete_chat)
         s.SESSIONS_PATH = os.path.join(self.tmp, "sessions.json")
         s.STATE_PATH = os.path.join(self.tmp, "webstate.json")
         s.save_sessions({})
 
     def tearDown(self):
         s.SESSIONS_PATH, s.STATE_PATH = self.old_paths
-        (s.create_chat, s.fetch_chat_count, s.chat_in_use, s.delete_chat) = self.old_fns
+        (s.create_chat, s.chat_has_history, s.chat_in_use, s.delete_chat) = self.old_fns
 
-    def test_empty_chat_is_used(self):
+    def test_fresh_chat_with_opening_is_used(self):
+        """新建会话自带卡片开场（1 条 assistant），不能当成旧会话删掉。"""
         s.create_chat = lambda cookie, card: ("c1", "")
-        s.fetch_chat_count = lambda cookie, cid: 0
+        s.chat_has_history = lambda cookie, cid: (False, "")
+        s.delete_chat = lambda cookie, cid: self.fail("新会话不能删")
         self.assertEqual(s.fresh_chat_for_card("ck", 1), ("c1", None))
 
     def test_stale_chat_is_deleted_and_recreated(self):
@@ -74,7 +76,7 @@ class FreshChatTest(unittest.TestCase):
             return ("c%d" % calls["create"], "")
 
         s.create_chat = create
-        s.fetch_chat_count = lambda cookie, cid: 0 if cid == "c2" else 7
+        s.chat_has_history = lambda cookie, cid: (cid == "c1", "")
         s.chat_in_use = lambda cid, except_session=None: False
         s.delete_chat = lambda cookie, cid: (calls["delete"].append(cid), (True, ""))[1]
         self.assertEqual(s.fresh_chat_for_card("ck", 1), ("c2", None))
@@ -82,7 +84,7 @@ class FreshChatTest(unittest.TestCase):
 
     def test_chat_owned_by_other_session_is_not_deleted(self):
         s.create_chat = lambda cookie, card: ("c1", "")
-        s.fetch_chat_count = lambda cookie, cid: 9
+        s.chat_has_history = lambda cookie, cid: (True, "")
         s.chat_in_use = lambda cid, except_session=None: True
         s.delete_chat = lambda cookie, cid: self.fail("不能删别的会话")
         self.assertEqual(s.fresh_chat_for_card("ck", 1),
@@ -90,7 +92,7 @@ class FreshChatTest(unittest.TestCase):
 
     def test_active_chat_is_never_deleted(self):
         s.create_chat = lambda cookie, card: ("active", "")
-        s.fetch_chat_count = lambda cookie, cid: self.fail("不读也不删")
+        s.chat_has_history = lambda cookie, cid: self.fail("不读也不删")
         s.delete_chat = lambda cookie, cid: self.fail("不能删自己的当前会话")
         self.assertEqual(s.fresh_chat_for_card("ck", 1, active_chat="active"),
                          (None, "active_chat_reused"))

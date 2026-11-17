@@ -1715,33 +1715,50 @@ class Handler(BaseHTTPRequestHandler):
             session_id = ((qs.get("sessionId") or [""])[0] or "").strip()
             st = load_state()
             pool = load_pool()
-            cands = []
+            # 同一会话会随换号产生多份上游存档，且各份长度不同；取最长的那份。
+            pairs = []
             reg = get_session(card_id, session_id) if session_id else None
             if reg and reg.get("account") and reg.get("chatId"):
-                cands.append((reg["account"], reg["chatId"]))
-            for sid, row in site_sessions_of_card(st, card_id).items():
-                if session_id and sid != session_id:
+                pairs.append((reg["account"], reg["chatId"]))
+            for key, ent in (st.get("site_chats") or {}).items():
+                parts = str(key).split(":")
+                if len(parts) < 4 or parts[0] != "site":
                     continue
-                if row.get("account") and row.get("chatId"):
-                    cands.append((row["account"], row["chatId"]))
-            if session_id and not cands:
-                # URL 只带 s= 时兜底：按 sessionId 在全部 site_chats 里找
-                for key, ent in (st.get("site_chats") or {}).items():
-                    parts = str(key).split(":")
-                    if len(parts) >= 4 and parts[0] == "site" and parts[3] == session_id:
-                        if (ent or {}).get("chatId"):
-                            cands.append((parts[1], ent["chatId"]))
-                        break
-            seen = set()
-            for acct, chat_id in cands:
-                if not acct or acct not in pool or not chat_id or chat_id in seen:
+                try:
+                    if int(parts[2]) != card_id:
+                        continue
+                except (TypeError, ValueError):
+                    continue
+                if session_id and parts[3] != session_id:
+                    continue
+                cid = (ent or {}).get("chatId")
+                if cid:
+                    pairs.append((parts[1], cid))
+            cands, seen = [], set()
+            for acct, chat_id in pairs:
+                if not acct or not chat_id or chat_id in seen:
                     continue
                 seen.add(chat_id)
+                cands.append((acct, chat_id))
+
+            best = None
+            for i, (acct, chat_id) in enumerate(cands):
+                if i >= 8:
+                    break
+                if acct not in pool:
+                    continue
                 msgs, err = fetch_chat_messages(pool[acct]["cookie"], chat_id)
                 if msgs:
-                    return self._json(200, {"messages": msgs, "account": acct,
-                                            "chatId": chat_id, "count": len(msgs)})
-                log("读取上游存档失败 %s/%s：%s" % (acct, str(chat_id)[:8], err), "warn")
+                    if best is None or len(msgs) > len(best[2]):
+                        best = (acct, chat_id, msgs)
+                    if len(msgs) >= 30:   # 够完整了，不再多打上游
+                        break
+                else:
+                    log("读取上游存档失败 %s/%s：%s" % (acct, str(chat_id)[:8], err), "warn")
+            if best:
+                acct, chat_id, msgs = best
+                return self._json(200, {"messages": msgs, "account": acct,
+                                        "chatId": chat_id, "count": len(msgs)})
             return self._json(404, {"error": "no archived messages",
                                     "cardId": card_id, "sessionId": session_id})
         if path == "/site/pool":

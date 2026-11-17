@@ -96,9 +96,13 @@
   「旧会话」→ 删了重开 → 3 次后 `no_fresh_chat`，整池不可用。现改为「有 user
   消息才算旧会话」。
 - 站点 `next build` 通过（本地运行副本 `%LOCALAPPDATA%\dzmm-site`，BUILD_EXIT=0）。
-- 线上冒烟：日志出现 `site: card=… session=… chat=… switched=… fresh=True recent=…`；
-  换号时出现 `清掉旧会话 …（card=…，N 条旧剧情）-> True`；同一 session 只保留
-  一条活跃 chat（`git` 不含运行态，看 `webstate.site_chats` 的活跃键）。
+- 线上冒烟（测试卡 3861267，临时 session，跑完 `clear` 清理）：
+  - 第 1 轮新建 chat `49a8fe98…`，第 2 轮 `event=note 接上原会话 49a8fe98`，
+    **两轮同一个 chatId**（会话亲和生效）；
+  - 第 3 轮带 `rewind:true`，chatId 变成 `4181ddaf…`，进度从 head 重开；
+  - `clear` 后 `webstate.site_chats` 里该 session 的键为空。
+- 日志关键字：`site: card=… session=… chat=… switched=… fresh=True recent=…`；
+  清旧会话 `清掉旧会话 …（card=…，已有对话历史）-> True`。
 
 ## 4. 对已污染会话的修复
 

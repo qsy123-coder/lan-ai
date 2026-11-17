@@ -78,7 +78,8 @@ def load_memory(out_dir, card_id, session_id=None):
             return default_memory(card_id)
         mem = default_memory(card_id)
         mem.update({
-            "pinned": [p for p in (data.get("pinned") or []) if isinstance(p, dict) and p.get("text")],
+            "pinned": clean_pins([p for p in (data.get("pinned") or [])
+                                  if isinstance(p, dict) and p.get("text")]),
             "summary": str(data.get("summary") or "")[:SUMMARY_MAX],
             "summarizedUpTo": _as_int(data.get("summarizedUpTo")),
             "summaryHash": str(data.get("summaryHash") or ""),
@@ -124,6 +125,35 @@ def _as_int(v, default=0):
         return default
 
 
+# 引擎自己拼进 content 的块（记忆前缀/格式要求）。这些文本经历史同步回灌后
+# 会被误当成「用户设定」，再注入时出现重复标题和错乱编号（notes/055）。
+ENGINE_MARKERS = (
+    "【长期设定·最高优先级", "【执行要求】", "【称呼】对方在账号资料里",
+    "【格式要求】正文结束后", "【前情摘要】", "【刚才的对话", "【接续要求】",
+)
+
+
+def looks_like_engine_block(text):
+    t = (text or "").strip()
+    return bool(t) and any(m in t[:400] for m in ENGINE_MARKERS)
+
+
+def clean_pins(pins):
+    """过滤掉被误抽成锚点的引擎块，并去掉编号前缀。"""
+    out = []
+    for p in pins or []:
+        t = (p.get("text") or "").strip()
+        if not t or any(m in t[:80] for m in ENGINE_MARKERS):
+            continue
+        t = re.sub(r"^\d+\)\s*", "", t)
+        if not t:
+            continue
+        q = dict(p)
+        q["text"] = t
+        out.append(q)
+    return out
+
+
 def extract_pins(history):
     """从用户消息里抽设定，返回 [{"text":..., "source":"auto"}]。"""
     found = []
@@ -131,7 +161,7 @@ def extract_pins(history):
         if not isinstance(m, dict) or m.get("role") != "user":
             continue
         raw = (m.get("content") or "").strip()
-        if not raw:
+        if not raw or looks_like_engine_block(raw):
             continue
         # 整条就是问句 → 不当作设定
         if QUESTION_END_RE.search(raw) and not re.search(

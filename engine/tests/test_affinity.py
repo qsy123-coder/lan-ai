@@ -8,6 +8,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import server as s
 
 
+class ActiveSiteTest(unittest.TestCase):
+    def test_counter(self):
+        s.ACTIVE_SITE = 0
+        s.site_job_begin()
+        self.assertEqual(s.ACTIVE_SITE, 1)
+        s.site_job_end()
+        self.assertEqual(s.ACTIVE_SITE, 0)
+
+
 class ChatAffinityTest(unittest.TestCase):
     """notes/052：会话必须钉在一条上游 chat 上，换号只能开空会话。"""
 

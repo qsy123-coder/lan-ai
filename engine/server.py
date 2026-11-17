@@ -15,6 +15,7 @@ import json
 import os
 import queue
 import re
+import signal
 import sys
 import threading
 import time
@@ -161,11 +162,27 @@ FORUM_DATA = os.path.join(OUT_DIR, "forum.json")
 STATE_LOCK = threading.Lock()
 RUN_LOCK = threading.Lock()
 STOP = threading.Event()
+# 正在跑的站点生成数：部署重启前必须等它归零，否则 SSE 会被拦腰切断。
+ACTIVE_SITE = 0
+ACTIVE_LOCK = threading.Lock()
+SHUTTING_DOWN = threading.Event()
 
 # 会话级串行锁：只锁「同一个号 × 同一张卡」对应的 chatId，避免上游 409「该对话正在生成中」；
 # 不同号/不同卡的生成可以并行。全局 RUN_LOCK 只用于 /run 批量任务，不参与站点聊天。
 CHAT_LOCKS_GUARD = threading.Lock()
 CHAT_LOCKS = {}
+
+
+def site_job_begin():
+    global ACTIVE_SITE
+    with ACTIVE_LOCK:
+        ACTIVE_SITE += 1
+
+
+def site_job_end():
+    global ACTIVE_SITE
+    with ACTIVE_LOCK:
+        ACTIVE_SITE -= 1
 
 
 def chat_lock_for(name, card_id):
@@ -2118,6 +2135,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/health":
             return self._json(200, {"ok": True, "root": ROOT, "proxy": PROXY,
                                     "running": RUN_LOCK.locked(),
+                                    "active": ACTIVE_SITE,
                                     "models": MODELS, "cards": card_candidates()})
         if path == "/site/history":
             if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
@@ -2679,7 +2697,10 @@ class Handler(BaseHTTPRequestHandler):
             payload = self._body()
             # 站点聊天不再用全局 RUN_LOCK：并发请求各自持独立的会话锁与 stop_event，
             # 避免第二个用户点进来就吃 409「已有任务在跑」。
+            if SHUTTING_DOWN.is_set():
+                return self._json(503, {"error": "engine_restarting"})
             self._stop = threading.Event()
+            site_job_begin()
             try:
                 self._sse_start()
                 run_site_chat(payload, self._emit, stop_event=self._stop)
@@ -2689,8 +2710,28 @@ class Handler(BaseHTTPRequestHandler):
                     self._emit("end", {"reason": "crash", "message": str(e)[:200]})
                 except Exception:
                     pass
+            finally:
+                site_job_end()
             return
         return self._json(404, {"error": "not found"})
+
+
+def _graceful_exit(signum, frame):
+    """收到 SIGTERM 时先等在跑的站点生成结束，避免把 SSE 拦腰切断。"""
+    SHUTTING_DOWN.set()
+    with ACTIVE_LOCK:
+        n = ACTIVE_SITE
+    log("收到信号 %s：等待 %d 个活跃生成结束（最多 75s）" % (signum, n), "warn")
+    deadline = time.time() + 75
+    while time.time() < deadline:
+        with ACTIVE_LOCK:
+            if ACTIVE_SITE <= 0:
+                break
+        time.sleep(0.5)
+    with ACTIVE_LOCK:
+        left = ACTIVE_SITE
+    log("引擎退出（未完成生成 %d）" % left, "warn")
+    os._exit(0)
 
 
 def main():
@@ -2701,6 +2742,8 @@ def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
     srv.daemon_threads = True
+    signal.signal(signal.SIGTERM, _graceful_exit)
+    signal.signal(signal.SIGINT, _graceful_exit)
     log("engine on http://%s:%d  root=%s" % (args.host, args.port, ROOT))
     srv.serve_forever()
 

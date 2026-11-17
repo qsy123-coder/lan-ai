@@ -340,6 +340,38 @@ class RefusalTest(unittest.TestCase):
         self.assertFalse(m.looks_like_refusal(good))
 
 
+class EngineBlockTest(unittest.TestCase):
+    def test_engine_block_not_extracted(self):
+        h = [{"role": "user",
+              "content": "【长期设定·最高优先级·必须无条件遵守】\n1) 私下叫我主人\n"
+                         "【执行要求】只要用户触发了设定里的条件……\n\n真正的用户正文"}]
+        self.assertEqual(m.extract_pins(h), [])
+
+    def test_clean_pins_filters_markers(self):
+        pins = [
+            {"text": "【长期设定·最高优先级·必须无条件遵守】"},
+            {"text": "1) 私下叫我主人，外人面前叫哥哥"},
+            {"text": "【称呼】对方在账号资料里的显示名只是自动生成的账号名"},
+            {"text": "以后叫我主人"},
+        ]
+        out = m.clean_pins(pins)
+        self.assertEqual([p["text"] for p in out],
+                         ["私下叫我主人，外人面前叫哥哥", "以后叫我主人"])
+
+    def test_load_memory_cleans_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            mem = m.default_memory(426322)
+            mem["pinned"] = [
+                {"id": "a", "text": "【长期设定·最高优先级·必须无条件遵守】"},
+                {"id": "b", "text": "1) 私下叫我主人"},
+                {"id": "c", "text": "以后叫我主人"},
+            ]
+            m.save_memory(d, mem)
+            got = m.load_memory(d, 426322)
+            self.assertEqual([p["text"] for p in got["pinned"]],
+                             ["私下叫我主人", "以后叫我主人"])
+
+
 class FactGuardTest(unittest.TestCase):
     def test_drift_rejected(self):
         self.assertFalse(m.fact_guard("她是你的养女，伊一。", "妹妹 伊一 哥哥"))

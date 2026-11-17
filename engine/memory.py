@@ -386,6 +386,25 @@ def looks_like_roleplay(text):
     return bool(t) and bool(ROLEPLAY_HEAD_RE.match(t[:60]))
 
 
+# 摘要事实守卫：这些词会把核心关系改掉（实测把「妹妹」写成「养女」）。
+DRIFT_TERMS = ("养女", "义妹", "干妹妹", "亲女儿", "继女", "童养媳")
+
+
+def fact_guard(summary, context=""):
+    """摘要不能凭空改变核心关系。
+
+    只在「上下文明确是妹妹/哥哥」且摘要里出现养女/义妹等漂移词时拒绝；
+    卡片本身就是这种关系（上下文里出现该词）时放行。返回 True=可用。
+    """
+    t = summary or ""
+    ctx = context or ""
+    if any(w in ctx for w in DRIFT_TERMS):
+        return True
+    if ("妹妹" in ctx or "哥哥" in ctx) and any(w in t for w in DRIFT_TERMS):
+        return False
+    return True
+
+
 SCENE_MARK = "【当前场景】"
 
 

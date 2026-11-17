@@ -340,6 +340,21 @@ class RefusalTest(unittest.TestCase):
         self.assertFalse(m.looks_like_refusal(good))
 
 
+class FactGuardTest(unittest.TestCase):
+    def test_drift_rejected(self):
+        self.assertFalse(m.fact_guard("她是你的养女，伊一。", "妹妹 伊一 哥哥"))
+        self.assertFalse(m.fact_guard("义妹一直跟着你。", "妹妹"))
+        self.assertFalse(m.fact_guard("你的亲女儿在等你。", "哥哥 妹妹"))
+
+    def test_normal_kept(self):
+        self.assertTrue(m.fact_guard("妹妹在玄关跪下。", "妹妹 伊一"))
+        self.assertTrue(m.fact_guard("姐姐来了。", "妹妹"))
+
+    def test_card_relation_passthrough(self):
+        # 卡片本身就是养女设定时不能误杀
+        self.assertTrue(m.fact_guard("养女在病房等你。", "卡片：养女 伊一"))
+
+
 class FileTest(unittest.TestCase):
     def test_roundtrip(self):
         with tempfile.TemporaryDirectory() as d:

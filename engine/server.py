@@ -1494,6 +1494,10 @@ def maybe_summarize(pool, name, st, card_id, mem, history, stop_event=None):
         return mem
 
     pins = [p.get("text", "") for p in (mem.get("pinned") or []) if p.get("text")]
+    # 事实守卫的上下文：锚点 + 卡片开场（历史第一条通常是开场 assistant）
+    fact_ctx = " ".join(pins)
+    if msgs:
+        fact_ctx += " " + (msgs[0].get("content") or "")
     recent = msgs[end:end + 2]
     # 旧摘要若本身是拒答/续写，不再喂回模型（否则脏文本会被一轮轮放大）。
     existing = memlib.usable_existing(mem.get("summary"))
@@ -1544,6 +1548,11 @@ def maybe_summarize(pool, name, st, card_id, mem, history, stop_event=None):
                     if memlib.looks_like_roleplay(piece):
                         ok_all = False
                         why = "roleplay: %s" % piece[:40].replace("\n", " ")
+                        break
+                    if not memlib.fact_guard(piece, fact_ctx):
+                        ok_all = False
+                        why = "fact_guard: %s" % next(
+                            (w for w in memlib.DRIFT_TERMS if w in piece), "")
                         break
                     running = piece
                 if ok_all:

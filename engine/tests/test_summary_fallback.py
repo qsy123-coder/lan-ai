@@ -81,6 +81,26 @@ class SummaryAccountTest(unittest.TestCase):
         self.assertNotIn("无法完成", out["summary"])
         self.assertIn("他：", out["summary"])    # 规则兜底
 
+    def test_fact_guard_rejects_drift_summary(self):
+        st = self._state({"a1": 20})
+        pool = {"a1": {"cookie": "a1"}}
+        drift = ("暑假的夜晚，你收养的养女伊一在玄关跪下，主动解开你的裤子，"
+                 "称呼你为主人；两人约定回家后继续，养女的身份被反复强调，"
+                 "门外还传来脚步声。")
+
+        def fake_generate(cookie, *a, **k):
+            self.calls.append(cookie)
+            return {"status": "ok", "text": drift}
+
+        s.generate = fake_generate
+        mem = s.memlib.default_memory(426322)
+        mem["sessionId"] = "sid-drift"
+        mem["pinned"] = [{"text": "以后私底下叫我主人，妹妹要听话", "source": "manual"}]
+        out = s.maybe_summarize(pool, "a1", st, 426322, mem, _msgs())
+        self.assertNotIn("养女", out["summary"])      # 漂移摘要被拒
+        self.assertIn("他：", out["summary"])         # 走规则兜底
+        self.assertEqual(out.get("summarizedUpTo"), 0)
+
     def test_all_accounts_broke_logs_rule_fallback(self):
         st = self._state({"a1": 0.5, "a2": 0.5})
         pool = {"a1": {"cookie": "a1"}, "a2": {"cookie": "a2"}}

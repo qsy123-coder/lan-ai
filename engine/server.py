@@ -1445,6 +1445,29 @@ def start_summary(pool, name, card_id, mem, history, stop_event=None):
     t.start()
 
 
+def summary_accounts(pool, st, primary, limit=3):
+    """摘要候选账号：原号优先，再按余额挑其它可用号。
+
+    摘要失败最常见的原因是「原号刚被榨到 < 3.2」（upgrade_needed）或 cookie 失效
+    （auth_error）。摘要与主对话解耦，可以换任意有额度的号来做。
+    """
+    def usable(n):
+        a = account_state(st, n)
+        return (not a.get("exhausted")) and (not a.get("disabled")) \
+               and (a.get("credit") or 0) >= MIN_PREPAY
+
+    out = []
+    if primary in pool and usable(primary):
+        out.append(primary)
+    rest = sorted(((account_state(st, n).get("credit") or 0), n)
+                  for n in pool if n != primary and usable(n))
+    for _c, n in reversed(rest):
+        if len(out) >= limit:
+            break
+        out.append(n)
+    return out
+
+
 def maybe_summarize(pool, name, st, card_id, mem, history, stop_event=None):
     """压缩旧消息；失败降级为规则摘要，绝不阻塞主流程。"""
     msgs = memlib.sanitize_history(history)
@@ -1471,19 +1494,23 @@ def maybe_summarize(pool, name, st, card_id, mem, history, stop_event=None):
     model_ok = False
     if not MEMORY_MODEL_SUMMARY:
         why = "model_summary_off"
-    elif name not in pool:
-        why = "no_pool"
     elif chunks:
-        try:
-            batch_cid, batch_card = ensure_chat(st, pool, name, lambda *a, **k: None)
-            if batch_cid:
+        accts = summary_accounts(pool, st, name)
+        if not accts:
+            why = "no_account"
+        for cand in accts:
+            try:
+                batch_cid, batch_card = ensure_chat(st, pool, cand, lambda *a, **k: None)
+                if not batch_cid:
+                    why = "no_chat:%s" % cand
+                    continue
                 running = existing
                 ok_all = True
                 for i, ch in enumerate(chunks):
                     prompt = memlib.model_summary_prompt(
                         ch, running, pins,
                         recent=recent if i == len(chunks) - 1 else None)
-                    res = generate(pool[name]["cookie"], batch_cid, batch_card,
+                    res = generate(pool[cand]["cookie"], batch_cid, batch_card,
                                    SUMMARY_MODEL, 800, prompt, lambda *a, **k: None,
                                    want_sug=False, stop_event=stop_event)
                     if res.get("status") != "ok":
@@ -1507,11 +1534,19 @@ def maybe_summarize(pool, name, st, card_id, mem, history, stop_event=None):
                 if ok_all:
                     text = running
                     model_ok = True
-            else:
-                why = "no_chat"
-        except Exception as e:
-            why = "exception: %s" % str(e)[:80]
-            log("摘要生成失败，降级规则摘要：%s" % str(e)[:160], "warn")
+                    if cand != name:
+                        log("摘要改用账号 %s（原号 %s 不可用：%s）"
+                            % (cand, name, why[:60] or "-"), "warn")
+                    break
+            except Exception as e:
+                why = "exception: %s" % str(e)[:80]
+                log("摘要生成失败（%s），尝试下一个号：%s" % (cand, str(e)[:120]), "warn")
+            # 内容级失败（拒答/续写/空）换号也没用；只有账号级失败才继续换号
+            if not (why.startswith("status=exhausted")
+                    or why.startswith("status=auth_error")
+                    or why.startswith("no_chat")
+                    or why.startswith("exception")):
+                break
 
     if not text:
         text = memlib.rule_summary(window, mem.get("summary"), pins)

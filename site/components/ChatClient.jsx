@@ -841,6 +841,39 @@ export default function ChatClient({ card, initialSession }) {
     [input, busy, msgs, card.id, model, maxTokens, rounds, save, loadMemory, kickReveal, stopReveal]
   );
 
+  // 把本机这条会话的完整消息上传到引擎（手机 → 云端），其它设备即可拉到。
+  const uploadSession = useCallback(async () => {
+    const sid = sidRef.current || sessionId;
+    if (!sid) {
+      setNote("当前会话没有 sessionId，无法上传");
+      return;
+    }
+    const list = (msgs || []).filter((m) => m.role === "user" || m.role === "assistant");
+    if (!list.length) {
+      setNote("本会话没有消息可上传");
+      return;
+    }
+    try {
+      const r = await fetch("/api/history", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          cardId: card.id,
+          sessionId: sid,
+          messages: list.map((m) => ({ role: m.role, content: m.content })),
+        }),
+      });
+      const j = await r.json().catch(() => null);
+      if (!r.ok) {
+        setNote("上传失败：" + (j?.error || r.status));
+        return;
+      }
+      setNote(`已上传 ${j?.count ?? list.length} 条到云端，PC 打开即可看到`);
+    } catch (e) {
+      setNote("上传失败：" + String(e).slice(0, 60));
+    }
+  }, [msgs, card.id, sessionId]);
+
   const stop = useCallback(() => {
     abort.current?.abort();
     setNote("已停止");
@@ -969,6 +1002,7 @@ export default function ChatClient({ card, initialSession }) {
           onClose={() => setShowSess(false)}
           onDelete={dropSession}
           onOpen={openSession}
+          onUpload={uploadSession}
           onNew={() => {
             newSession();
             setShowSess(false);

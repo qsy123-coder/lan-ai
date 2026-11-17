@@ -44,6 +44,7 @@ export default function SessionList({
   onDelete,
   onOpen,
   onNew,
+  onUpload,
   onOpenSettings,
 }) {
   const [q, setQ] = useState("");
@@ -105,6 +106,13 @@ export default function SessionList({
             aria-pressed={manage}
           >
             {manage ? "完成" : "管理"}
+          </button>
+          <button
+            className="sp-txt-btn press"
+            onClick={() => onUpload?.()}
+            title="把本机会话上传到云端，PC 打开同一会话即可看到"
+          >
+            上传
           </button>
           <ThemeToggle className="sp-theme" />
         </header>

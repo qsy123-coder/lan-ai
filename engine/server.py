@@ -813,6 +813,35 @@ def accounts_used_by_card(card_id):
     return used
 
 
+def snapshot_path(card_id, session_id):
+    safe = re.sub(r"[^A-Za-z0-9._-]", "", str(session_id))[:80]
+    return os.path.join(OUT_DIR, "history", str(int(card_id)), safe + ".json")
+
+
+def load_snapshot(card_id, session_id):
+    """浏览器上传的整段会话（手机 localStorage 里的完整消息）。"""
+    if not session_id:
+        return []
+    try:
+        d = read_json(snapshot_path(card_id, session_id), {})
+        msgs = d.get("messages") if isinstance(d, dict) else None
+        return msgs if isinstance(msgs, list) else []
+    except Exception:
+        return []
+
+
+def save_snapshot(card_id, session_id, messages):
+    p = snapshot_path(card_id, session_id)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    tmp = p + ".tmp"
+    with io.open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        json.dump({"cardId": int(card_id), "sessionId": str(session_id),
+                   "messages": messages, "updatedAt": int(time.time())},
+                  f, ensure_ascii=False)
+    os.replace(tmp, p)
+    return p
+
+
 def fetch_chat_messages(cookie, chat_id):
     """从上游 chat.getMessages 拉完整存档，返回 ([{role, content}], err)。
 
@@ -1723,6 +1752,11 @@ class Handler(BaseHTTPRequestHandler):
             except (TypeError, ValueError):
                 return self._json(400, {"error": "cardId required"})
             session_id = ((qs.get("sessionId") or [""])[0] or "").strip()
+            # 浏览器上传过快照时优先用它：手机 localStorage 的完整消息比上游分块更全。
+            snap = load_snapshot(card_id, session_id)
+            if snap:
+                return self._json(200, {"messages": snap, "source": "snapshot",
+                                        "count": len(snap)})
             st = load_state()
             pool = load_pool()
             # 同一会话会随换号产生多份上游存档，且各份长度不同；取最长的那份。
@@ -1924,6 +1958,35 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if path == "/site/history":
+            if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
+                return self._json(401, {"error": "bad token"})
+            payload = self._body()
+            try:
+                card_id = int(payload.get("cardId"))
+            except (TypeError, ValueError):
+                return self._json(400, {"error": "cardId required"})
+            session_id = str(payload.get("sessionId") or "").strip()
+            if not session_id:
+                return self._json(400, {"error": "sessionId required"})
+            raw = payload.get("messages") or []
+            msgs, chars = [], 0
+            for m in raw[:2000]:
+                if not isinstance(m, dict):
+                    continue
+                role, content = m.get("role"), m.get("content")
+                if role not in ("user", "assistant") or not isinstance(content, str):
+                    continue
+                content = content.strip()[:6000]
+                if not content:
+                    continue
+                if chars + len(content) > 2000000:
+                    break
+                chars += len(content)
+                msgs.append({"role": role, "content": content})
+            save_snapshot(card_id, session_id, msgs)
+            log("会话快照 %s/%s：%d 条" % (card_id, session_id[:8], len(msgs)))
+            return self._json(200, {"ok": True, "count": len(msgs)})
         if path == "/stop":
             STOP.set()
             return self._json(200, {"ok": True})

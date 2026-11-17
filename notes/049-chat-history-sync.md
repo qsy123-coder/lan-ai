@@ -36,11 +36,25 @@
 
 ## 4. 验证
 
-- 离线：`fetch_chat_messages` 用假响应验证 chunks 拆平/去 sug；`site_sessions_of_card` 验证多账号合并。
-- 线上：`/site/history` 对两张卡的真实 session 返回消息；PC 打开 `/chat?card=…&s=…` 能看到手机对话。
-- 构建：`npm run build` + 引擎重启 + 页面 200。
+- 离线：`fetch_chat_messages` 假响应验证 chunks 拆平/去 sug；`site_sessions_of_card` 验证多账号合并。
+- 线上（2026-11-17 12:35，US-N-1 出口）：
+  - 「夏日,妹妹,同居」`93d5e47b` → 49 条（账号 b054）；`a9704810` → 7 条。
+  - 「两个少女…」`16f8354b` → 5 条（b021）；`a310c0e8` → 9 条（b055）。
+  - `/api/sessions` 经站点代理返回同样的会话列表。
+- 构建：`npm run build` 成功，`lan-engine` / `lan-site` 均 active，页面 200。
+- 踩坑：同一 session 换号会留下多份上游存档，长度不同（9 / 17 / 49 条）；
+  只取第一份会拿到残档。改成最多试 24 份、取最长。
+- 踩坑：代理节点 SSL 抖动会让部分存档读不到；`fetch_chat_messages` 失败后直连重试一次。
+- 出口：mihomo 原 `SG-N-3` 已失效（SG/JP 节点全 000），GLOBAL 切到 `US-N-1`
+  （3/3 稳定；`DIRECT` 也可用，留作兜底）。
 
-## 5. 回滚
+## 5. 使用方式（手机 → PC）
+
+1. PC 打开同一张卡，左侧会话列表会多出服务器侧登记过的会话（显示摘要预览）。
+2. 点开某个会话：本地没有消息时，前端自动拉 `/api/history` 回填，正文与手机一致。
+3. 也可以直接在手机复制地址栏 `?card=…&s=…` 的链接，在 PC 打开，效果相同。
+
+## 6. 回滚
 
 ```bash
 cp /opt/lan/backup-history-sync-<ts>/server.py /opt/lan/engine/server.py

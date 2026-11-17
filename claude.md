@@ -674,6 +674,7 @@ Remove-Item -Recurse -Force out\*,notes\*.tmp -ErrorAction SilentlyContinue     
 | 2026-11-17 | `feat/chat-history-sync` | 手机↔PC 对话同步：/site/history 回放上游存档 + /api/sessions 补全会话列表（notes/049） | 已上线（备份 backup-history-sync-20261117-122617；出口切 US-N-1） |
 | 2026-11-17 | `fix/chat-history-refresh` | 云端存档比本地更全时覆盖，手机新轮次也能同步到 PC | 已上线 |
 | 2026-11-17 | `fix/session-list-global` | 左侧会话列表跨卡同步：/api/sessions 无 cardId 返回全部 + 卡片库补 name/cover（notes/049） | 已上线 |
+| 2026-11-17 | `feat/chat-history-upload` | 手机端「上传」把本机整段会话推到云端快照；GET 优先快照、列表可见（notes/050） | 已上线 |
 
 > 规矩：分支从 `main` 切出；质量门禁通过后可自行 commit / push / 部署 / 合并（见上「Claude 执行规范」）。
 > 不可逆操作（删数据 / 改库 / `.env.production` / force-push）前先确认。

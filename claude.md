@@ -671,6 +671,7 @@ Remove-Item -Recurse -Force out\*,notes\*.tmp -ErrorAction SilentlyContinue     
 | 2026-11-17 | `feat/foryou-crawl` | 扩卡库加登录态 `home.forYou` 深翻页；4 个号 +26 张，卡库终值 25749（notes/045） | 已上线 |
 | 2026-11-17 | `fix/summary-nsfw-pulse` | 摘要模型 Surge→Pulse 128K + 拒答/续写识别 + 摘要按会话落盘；清卡 426322 脏摘要（notes/047） | 已上线（备份 backup-summary-20261117） |
 | 2026-11-17 | `fix/summary-retry-and-refresh` | 摘要失败不推进水位（下一轮重试）+ 前端 complete 后 4s 刷记忆面板（notes/048） | 已上线（备份 backup-site-20261117） |
+| 2026-11-17 | `feat/chat-history-sync` | 手机↔PC 对话同步：/site/history 回放上游存档 + /api/sessions 补全会话列表（notes/049） | 开发中 |
 
 > 规矩：分支从 `main` 切出；质量门禁通过后可自行 commit / push / 部署 / 合并（见上「Claude 执行规范」）。
 > 不可逆操作（删数据 / 改库 / `.env.production` / force-push）前先确认。

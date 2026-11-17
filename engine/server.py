@@ -813,6 +813,75 @@ def accounts_used_by_card(card_id):
     return used
 
 
+def fetch_chat_messages(cookie, chat_id):
+    """从上游 chat.getMessages 拉完整存档，返回 ([{role, content}], err)。
+
+    手机与 PC 的消息只存在各自浏览器的 localStorage；真正跨设备共用的是上游
+    会话存档。这里把上游 chunks 拆平、去掉建议块，供 /site/history 回放。
+    """
+    url = "%s/api/trpc/chat.getMessages?batch=1&input=%s" % (
+        BASE, quote(json.dumps({"0": {"json": {"chatId": chat_id}}})))
+    try:
+        r = creq.get(url, headers=headers_of(cookie), impersonate="chrome",
+                     proxies=proxies(), timeout=45)
+    except Exception as e:
+        return None, "%s: %s" % (type(e).__name__, str(e)[:80])
+    if r.status_code != 200:
+        return None, "HTTP %s" % r.status_code
+    try:
+        data = json.loads(r.text)[0]["result"]["data"]["json"]
+    except Exception:
+        return None, "parse error"
+
+    raw = data.get("messages") or data.get("chunks") or []
+    flat = []
+    for ch in raw:
+        if isinstance(ch, dict) and isinstance(ch.get("messages"), list):
+            flat.extend(ch["messages"])
+        elif isinstance(ch, dict) and ch.get("role"):
+            flat.append(ch)
+    out = []
+    for m in flat:
+        role = m.get("role")
+        content = m.get("content")
+        if role not in ("user", "assistant") or not isinstance(content, str):
+            continue
+        content = re.sub(r"<sug>.*?</sug>", "", content, flags=re.S).strip()
+        if content:
+            out.append({"role": role, "content": content})
+    return out, ""
+
+
+def site_sessions_of_card(st, card_id):
+    """从 webstate.site_chats 提取某张卡的所有会话（sessionId 维度）。
+
+    key 形态：site:<账号>:<卡>[:<sessionId>]。同一会话可能轮换到多个号上，
+    这里按 sessionId 合并，记录最近一次对应的 chatId。
+    """
+    out = {}
+    for key, ent in (st.get("site_chats") or {}).items():
+        parts = str(key).split(":")
+        if len(parts) < 4 or parts[0] != "site":
+            continue
+        try:
+            if int(parts[2]) != int(card_id):
+                continue
+        except (TypeError, ValueError):
+            continue
+        sid = parts[3]
+        if not sid:
+            continue
+        row = out.setdefault(sid, {"sessionId": sid, "chatId": None,
+                                   "account": None, "accounts": []})
+        chat_id = (ent or {}).get("chatId")
+        if chat_id:
+            row["chatId"] = chat_id
+        if parts[1] not in row["accounts"]:
+            row["accounts"].append(parts[1])
+        row["account"] = parts[1]
+    return out
+
+
 def drop_site_chats_for_card(card_id):
     """删除某张卡在所有账号上的上游会话，并清掉本地缓存。
 
@@ -1635,6 +1704,46 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"ok": True, "root": ROOT, "proxy": PROXY,
                                     "running": RUN_LOCK.locked(),
                                     "models": MODELS, "cards": card_candidates()})
+        if path == "/site/history":
+            if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
+                return self._json(401, {"error": "bad token"})
+            qs = parse_qs(urlparse(self.path).query)
+            try:
+                card_id = int((qs.get("cardId") or [""])[0])
+            except (TypeError, ValueError):
+                return self._json(400, {"error": "cardId required"})
+            session_id = ((qs.get("sessionId") or [""])[0] or "").strip()
+            st = load_state()
+            pool = load_pool()
+            cands = []
+            reg = get_session(card_id, session_id) if session_id else None
+            if reg and reg.get("account") and reg.get("chatId"):
+                cands.append((reg["account"], reg["chatId"]))
+            for sid, row in site_sessions_of_card(st, card_id).items():
+                if session_id and sid != session_id:
+                    continue
+                if row.get("account") and row.get("chatId"):
+                    cands.append((row["account"], row["chatId"]))
+            if session_id and not cands:
+                # URL 只带 s= 时兜底：按 sessionId 在全部 site_chats 里找
+                for key, ent in (st.get("site_chats") or {}).items():
+                    parts = str(key).split(":")
+                    if len(parts) >= 4 and parts[0] == "site" and parts[3] == session_id:
+                        if (ent or {}).get("chatId"):
+                            cands.append((parts[1], ent["chatId"]))
+                        break
+            seen = set()
+            for acct, chat_id in cands:
+                if not acct or acct not in pool or not chat_id or chat_id in seen:
+                    continue
+                seen.add(chat_id)
+                msgs, err = fetch_chat_messages(pool[acct]["cookie"], chat_id)
+                if msgs:
+                    return self._json(200, {"messages": msgs, "account": acct,
+                                            "chatId": chat_id, "count": len(msgs)})
+                log("读取上游存档失败 %s/%s：%s" % (acct, str(chat_id)[:8], err), "warn")
+            return self._json(404, {"error": "no archived messages",
+                                    "cardId": card_id, "sessionId": session_id})
         if path == "/site/pool":
             pool = load_pool()
             st = load_state()
@@ -1701,10 +1810,30 @@ class Handler(BaseHTTPRequestHandler):
                 _cid = int((qs.get("cardId") or ["0"])[0])
             except (TypeError, ValueError):
                 _cid = 0
-            rows = [v for v in load_sessions().values()
-                    if (not _cid or int(v.get("cardId") or 0) == _cid)]
-            rows.sort(key=lambda r: int(r.get("at") or 0))
-            return self._json(200, {"sessions": rows})
+            rows, known = [], set()
+            for v in load_sessions().values():
+                if _cid and int(v.get("cardId") or 0) != _cid:
+                    continue
+                sid = str(v.get("sessionId") or "")
+                mem = memlib.load_memory(MEMORY_DIR, int(v.get("cardId") or 0), sid or None)
+                rows.append(dict(v,
+                                 updatedAt=int(mem.get("updatedAt") or v.get("at") or 0),
+                                 summary=(mem.get("summary") or "")[:80]))
+                known.add(sid)
+            # 注册表可能漏记（老会话 / 删号重绑）：用 site_chats 补齐
+            if _cid:
+                for sid, row in site_sessions_of_card(load_state(), _cid).items():
+                    if sid in known:
+                        continue
+                    mem = memlib.load_memory(MEMORY_DIR, _cid, sid)
+                    rows.append({"cardId": _cid, "sessionId": sid,
+                                 "account": row.get("account"),
+                                 "chatId": row.get("chatId"),
+                                 "at": int(mem.get("updatedAt") or 0),
+                                 "updatedAt": int(mem.get("updatedAt") or 0),
+                                 "summary": (mem.get("summary") or "")[:80]})
+            rows.sort(key=lambda r: int(r.get("updatedAt") or r.get("at") or 0))
+            return self._json(200, {"sessions": rows, "count": len(rows)})
         if path == "/site/user/me":
             if SITE_TOKEN and self.headers.get("x-site-token") != SITE_TOKEN:
                 return self._json(401, {"error": "bad token"})

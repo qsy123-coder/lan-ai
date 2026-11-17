@@ -347,8 +347,8 @@ export default function ChatClient({ card, initialSession }) {
     localStorage.setItem(SKEY, JSON.stringify(next));
     setSessions(next);
 
-    // 3) seeds 快照只在该卡「第一次打开且完全空白」时恢复一次。
-    //    「＋新对话」创建的会话（justNew）一律跳过；标记无条件落盘，避免以后重复注入。
+    // 3) 空白会话的恢复顺序：服务器侧上游存档（跨设备同步）→ seeds 快照。
+    //    「＋新对话」创建的会话（justNew）一律跳过；seeds 标记无条件落盘，避免重复注入。
     const justNew = isNewRef.current;
     isNewRef.current = false;
     const deleted = readJSON(DKEY, []);
@@ -356,31 +356,104 @@ export default function ChatClient({ card, initialSession }) {
     const seedsDone = !!localStorage.getItem(seedsFlag);
     try { localStorage.setItem(seedsFlag, "1"); } catch {}
     let alive = true;
-    if (!justNew && !saved.length && !seedsDone
-        && !deleted.some((x) => String(x) === String(card.id))) {
-      fetch("/seeds.json", { cache: "no-store" })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((all) => {
-          if (!alive || !all) return;
-          const seed = all[String(card.id)];
-          if (!seed || !Array.isArray(seed.msgs) || !seed.msgs.length) return;
-          const restored = seed.msgs.map((m, i) => ({
-            id: `s${i}`,
-            role: m.role,
-            content: m.content,
-            ts: Date.now() - (seed.msgs.length - i) * 1000,
-          }));
-          setMsgs(restored);
-          if (seed.chatId) chatIdRef.current = seed.chatId;
-          if (seed.account) seedAcctRef.current = seed.account;
-          localStorage.setItem(mkey(card.id, sid), JSON.stringify(restored));
-        })
-        .catch(() => {});
-    }
+
+    const writeIndex = (list) => {
+      const last = [...list].reverse().find((m) => m.role === "assistant");
+      const idx = readJSON(SKEY, []);
+      const nextIdx = idx.map((x) => String(x.sessionId) === String(sid)
+        ? { ...x, lastAt: Date.now(), last: (last?.content || "").slice(0, 42) }
+        : x);
+      localStorage.setItem(SKEY, JSON.stringify(nextIdx));
+      setSessions(nextIdx);
+    };
+
+    const restore = async () => {
+      // 手机玩出来的会话在同一张卡下、但消息在手机 localStorage；上游存档才是共用源。
+      if (!justNew && !saved.length) {
+        try {
+          const q = `/api/history?cardId=${encodeURIComponent(card.id)}&sessionId=${encodeURIComponent(sid)}`;
+          const r = await fetch(q, { cache: "no-store" });
+          if (r.ok) {
+            const j = await r.json();
+            const list = (j?.messages || []).map((m, i) => ({
+              id: `h${i}`,
+              role: m.role,
+              content: m.content,
+              ts: Date.now() - ((j.messages.length - i) * 1000),
+            }));
+            if (alive && list.length) {
+              setMsgs(list);
+              localStorage.setItem(mkey(card.id, sid), JSON.stringify(list));
+              writeIndex(list);
+              return;
+            }
+          }
+        } catch {}
+      }
+      if (!justNew && !saved.length && !seedsDone
+          && !deleted.some((x) => String(x) === String(card.id))) {
+        fetch("/seeds.json", { cache: "no-store" })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((all) => {
+            if (!alive || !all) return;
+            const seed = all[String(card.id)];
+            if (!seed || !Array.isArray(seed.msgs) || !seed.msgs.length) return;
+            const restored = seed.msgs.map((m, i) => ({
+              id: `s${i}`,
+              role: m.role,
+              content: m.content,
+              ts: Date.now() - (seed.msgs.length - i) * 1000,
+            }));
+            setMsgs(restored);
+            if (seed.chatId) chatIdRef.current = seed.chatId;
+            if (seed.account) seedAcctRef.current = seed.account;
+            localStorage.setItem(mkey(card.id, sid), JSON.stringify(restored));
+          })
+          .catch(() => {});
+      }
+    };
+    restore();
     return () => {
       alive = false;
     };
   }, [card.id, card.name, card.cover, sessionId, initialSession]);
+
+  // 跨设备同步：把服务器侧登记过的会话补进左侧列表（手机玩的在这里出现）。
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const r = await fetch(`/api/sessions?cardId=${encodeURIComponent(card.id)}`, { cache: "no-store" });
+        if (!r.ok) return;
+        const j = await r.json();
+        const rows = Array.isArray(j?.sessions) ? j.sessions : [];
+        if (!alive || !rows.length) return;
+        const local = readJSON(SKEY, []);
+        const byId = new Map((Array.isArray(local) ? local : []).map((x) => [String(x.sessionId), x]));
+        let changed = false;
+        for (const s of rows) {
+          const sid2 = String(s.sessionId || "");
+          if (!sid2 || byId.has(sid2)) continue;
+          byId.set(sid2, {
+            sessionId: sid2,
+            cardId: card.id,
+            name: card.name,
+            cover: card.cover,
+            lastAt: (Number(s.updatedAt) || 0) * 1000 || Date.now(),
+            last: s.summary || "云端会话",
+          });
+          changed = true;
+        }
+        if (!changed) return;
+        const next = [...byId.values()]
+          .sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0))
+          .slice(0, 200);
+        localStorage.setItem(SKEY, JSON.stringify(next));
+        setSessions(next);
+      } catch {}
+    })();
+    return () => { alive = false; };
+  }, [card.id, card.name, card.cover]);
 
   const loadPool = useCallback(async () => {
     try {

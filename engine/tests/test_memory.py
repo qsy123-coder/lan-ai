@@ -255,6 +255,12 @@ class SummaryTest(unittest.TestCase):
         t2 = m.ensure_scene("正文\n【当前场景】已给", msgs)
         self.assertEqual(t2.count("【当前场景】"), 1)
 
+    def test_ensure_scene_force_replaces_stale(self):
+        msgs = [{"role": "assistant", "content": "*教室里，夕阳西斜，门被推开了。*"}]
+        t = m.ensure_scene("正文\n【当前场景】病房里，三人喘息。", msgs, force=True)
+        self.assertIn("教室", t)
+        self.assertNotIn("病房里", t)
+
     def test_chunks_cover_all(self):
         msgs = [{"role": "user", "content": "x" * 3000} for _ in range(5)]
         chunks = m.chunk_messages(msgs, 6000)

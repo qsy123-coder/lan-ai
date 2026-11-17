@@ -438,11 +438,17 @@ def fact_guard(summary, context=""):
 SCENE_MARK = "【当前场景】"
 
 
-def ensure_scene(text, messages):
-    """保证摘要末尾带「当前场景」：换号/新 chat 时，模型的第一手依据就是它。"""
+def ensure_scene(text, messages, force=False):
+    """保证摘要末尾带「当前场景」：换号/新 chat 时，模型的第一手依据就是它。
+
+    force=True 时用 messages（应当传最近几条）里的最后一条 assistant **替换**
+    旧场景——摘要正文可能滞后几轮，但场景必须是当下的，否则换 chat 会跳回旧地点。
+    """
     t = (text or "").strip()
     if SCENE_MARK in t:
-        return t[:SUMMARY_MAX]
+        if not force:
+            return t[:SUMMARY_MAX]
+        t = t.split(SCENE_MARK, 1)[0].rstrip()
     last = ""
     for m in reversed(messages or []):
         if m.get("role") == "assistant" and (m.get("content") or "").strip():
@@ -450,7 +456,7 @@ def ensure_scene(text, messages):
             break
     if not last:
         return t[:SUMMARY_MAX]
-    add = "\n" + SCENE_MARK + last[:80]
+    add = "\n" + SCENE_MARK + last[:120]
     room = max(0, SUMMARY_MAX - len(add))
     return (t[:room].rstrip() + add)[:SUMMARY_MAX]
 

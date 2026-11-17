@@ -104,7 +104,7 @@ def summarize(msgs, pins, acct, cid, batch_card, fact_ctx, existing=""):
                 or m.looks_like_roleplay(piece) or not m.fact_guard(piece, fact_ctx):
             return None, "chunk %d: %s" % (i, (piece or res.get("error") or "")[:60])
         running = piece
-    text = m.ensure_scene(running, msgs[-4:])
+    text = m.ensure_scene(running, msgs[-4:], force=True)
     return (text, len(body)), ""
 
 

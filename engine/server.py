@@ -1593,7 +1593,8 @@ def maybe_summarize(pool, name, st, card_id, mem, history, stop_event=None):
         text = memlib.rule_summary(window, mem.get("summary"), pins)
         log("摘要降级为规则摘要（%d 条）%s，summarizedUpTo 不前进，下一轮重试"
             % (len(window), ("：" + why) if why else ""), "warn")
-    text = memlib.ensure_scene(text, window)
+    # 场景必须用最近几条（不是摘要窗口）——正文可滞后，场景不能。
+    text = memlib.ensure_scene(text, msgs[-6:], force=True)
 
     if text:
         # 重新读一次，避免覆盖这期间新写入的锚点。

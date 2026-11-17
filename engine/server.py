@@ -2721,8 +2721,8 @@ def _graceful_exit(signum, frame):
     SHUTTING_DOWN.set()
     with ACTIVE_LOCK:
         n = ACTIVE_SITE
-    log("收到信号 %s：等待 %d 个活跃生成结束（最多 75s）" % (signum, n), "warn")
-    deadline = time.time() + 75
+    log("收到信号 %s：等待 %d 个活跃生成结束（最多 100s）" % (signum, n), "warn")
+    deadline = time.time() + 100
     while time.time() < deadline:
         with ACTIVE_LOCK:
             if ACTIVE_SITE <= 0:

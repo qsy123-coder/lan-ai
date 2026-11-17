@@ -235,6 +235,9 @@ export default function ChatClient({ card, initialSession }) {
   const busyRef = useRef(false);                // 同步锁：busy 是异步 state，防双击重复发送
   const lastSendRef = useRef({ text: "", ts: 0 });  // 2 秒内同一句话不重复发
   const isNewRef = useRef(false);  // 本会话是否刚由「＋新对话」创建（用于跳过 seeds 恢复）
+  // 本机删过消息/点了重新生成 → 下一次发送让引擎丢掉上游旧会话重开，
+  // 否则上游还留着被撤回的那几轮，模型会把它们当成已经发生（notes/052）。
+  const rewindRef = useRef(false);
   // 流式平滑渲染：上游按 ~80ms 一包吐出，直接渲染会「一顿一顿」。
   // 这里把累积文本放进 ref，用 rAF 以稳定节奏逐字揭示（追平 backlog），
   // 让画面连续，而不是按上游包的节奏跳动。
@@ -717,7 +720,7 @@ export default function ChatClient({ card, initialSession }) {
   }, []);
 
   const send = useCallback(
-    async (textArg, historyArg) => {
+    async (textArg, historyArg, opts) => {
       const text = (textArg ?? input).trim();
       // busy 是异步 state：双击时第二次调用读到的还是 false，必须用同步 ref 挡。
       if (!text || busy || busyRef.current) return;
@@ -749,6 +752,8 @@ export default function ChatClient({ card, initialSession }) {
           content: m.role === "assistant" ? splitSug(m.content).text : m.content,
         }));
 
+      const rewind = Boolean(opts?.rewind || rewindRef.current);
+      rewindRef.current = false;
       const ctl = new AbortController();
       abort.current = ctl;
       let finished = false;
@@ -777,6 +782,8 @@ export default function ChatClient({ card, initialSession }) {
             // 否则 createByCard 会新建一个空会话，历史接不上。
             chatId: chatIdRef.current || undefined,
             account: seedAcctRef.current || undefined,
+            // 撤回/重新生成：让引擎丢掉上游旧会话，从当前 head 重开一条
+            rewind: rewind || undefined,
           }),
           signal: ctl.signal,
         });
@@ -895,13 +902,16 @@ export default function ChatClient({ card, initialSession }) {
     const head = msgs.slice(0, realIdx);
     setMsgs(head);
     save(head, head[head.length - 1]?.content?.slice(0, 42) || "");
-    send(msgs[realIdx].content, head);
+    // 重新生成=撤回上一轮：必须让引擎丢掉上游那条会话里的旧尾巴
+    send(msgs[realIdx].content, head, { rewind: true });
   }, [busy, msgs, save, send]);
 
   const del = useCallback(
     (id) => {
       const list = msgs.filter((m) => m.id !== id);
       setMsgs(list);
+      // 删掉一条消息后，上游会话仍留着它；下一次发送前重开一条干净会话
+      rewindRef.current = true;
       const last = list.filter((m) => m.role === "assistant").at(-1);
       save(list, last?.content?.slice(0, 42) || "");
       rebuildMemory(list);

@@ -150,8 +150,26 @@ class ContentPrefixTest(unittest.TestCase):
         self.assertTrue(txt.endswith("\n\n"), "前缀必须自带换行，避免与用户正文粘连")
 
     def test_capped(self):
-        txt = m.content_prefix({"pinned": [{"text": "x" * 5000}], "summary": "y" * 5000})
+        txt = m.content_prefix({"pinned": [{"text": "x" * 5000}], "summary": "y" * 5000},
+                              cap=900)
         self.assertLessEqual(len(txt), 900 + 2)
+
+    def test_scene_tail_survives_when_pins_fill_budget(self):
+        """notes/052：设定块吃满预算时，摘要末尾的【当前场景】不能被截掉。"""
+        pins = [{"text": "规则%d：" % i + "称呼主人" * 100} for i in range(6)]
+        summary = "剧情经过" * 80 + "\n【当前场景】图书馆旧馆三层，玲奈戴耳机自习，你从背后捂住她的嘴。"
+        txt = m.content_prefix({"pinned": pins, "summary": summary})
+        self.assertIn("【当前场景】", txt)
+        self.assertIn("图书馆旧馆三层", txt)
+        self.assertLessEqual(len(txt), 2600 + 2)
+
+    def test_summary_can_be_skipped_for_same_chat(self):
+        txt = m.content_prefix({"pinned": [{"text": "叫我主人"}],
+                                "summary": "旧场景：玄关回家"},
+                               include_summary=False)
+        self.assertIn("叫我主人", txt)
+        self.assertNotIn("前情摘要", txt)
+        self.assertNotIn("玄关回家", txt)
 
 
 class LongConversationTest(unittest.TestCase):

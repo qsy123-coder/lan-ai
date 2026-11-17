@@ -176,6 +176,17 @@ def chat_lock_for(name, card_id):
             lock = threading.Lock()
             CHAT_LOCKS[key] = lock
         return lock
+
+
+def session_lock_for(card_id, session_id):
+    """同会话「建新 chat」串行化：双击/重试并发时会各建一个 chat，把会话打散。"""
+    key = ("sess", int(card_id), str(session_id))
+    with CHAT_LOCKS_GUARD:
+        lock = CHAT_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            CHAT_LOCKS[key] = lock
+        return lock
 LOG_BUFFER = []
 
 # 上游 418 是出口 IP 级风控：一旦命中就冷却一段时间，期间直接拒绝新请求，
@@ -532,10 +543,13 @@ def normalize_history(history):
 
 
 def build_body(chat_id, card_id, model, max_tokens, prompt, history=None, memory=None,
-               want_sug=None, recent_text=None):
+               want_sug=None, recent_text=None, fresh_chat=False):
     """head（卡片开场）→ 记忆块（锚点+摘要）→ 预算内 tail → 当前 user。
 
     裁剪与注入统一在这里做，前端不再自己 head/tail。
+    fresh_chat=True 表示这是新开的上游会话（换号/首次）：此时才注入摘要与
+    最近原文；同一会话内上游已有真实历史，旧摘要反而会把模型拉回摘要停笔的
+    旧场景（notes/052）。
     """
     ctx = model_ctx(model)
     prompts, meta = memlib.compose_prompts(
@@ -543,10 +557,13 @@ def build_body(chat_id, card_id, model, max_tokens, prompt, history=None, memory
     for m in prompts:
         m["content"] = _clean_surrogates(m["content"])
     # 上游只认 content，记忆必须并进当前消息，否则不进模型视野。
-    prefix = memlib.content_prefix(memory)
+    prefix = memlib.content_prefix(memory, include_summary=bool(fresh_chat))
     if recent_text:
         # 换号/新 chat 时上游没有前文，只靠摘要会串回旧场景；补最近几轮原文兜底。
-        prefix += "【刚才的对话·原文·用于衔接，不要复述】\n" + recent_text + "\n\n"
+        prefix += ("【刚才的对话·原文·用于衔接，不要复述】\n" + recent_text + "\n\n"
+                   "【接续要求】下一段必须从上面最后一句的落点接着写，保持同一时间、地点、"
+                   "在场人物、衣着与双方状态；禁止回到更早的场景，禁止另起新剧情，"
+                   "禁止复述或总结已有内容。\n\n")
     content = _clean_surrogates(prefix + prompt)
     # 上游账号资料里的显示名是注册时自动生成的（形如「用户d57640」），
     # 模型会把它当称呼写进正文。明确禁止，统一用「你」/角色习惯称呼。
@@ -616,14 +633,16 @@ def extract_text(obj):
 
 
 def generate(cookie, chat_id, card_id, model, max_tokens, prompt, emit, history=None,
-             memory=None, want_sug=True, stop_event=None, recent_text=None):
+             memory=None, want_sug=True, stop_event=None, recent_text=None,
+             fresh_chat=False):
     """流式生成。返回 {status: ok|exhausted|card_error|auth_error|error, ...}"""
     stop = stop_event if stop_event is not None else STOP
     url = BASE + "/api/chat"
     rid = "web-%d-%s" % (int(time.time() * 1000), os.urandom(3).hex())
     h = headers_of(cookie, referer=BASE + "/chat?c=" + chat_id, request_id=rid)
     body = json.dumps(build_body(chat_id, card_id, model, max_tokens, prompt, history,
-                                 memory, want_sug=want_sug, recent_text=recent_text),
+                                 memory, want_sug=want_sug, recent_text=recent_text,
+                                 fresh_chat=fresh_chat),
                       ensure_ascii=False).encode("utf-8", "replace")
 
     text_parts = []
@@ -999,19 +1018,58 @@ def drop_site_chats_for_card(card_id):
     return keys
 
 
+def reset_session_chat(card_id, session_id, account=None, chat_id=None):
+    """撤回/重新生成用：只丢掉当前上游会话，下次重建一条空会话。
+
+    上游没有「删除某条消息」，撤回一轮后再发，旧尾还在上游历史里，模型会把
+    被撤回的内容当作已发生。这里直接删掉当前会话，让新 chat 从 head 重建。
+    """
+    if not session_id:
+        return
+    pool = load_pool()
+    st = load_state()
+    if account and chat_id and account in pool:
+        ok, err = delete_chat(pool[account]["cookie"], chat_id)
+        log("撤回：删除上游会话 %s（%s/%s/%s）-> %s %s" % (
+            str(chat_id)[:8], account, card_id, session_id, ok, err))
+    sc = st.setdefault("site_chats", {})
+    for k in [k for k, v in sc.items() if chat_id and (v or {}).get("chatId") == chat_id]:
+        sc.pop(k, None)
+    save_state(st)
+    s = load_sessions()
+    s.pop(session_key(card_id, session_id), None)
+    save_sessions(s)
+
+
 def drop_session_chat(card_id, session_id):
-    """删除「某个会话」绑定的上游会话，并清掉它的缓存与注册（不影响同卡其它会话）。"""
+    """删除「某个会话」的上游会话，并清掉它的缓存与注册（不影响同卡其它会话）。
+
+    一个会话换号后会留下**多条**上游会话（每条各停在不同轮次，见 notes/052），
+    只删注册里的那一条会留下孤儿旧会话，下次 createByCard 又把它捡回来。
+    所以这里把该 session 名下的所有 chat 一并删掉。
+    """
     sess = get_session(card_id, session_id) or {}
     st = load_state()
     pool = load_pool()
     sc = st.setdefault("site_chats", {})
-    acct = sess.get("account")
-    cid = sess.get("chatId")
-    if acct and cid and acct in pool:
-        ok, err = delete_chat(pool[acct]["cookie"], cid)
-        log("删除会话上游 %s（%s/%s/%s）-> %s %s" % (
-            str(cid)[:8], acct, card_id, session_id, ok, err))
-    for k in [k for k, v in sc.items() if (v or {}).get("chatId") == cid]:
+    keys = [k for k in sc
+            if str(k).startswith("site:") and str(k).endswith(":" + str(session_id))
+            and str(k).split(":")[2:3] == [str(int(card_id))]]
+    pairs = {}
+    for k in keys:
+        ent = sc.get(k) or {}
+        acct, cid2 = ent.get("account"), ent.get("chatId")
+        if acct and cid2:
+            pairs[(acct, cid2)] = k
+    acct, cid = sess.get("account"), sess.get("chatId")
+    if acct and cid:
+        pairs[(acct, cid)] = pairs.get((acct, cid), "session")
+    for (acct2, cid2) in pairs:
+        if acct2 in pool:
+            ok, err = delete_chat(pool[acct2]["cookie"], cid2)
+            log("删除会话上游 %s（%s/%s/%s）-> %s %s" % (
+                str(cid2)[:8], acct2, card_id, session_id, ok, err))
+    for k in keys:
         sc.pop(k, None)
     save_state(st)
     s = load_sessions()
@@ -1045,17 +1103,46 @@ def is_network(err):
     return any(k in e for k in keys)
 
 
-def ensure_chat_for_card(st, pool, name, card_id, emit, session_id=None):
+def ensure_chat_for_card(st, pool, name, card_id, emit, session_id=None, fresh=False,
+                         active_chat=None):
     """为「某个号 × 某张卡 [× 某个会话]」拿到一个 chatId。会话维度独立缓存。
-    返回 (chatId, err)：err 非空时上层要区分「闸门」还是「账号问题」。"""
+    返回 (chatId, err)：err 非空时上层要区分「闸门」还是「账号问题」。
+
+    fresh=True 用于「会话已换号 / 新开会话」：必须拿到空会话，不能复用缓存，
+    也不能接受 createByCard 返回的旧会话（notes/052）。
+    """
     key = "site:%s:%s" % (name, card_id)
     if session_id:
         key = "site:%s:%s:%s" % (name, card_id, session_id)
     chats = st.setdefault("site_chats", {})
     ent = chats.get(key)
-    if ent and ent.get("chatId"):
+    if ent and ent.get("chatId") and not fresh:
         return ent["chatId"], None
-    cid, err = create_chat(pool[name]["cookie"], card_id)
+    cookie = pool[name]["cookie"]
+    if fresh:
+        lk = session_lock_for(card_id, session_id) if session_id else None
+        if lk:
+            lk.acquire()
+        try:
+            if session_id:
+                cur = get_session(card_id, session_id)
+                if cur and cur.get("chatId") and cur.get("chatId") != active_chat:
+                    # 并发的另一条请求已经建好并绑定了新会话
+                    if cur.get("account") != name:
+                        return None, "session_bound_elsewhere"
+                    cid = cur["chatId"]
+                    err = None
+                    chats[key] = {"chatId": cid, "cardId": card_id,
+                                  "account": name, "at": int(time.time())}
+                    save_state(st)
+                    return cid, None
+            cid, err = fresh_chat_for_card(cookie, card_id, session_id=session_id,
+                                           active_chat=active_chat)
+        finally:
+            if lk:
+                lk.release()
+    else:
+        cid, err = create_chat(cookie, card_id)
     if not cid:
         log("site: %s 无法为卡 %s 建会话（%s）" % (name, card_id, err), "warn")
         return None, err
@@ -1164,20 +1251,40 @@ def _tail_prompt(text, limit=1200):
     return t[-limit:] if len(t) > limit else t
 
 
-def recent_turns_text(history, n=4, limit=500):
-    """换号/新 chat 时给模型的最近几轮原文（上游没有这些历史）。"""
+def _clip_mid(text, limit):
+    """长段落留头又留尾：只留头会把「停笔的位置」丢掉，模型就接不上。"""
+    if len(text) <= limit:
+        return text
+    head = max(1, limit // 3)
+    tail = max(1, limit - head)
+    return text[:head].rstrip() + "……" + text[-tail:].lstrip()
+
+
+def recent_turns_text(history, n=6, limit=600, tail_limit=900):
+    """换号/新 chat 时给模型的最近几轮原文（上游没有这些历史）。
+
+    最后一条 assistant 保留**结尾**：那才是本轮该接着写的位置。旧实现统一
+    `c[:500]`，模型看到的是每段开头，接续自然错位（notes/052）。
+    """
     msgs = memlib.sanitize_history(history)[-n:]
     lines = []
-    for m in msgs:
+    last_i = len(msgs) - 1
+    for i, m in enumerate(msgs):
         who = "用户" if m.get("role") == "user" else "角色"
         c = re.sub(r"\s+", " ", m.get("content") or "").strip()
-        if c:
-            lines.append("%s：%s" % (who, c[:limit]))
+        if not c:
+            continue
+        if i == last_i and m.get("role") == "assistant":
+            c = c[-tail_limit:] if len(c) > tail_limit else c
+        else:
+            c = _clip_mid(c, limit)
+        lines.append("%s：%s" % (who, c))
     return "\n".join(lines)
 
 
 def generate_long(cookie, chat_id, card_id, model, max_tokens, prompt, emit,
-                  history=None, rounds=3, memory=None, stop_event=None, recent_text=None):
+                  history=None, rounds=3, memory=None, stop_event=None, recent_text=None,
+                  fresh_chat=False):
     """
     多轮续写：首轮用原始 prompt，之后每轮把「累积正文」当 assistant 历史回灌。
     任一环节失败就带着已有正文返回 ok，不丢内容。
@@ -1201,7 +1308,8 @@ def generate_long(cookie, chat_id, card_id, model, max_tokens, prompt, emit,
         try:
             res = generate(cookie, chat_id, card_id, model, max_tokens, this_prompt, emit,
                            history=this_hist, memory=memory, stop_event=stop_event,
-                           recent_text=recent_text if i == 0 else None)
+                           recent_text=recent_text if i == 0 else None,
+                           fresh_chat=fresh_chat if i == 0 else False)
         except Exception as e:
             log("round %d failed: %s" % (i + 1, repr(e)[:200]), "warn")
             if text:
@@ -1224,17 +1332,104 @@ def generate_long(cookie, chat_id, card_id, model, max_tokens, prompt, emit,
     return {"status": "ok", "text": text, "done": True, "rounds": rounds}
 
 
-def chat_id_ok(pool, name, chat_id):
-    """验证 chatId 属于该号且存在。失败就让下面重新建会话。"""
+def fetch_chat_count(cookie, chat_id):
+    """上游会话已有的消息条数；读取失败返回 None（区别于「空会话 0 条」）。"""
     try:
-        cookie = pool[name]["cookie"]
         url = "%s/api/trpc/chat.getMessages?batch=1&input=%s" % (
             BASE, quote(json.dumps({"0": {"json": {"chatId": chat_id}}})))
         r = creq.get(url, headers=headers_of(cookie), impersonate="chrome",
                      proxies=proxies(), timeout=30)
-        return r.status_code == 200
+        if r.status_code != 200:
+            return None
+        data = json.loads(r.text)[0]["result"]["data"]["json"]
+        raw = data.get("messages") or data.get("chunks") or []
+        n = 0
+        for ch in raw:
+            if isinstance(ch, dict) and isinstance(ch.get("messages"), list):
+                n += len(ch["messages"])
+            elif isinstance(ch, dict) and ch.get("role"):
+                n += 1
+        return n
     except Exception:
+        return None
+
+
+def chat_id_ok(pool, name, chat_id):
+    """验证 chatId 属于该号且存在。失败就让下面重新建会话。"""
+    if name not in pool or not chat_id:
         return False
+    return fetch_chat_count(pool[name]["cookie"], chat_id) is not None
+
+
+def chat_owner_session(chat_id):
+    """反查 chatId 属于哪个会话（sessions.json）。"""
+    if not chat_id:
+        return None
+    for v in load_sessions().values():
+        if (v or {}).get("chatId") == chat_id:
+            return (int(v.get("cardId") or 0), str(v.get("sessionId") or ""))
+    return None
+
+
+def chat_in_use(chat_id, except_session=None):
+    """该 chatId 是否被**别的会话**登记中。删除前必须过这一关。
+
+    except_session = (cardId, sessionId)：本会话自己的旧 chat 不算占用。
+    """
+    if not chat_id:
+        return False
+    for v in load_sessions().values():
+        if (v or {}).get("chatId") != chat_id:
+            continue
+        owner = (int(v.get("cardId") or 0), str(v.get("sessionId") or ""))
+        if except_session and owner == (int(except_session[0]), str(except_session[1])):
+            continue
+        return True
+    st = load_state()
+    for key, ent in (st.get("site_chats") or {}).items():
+        if (ent or {}).get("chatId") != chat_id:
+            continue
+        parts = str(key).split(":")
+        if except_session and len(parts) >= 4 \
+                and parts[3] == str(except_session[1]):
+            continue
+        return True
+    return False
+
+
+def fresh_chat_for_card(cookie, card_id, session_id=None, active_chat=None):
+    """拿到一个**空**会话，保证新会话从零开始。
+
+    上游 chat.createByCard 按 (号, cardId) 去重：只要该号以前给这张卡建过会话，
+    就直接返回那个旧会话（历史停在本会话/别的会话的某一轮）。直接续写旧会话就是
+    「剧情倒退」的根因（notes/052：同一会话被拆成 15 个各停在不同轮次的上游会话）。
+    所以：非空 → 清掉重开；属于别的会话 → 不动它，换号。
+    """
+    active = active_chat
+    if session_id:
+        active = (get_session(card_id, session_id) or {}).get("chatId") or active
+    for _ in range(3):
+        cid, err = create_chat(cookie, card_id)
+        if not cid:
+            return None, err
+        if active and cid == active:
+            # 当前会话的正式会话：即使读失败也不能删，交给上层决定是否换号
+            return None, "active_chat_reused"
+        n = fetch_chat_count(cookie, cid)
+        if n is None:
+            # 读不到条数时不能无限重试；按新会话用，并留日志
+            log("新会话条数未知，按空会话使用 %s（card=%s）" % (str(cid)[:8], card_id), "warn")
+            return cid, None
+        if n == 0:
+            return cid, None
+        if chat_in_use(cid, except_session=(card_id, session_id) if session_id else None):
+            return None, "chat_owned_by_other_session"
+        ok, derr = delete_chat(cookie, cid)
+        log("清掉旧会话 %s（card=%s，%d 条旧剧情）-> %s %s" % (
+            str(cid)[:8], card_id, n, ok, derr))
+        if not ok:
+            return None, "stale_chat_delete_failed: %s" % derr
+    return None, "no_fresh_chat"
 
 
 def start_summary(pool, name, card_id, mem, history, stop_event=None):
@@ -1372,6 +1567,20 @@ def run_site_chat(payload, emit, stop_event=None):
     site_uid = user["id"] if user else None
 
     history = payload.get("history")
+    # 重复发送兜底：前端 2s 去重挡不住更慢的双击/重试。若历史末尾就是同一句
+    # 用户消息（中间没有 assistant），说明上一次已提交过，丢掉重复的尾巴。
+    if isinstance(history, list) and history:
+        cut = len(history)
+        for i in range(len(history) - 1, -1, -1):
+            m = history[i]
+            if not isinstance(m, dict):
+                break
+            if m.get("role") != "user" or (m.get("content") or "").strip() != prompt:
+                break
+            cut = i
+        if cut < len(history):
+            log("去重：丢弃末尾 %d 条重复用户消息" % (len(history) - cut))
+            history = history[:cut]
     session_id = (payload.get("sessionId") or "").strip() or None
     # —— 长期记忆按会话独立；老对话的卡片级旧记忆由用户点「导入旧记忆」显式导入
     mem = memlib.load_memory(MEMORY_DIR, card_id, session_id)
@@ -1417,6 +1626,19 @@ def run_site_chat(payload, emit, stop_event=None):
     # 已绑定的会话强制走它自己的号 + chatId；未绑定的会话优先选「本卡还没被
     # 其它会话占用的号」，保证新会话的上游存档是干净独立的。
     prev_sess = get_session(card_id, session_id) if session_id else None
+    active_chat = (prev_sess or {}).get("chatId")
+    active_acct = (prev_sess or {}).get("account")
+    # 前端显式指定的原会话（从 seeds/云端恢复的历史）：注册表里没有时也认它，
+    # 否则会被当成新会话，历史直接断掉。
+    if not active_chat and want_chat and want_acct:
+        active_chat, active_acct = want_chat, want_acct
+    # 撤回/重新生成：客户端已经把尾部删掉，上游会话里那几轮还在，必须丢掉重开，
+    # 否则模型会把被撤回的内容当成已经发生。
+    if payload.get("rewind") and session_id:
+        reset_session_chat(card_id, session_id, active_acct, active_chat)
+        prev_sess = None
+        active_chat = active_acct = None
+        want_chat = None
     if session_id:
         sess = prev_sess
         if sess and sess.get("account") and sess.get("account") in pool \
@@ -1444,10 +1666,18 @@ def run_site_chat(payload, emit, stop_event=None):
 
     gate_hits = 0
     busy_hits = 0
+    stale_hits = 0
     for credit, name in cands:
         a = account_state(st, name)
         emit("account", {"name": name, "credit": a.get("credit")})
-        if want_chat and name == want_acct and chat_id_ok(pool, name, want_chat):
+        usable = (not a.get("exhausted") and not a.get("disabled")
+                  and (a.get("credit") or 0) >= MIN_PREPAY)
+        # 只有「本会话当前绑定的那个号 + 那个 chat」允许续写。其它情况一律新建
+        # **空**会话：换号后回到某个号以前建过的旧会话，模型会从那个旧轮次接着
+        # 演，表现为剧情凭空倒退（notes/052）。
+        reuse = bool(want_chat) and name == want_acct and name == active_acct \
+            and usable and chat_id_ok(pool, name, want_chat)
+        if reuse:
             cid, chat_err = want_chat, None
             _k = "site:%s:%s" % (name, card_id)
             if session_id:
@@ -1459,9 +1689,20 @@ def run_site_chat(payload, emit, stop_event=None):
                 bind_session(card_id, session_id, name, want_chat)
             emit("note", {"message": "接上原会话 %s" % want_chat[:8]})
         else:
-            cid, chat_err = ensure_chat_for_card(st, pool, name, card_id, emit,
-                                                 session_id=session_id)
+            cid, chat_err = ensure_chat_for_card(
+                st, pool, name, card_id, emit, session_id=session_id,
+                fresh=bool(session_id), active_chat=active_chat)
         if not cid:
+            if (chat_err or "").startswith(
+                    ("active_chat_reused", "chat_owned_by_other_session",
+                     "stale_chat_delete_failed", "no_fresh_chat",
+                     "session_bound_elsewhere")):
+                # 这个号上有别的会话/历史，不能安全清空：换下一个号。
+                log("site: %s 不能提供干净会话（%s）" % (name, chat_err), "warn")
+                stale_hits += 1
+                emit("switch", {"from": name, "reason": "stale_chat",
+                                "detail": chat_err})
+                continue
             if is_gate(chat_err):
                 # 闸门是 IP 级：先换出口节点再重试一次；换不了才进冷却。
                 gate_hits += 1
@@ -1495,32 +1736,40 @@ def run_site_chat(payload, emit, stop_event=None):
             rounds = int(payload.get("rounds") or 0)
         except (TypeError, ValueError):
             rounds = 0
-        # 会话级锁：同一 chatId（号×卡）并发生成会被上游 409「该对话正在生成中」。
-        # 抢不到就换下一个号：既不上游 409，也不排队干等。
-        lock = chat_lock_for(name, card_id)
+        # 会话级锁：同一条上游会话并发生成会被上游 409「该对话正在生成中」。
+        # 锁粒度必须是 chatId，而不是「号×卡」：同号同卡的不同会话互不影响。
+        # 当前会话的锁被占时不能换号（换号=新 chat=剧情断），只能让用户等。
+        lock = chat_lock_for(name, cid)
         if not lock.acquire(blocking=False):
             busy_hits += 1
+            if reuse:
+                emit("end", {"reason": "busy",
+                             "message": "这一轮还在生成中，等它写完再发。"})
+                return
             emit("switch", {"from": name, "reason": "busy", "detail": "该账号正在生成中"})
             continue
         try:
             # 换号 = 新 chat：上游没有前文，只靠摘要会串回旧场景，补最近几轮原文。
-            prev_chat = (prev_sess or {}).get("chatId")
-            prev_acct = (prev_sess or {}).get("account")
+            prev_chat = active_chat
+            prev_acct = active_acct
             switched = bool(prev_chat) and (prev_chat != cid or prev_acct != name)
+            fresh_chat = bool(not prev_chat or switched)
             recent_text = (recent_turns_text(history)
-                           if history and (switched or not prev_chat) else None)
-            log("site: card=%s session=%s account=%s chat=%s switched=%s recent=%d"
+                           if history and fresh_chat else None)
+            log("site: card=%s session=%s account=%s chat=%s switched=%s fresh=%s recent=%d"
                 % (card_id, str(session_id or "")[:8], name, str(cid)[:8],
-                   switched, len(recent_text or "")))
+                   switched, fresh_chat, len(recent_text or "")))
+            if switched:
+                emit("note", {"message": "已换号，正在新会话里接着刚才的剧情写"})
             if rounds <= 1:
                 res = generate(pool[name]["cookie"], cid, card_id, model, max_tokens, prompt,
                                emit, history=history, memory=mem, stop_event=stop_event,
-                               recent_text=recent_text)
+                               recent_text=recent_text, fresh_chat=fresh_chat)
             else:
                 res = generate_long(pool[name]["cookie"], cid, card_id, model, max_tokens,
                                     prompt, emit, history=history, memory=mem,
                                     rounds=min(rounds, 8), stop_event=stop_event,
-                                    recent_text=recent_text)
+                                    recent_text=recent_text, fresh_chat=fresh_chat)
         finally:
             lock.release()
         if res.get("status") == "exhausted" and res.get("reason") == "internal":
@@ -1597,6 +1846,9 @@ def run_site_chat(payload, emit, stop_event=None):
 
     if busy_hits >= len(cands):
         emit("end", {"reason": "busy", "message": "当前可用账号都在生成中，请稍等几秒再试"})
+    elif stale_hits >= len(cands):
+        emit("end", {"reason": "no_clean_chat",
+                     "message": "可用账号上的会话都被其它对话占用，暂时开不了干净的新会话，请稍后再试。"})
     else:
         emit("end", {"reason": "all_failed", "message": "所有账号都没能完成这次生成"})
 
@@ -1849,6 +2101,18 @@ class Handler(BaseHTTPRequestHandler):
                     continue
                 seen.add(chat_id)
                 cands.append((acct, chat_id))
+
+            # 已绑定的「当前会话」优先：换号之前的旧存档都停在更早的轮次，
+            # 取最长反而可能把剧情退回去（notes/052）。
+            if reg and reg.get("account") in pool and reg.get("chatId"):
+                msgs, err = fetch_chat_messages(
+                    pool[reg["account"]]["cookie"], reg["chatId"])
+                if msgs:
+                    return self._json(200, {"messages": msgs, "account": reg["account"],
+                                            "chatId": reg["chatId"],
+                                            "count": len(msgs)})
+                log("读取当前会话存档失败 %s/%s：%s" % (
+                    reg["account"], str(reg["chatId"])[:8], err), "warn")
 
             best = None
             for i, (acct, chat_id) in enumerate(cands):

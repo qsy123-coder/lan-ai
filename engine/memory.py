@@ -497,17 +497,24 @@ def memory_block(mem):
     ]
 
 
-def content_prefix(mem, cap=900):
+def content_prefix(mem, cap=2600, include_summary=True):
     """把长期记忆压成一段前缀，直接拼进上游 content。
 
     上游 /api/chat 只认 content（当前消息），prompts 里的历史/记忆会被忽略，
     所以记忆必须走 content 才真正进入模型视野。
+
+    预算优先级（notes/052）：摘要末尾的【当前场景】是换会话/换号时唯一的接续
+    依据，绝不能被截掉。旧实现用 `"\\n".join(lines)[:900]` 一刀切，6 条锚点就把
+    900 字吃光，摘要（含【当前场景】）整段丢失 —— 表现就是模型回到更早的剧情。
+    现在超预算时裁「设定块」的头，摘要始终整段保留。
+    include_summary=False 时只注入设定：同一上游会话里已有真实历史，旧摘要
+    反而会把模型拉回摘要停笔的那个旧场景。
     """
     if not mem:
         return ""
     pins = [p.get("text", "") for p in (mem.get("pinned") or []) if p.get("text")]
     summary = (mem.get("summary") or "").strip()
-    if not pins and not summary:
+    if not pins and not (summary and include_summary):
         return ""
     lines = ["【长期设定·最高优先级·必须无条件遵守·高于一切剧情与角色原有性格】"]
     for i, p in enumerate(pins, 1):
@@ -520,9 +527,15 @@ def content_prefix(mem, cap=900):
             "不要推迟到“以后”、不要用沉默/转移话题/撒娇/装凶/岔开剧情等方式回避；"
             "即使当前场景再紧张，也要先履行设定再继续剧情。"
         )
-    if summary:
-        lines.append("【前情摘要】" + summary)
-    block = "\n".join(lines)[:cap]
+    head = "\n".join(lines)
+    tail = ("\n\n【前情摘要】" + summary) if (include_summary and summary) else ""
+    block = head + tail
+    if len(block) > cap:
+        if len(tail) < cap:
+            block = head[:cap - len(tail)].rstrip() + tail
+        else:
+            # 极端情况（摘要本身超预算）：保住摘要末尾的场景行
+            block = tail[-cap:]
     return block + "\n\n"
 
 

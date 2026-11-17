@@ -84,15 +84,15 @@ def load_messages(card, sid):
     return (best if best else (None, "none"))
 
 
-def summarize(msgs, pins, acct, cid, batch_card, fact_ctx):
+def summarize(msgs, pins, acct, cid, batch_card, fact_ctx, existing=""):
     body = msgs[:-2] if len(msgs) > 6 else msgs
     chunks = m.chunk_messages(body, 6000)
+    # 旧摘要（哪怕是规则碎片）先带上，让模型合并而不是丢掉更早的剧情
+    running = m.usable_existing(existing)
     if len(chunks) > 8:
         head = [x for ch in chunks[:-4] for x in ch]
-        running = m.rule_summary(head, "", pins)
+        running = m.rule_summary(head, running, pins)
         chunks = chunks[-4:]
-    else:
-        running = ""
     pool = s.load_pool()
     for i, ch in enumerate(chunks):
         prompt = m.model_summary_prompt(
@@ -165,7 +165,8 @@ def main():
         print("   src=%s msgs=%d" % (src, len(msgs)))
         if args.dry_run:
             continue
-        text, info = summarize(msgs, pins, acct, batch_cid, batch_card, fact_ctx)
+        text, info = summarize(msgs, pins, acct, batch_cid, batch_card, fact_ctx,
+                               existing=d.get("summary") or "")
         if not text:
             print("   FAIL:", info); continue
         backup = os.path.join("/opt/lan", "backup-summary-%s-%s.json"

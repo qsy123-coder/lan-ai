@@ -678,6 +678,7 @@ Remove-Item -Recurse -Force out\*,notes\*.tmp -ErrorAction SilentlyContinue     
 | 2026-11-17 | `fix/continuity-dedupe` | 剧情连续性：发送去重 + 换号补最近原文 + 摘要哈希水位 + 摘要带当前场景（notes/051） | 已上线（备份 backup-continuity-20261117-133506） |
 | 2026-11-17 | `fix/session-chat-affinity` | 会话亲和：换号不再复用旧 chat、只在 fresh chat 注入摘要、content_prefix 保住【当前场景】、rewind（notes/052） | 已上线 |
 | 2026-11-17 | `fix/summary-account-fallback` | 摘要账号失败自动换号 + fresh chat 判空改看 user 消息 + 线上真实测试（notes/053） | 已上线 |
+| 2026-11-17 | `fix/fact-guard-repair` | 摘要事实守卫（妹妹→养女拒收）+ 批量重修 rule 摘要 + 清理测试残留（notes/054） | 已上线 |
 
 > 规矩：分支从 `main` 切出；质量门禁通过后可自行 commit / push / 部署 / 合并（见上「Claude 执行规范」）。
 > 不可逆操作（删数据 / 改库 / `.env.production` / force-push）前先确认。

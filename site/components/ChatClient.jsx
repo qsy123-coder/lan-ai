@@ -369,7 +369,8 @@ export default function ChatClient({ card, initialSession }) {
 
     const restore = async () => {
       // 手机玩出来的会话在同一张卡下、但消息在手机 localStorage；上游存档才是共用源。
-      if (!justNew && !saved.length) {
+      // 不只看空会话：PC 里存的是旧缓存时，只要云端更全就覆盖（手机新聊的轮次才会出现）。
+      if (!justNew) {
         try {
           const q = `/api/history?cardId=${encodeURIComponent(card.id)}&sessionId=${encodeURIComponent(sid)}`;
           const r = await fetch(q, { cache: "no-store" });
@@ -381,7 +382,7 @@ export default function ChatClient({ card, initialSession }) {
               content: m.content,
               ts: Date.now() - ((j.messages.length - i) * 1000),
             }));
-            if (alive && list.length) {
+            if (alive && list.length > saved.length) {
               setMsgs(list);
               localStorage.setItem(mkey(card.id, sid), JSON.stringify(list));
               writeIndex(list);

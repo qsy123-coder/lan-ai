@@ -1743,12 +1743,13 @@ class Handler(BaseHTTPRequestHandler):
 
             best = None
             for i, (acct, chat_id) in enumerate(cands):
-                if i >= 8:
+                if i >= 24:   # 换号次数再多也够覆盖了
                     break
                 if acct not in pool:
                     continue
                 msgs, err = fetch_chat_messages(pool[acct]["cookie"], chat_id)
                 if msgs:
+                    log("存档候选 %s/%s：%d 条" % (acct, str(chat_id)[:8], len(msgs)))
                     if best is None or len(msgs) > len(best[2]):
                         best = (acct, chat_id, msgs)
                     if len(msgs) >= 30:   # 够完整了，不再多打上游

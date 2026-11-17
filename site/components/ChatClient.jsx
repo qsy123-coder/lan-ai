@@ -424,7 +424,8 @@ export default function ChatClient({ card, initialSession }) {
     let alive = true;
     (async () => {
       try {
-        const r = await fetch(`/api/sessions?cardId=${encodeURIComponent(card.id)}`, { cache: "no-store" });
+        // 不带 cardId：一次拿全部卡片的会话，左侧列表才能跨卡显示手机玩过的内容
+        const r = await fetch("/api/sessions", { cache: "no-store" });
         if (!r.ok) return;
         const j = await r.json();
         const rows = Array.isArray(j?.sessions) ? j.sessions : [];
@@ -435,11 +436,12 @@ export default function ChatClient({ card, initialSession }) {
         for (const s of rows) {
           const sid2 = String(s.sessionId || "");
           if (!sid2 || byId.has(sid2)) continue;
+          const same = String(s.cardId) === String(card.id);
           byId.set(sid2, {
             sessionId: sid2,
-            cardId: card.id,
-            name: card.name,
-            cover: card.cover,
+            cardId: s.cardId || card.id,
+            name: s.name || (same ? card.name : `卡片 ${s.cardId}`),
+            cover: s.cover || (same ? card.cover : ""),
             lastAt: (Number(s.updatedAt) || 0) * 1000 || Date.now(),
             last: s.summary || "云端会话",
           });

@@ -74,17 +74,59 @@ $PY = "C:\Users\WINDOWS11\AppData\Local\Programs\Python\Python312\python.exe"
 站点侧：模型下拉选「∞ 无限 16K（0 积分）」，完成提示应为
 `完成 · 无限模型零扣费`；号池余额不会变化。
 
+## 4.1 零扣费失效自检（2026-11-19 追加）
+
+需求：服务端哪天把 turbo 修好了，用户要第一时间知道，而不是余额被默默扣光。
+
+实现（`engine/server.py`）：
+
+| 时机 | 动作 |
+|---|---|
+| 每次免费生成**开始前** | `getMe` 取实时余额，与 `webstate.json: free_watch[账号]` 的上次基线对比；差额 > 0.05 就推 `free_warn` |
+| 每次免费生成**结束后** | 再取一次余额，与本次生成前对比；本次这一笔扣了就推 `free_warn`（`phase=after`） |
+| 成功之后 | 更新 `free_watch[账号] = {credit, at}`，供下一次开始前对比 |
+| 付费生成成功（站点或 `/run` 批量） | 删除该号的 `free_watch`，避免正常扣费被误报 |
+| 告警落盘 | `webstate.json: free_alert = {at, account, model, prev, credit, spent, phase}` |
+
+`free_warn` 事件字段与落盘记录一致，另带 `message`。`GET /site/pool` 也会返回
+`freeAlert`，前端每 30s 轮询一次，刷新页面后仍能看到。
+
+前端（`ChatClient.jsx`）：
+
+- 收到 `free_warn` 或轮询到更新的 `freeAlert` → 顶部挂常驻横幅
+  「零扣费失效」：账号、余额变化、扣费金额，并建议切回付费档。
+- 「知道了」写入 `localStorage.lan.free.alert.dismissed`；服务端出现**更新**的告警
+  （`at` 更大）会再次提示。
+- 样式 `.free-alert` 在 `site/app/globals.css`（沿用现有配色变量，深色主题同步）。
+
+离线校验（4 个场景全过）：
+
+```
+A before-phase OK  基线 5.0，开始前余额 4.4 → free_warn(phase=before, spent=0.60)
+B after-phase OK   开始前 3.0，本次后 2.4 → free_warn(phase=after, spent=0.60)
+C paid-clears OK   付费生成后 free_watch 被清除，不告警
+D clean-zero OK    余额不变 → 不告警，基线更新
+```
+
+> 注意：如果同一个号在引擎之外被手动用过，余额也会下降，告警会报出来。
+> 它表示「免费模式期间余额掉了」，排查时先看 `phase=after`（一定是本次生成扣的）；
+> `phase=before` 则结合该号最近的付费使用记录判断。
+
 ## 5. 回滚
 
 ```powershell
 # 代码
-git checkout -- engine/server.py site/components/ChatClient.jsx
+git revert <本次提交>
+# 或手工恢复：
+git checkout -- engine/server.py site/components/ChatClient.jsx site/app/globals.css
 git rm --cached scripts/verify_free.py   # 或直接删除该文件
 
 # 运行态：把前端模型切回任意付费档即可（免费档只是列表里的额外选项）
+# 清掉告警（该号确认无误后）：
+#   停引擎 → 编辑 out/webstate.json，删除 "free_alert" 与 "free_watch" → 起引擎
 ```
 
-如果线上发现 turbo 开始扣费（引擎日志出现 `零扣费模型出现扣费`）：
+如果线上发现 turbo 开始扣费（引擎日志出现 `零扣费失效：`，或前台顶部出现「零扣费失效」横幅）：
 
 1. 立即把前台模型切回 `Turbo 16K`（Flux）或其它付费档；
 2. 跑 `scripts/verify_free.py` 确认；

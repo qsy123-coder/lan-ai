@@ -230,6 +230,8 @@ export default function ChatClient({ card, initialSession }) {
   // 手机端会话抽屉：与设置抽屉独立开关
   const [showSess, setShowSess] = useState(false);
   const [pool, setPool] = useState(null);
+  // 零扣费失效告警（notes/056）：服务端发现免费模型开始扣费时置位，前端常驻提示
+  const [freeAlert, setFreeAlert] = useState(null);
 
   const box = useRef(null);
   const taRef = useRef(null);
@@ -475,6 +477,25 @@ export default function ChatClient({ card, initialSession }) {
       const r = await fetch("/api/pool", { cache: "no-store" });
       const j = await r.json();
       setPool(j);
+      // 零扣费自检：服务端的告警记录比本机「已读」时间新，就再提示一次
+      const fa = j?.freeAlert;
+      if (fa && fa.at) {
+        // 服务端的 at 是「秒」；本机已读时间也统一存秒，避免新旧记录口径不一致
+        let dismissed = 0;
+        try {
+          dismissed = Number(localStorage.getItem("lan.free.alert.dismissed") || 0);
+          if (dismissed > 1e12) dismissed = Math.floor(dismissed / 1000);
+        } catch {}
+        if (Number(fa.at) > dismissed) setFreeAlert(fa);
+      }
+    } catch {}
+  }, []);
+
+  const dismissFreeAlert = useCallback(() => {
+    setFreeAlert(null);
+    try {
+      // 与服务端 free_alert.at 对齐：统一用秒
+      localStorage.setItem("lan.free.alert.dismissed", String(Math.floor(Date.now() / 1000)));
     } catch {}
   }, []);
 
@@ -808,6 +829,9 @@ export default function ChatClient({ card, initialSession }) {
           } else if (ev === "memory_update") {
             setMem((cur) => ({ ...(cur || {}), ...d }));
             setNote("长期记忆已更新");
+          } else if (ev === "free_warn") {
+            // 免费模型开始扣费：立刻挂出常驻告警，别让用户默默被扣
+            setFreeAlert(d);
           } else if (ev === "complete") {
             finished = true;
             stopReveal();
@@ -1109,6 +1133,19 @@ export default function ChatClient({ card, initialSession }) {
           </div>
 
           {note ? <div className="chat-note">{note}</div> : null}
+
+          {freeAlert ? (
+            <div className="free-alert" role="alert">
+              <b>零扣费失效</b>
+              <span>
+                {freeAlert.account ? `账号 ${freeAlert.account} ` : ""}
+                余额 {Number(freeAlert.prev ?? 0).toFixed(2)} → {Number(freeAlert.credit ?? 0).toFixed(2)}
+                （-{Number(freeAlert.spent ?? 0).toFixed(2)} 积分）。上游可能已修复无限模型，
+                建议立即切回付费档，避免继续被扣。
+              </span>
+              <button type="button" onClick={dismissFreeAlert}>知道了</button>
+            </div>
+          ) : null}
 
           {pool && !pool.offline && pool.usable === 0 && !isFreeModel(model) ? (
             <div className="pool-empty">

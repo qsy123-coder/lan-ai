@@ -2034,6 +2034,41 @@ html[data-theme="dark"] .notes-card .notes {
   border-bottom: 1px solid #f4cfd2;
   text-align: center;
 }
+
+/* zero-cost watch alert (notes/056) */
+.free-alert {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  padding: 8px 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #8a3b41;
+  background: #fdeced;
+  border-bottom: 1px solid #f4cfd2;
+}
+.free-alert b { flex: none; letter-spacing: 0.02em; }
+.free-alert span { flex: 1; min-width: 220px; }
+.free-alert button {
+  flex: none;
+  padding: 2px 12px;
+  border: 1px solid #e2b6ba;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.free-alert button:hover { background: rgba(168, 67, 75, 0.1); }
+html[data-theme="dark"] .free-alert {
+  color: var(--ch-danger);
+  background: rgba(168, 67, 75, 0.14);
+  border-bottom-color: rgba(168, 67, 75, 0.4);
+}
+html[data-theme="dark"] .free-alert button { border-color: rgba(168, 67, 75, 0.5); }
+
 /* ---------- 移动端 ---------- */
 .drawer-mask,
 .drawer-close {

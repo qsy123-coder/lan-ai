@@ -176,8 +176,11 @@ project/
   摘要模型走 `MEMORY_SUMMARY_MODEL_FREE`。
 - 前台：模型下拉前三项是「∞ 无限」；完成提示 `完成 · 无限模型零扣费`。
 - 自检：`python scripts/verify_free.py`（N 次 turbo 生成，前后比 credit，差额 0 才算过）。
-- 保险：每次免费生成后引擎比对 `getMe` 的 credit，出现扣费立即写
-  `零扣费模型出现扣费` 告警日志。
+- **零扣费失效自检**：`webstate.json: free_watch` 记住每个号上次免费生成后的余额；
+  下一次免费请求**开始前**先 `getMe` 对比，差额 > 0.05 就推 SSE `free_warn`
+  并落盘 `free_alert`，前台顶部挂「零扣费失效」横幅（可「知道了」关闭）。
+  生成前后再对比一次（`phase=after`）；付费生成（站点或 `/run`）会清掉该号基线。
+  `/site/pool` 也返回 `freeAlert`，刷新页面仍可见。
 - **不影响额度池**：付费链路（选号门槛、扣费、建议兜底、Pulse 摘要）一行未动；
   回滚只需把前端模型切回任意付费档。
 
@@ -701,6 +704,7 @@ Remove-Item -Recurse -Force out\*,notes\*.tmp -ErrorAction SilentlyContinue     
 | 2026-11-17 | `fix/fact-guard-repair` | 摘要事实守卫（妹妹→养女拒收）+ 批量重修 rule 摘要 + 清理测试残留（notes/054） | 已上线 |
 | 2026-11-17 | `fix/graceful-restart-prefix` | 重启等待活跃生成（不再切断 SSE）+ 引擎块不再被抽成锚点 + 脏锚点清理（notes/055） | 已上线 |
 | 2026-11-19 | `feat/turbo-unlimited` | 接入 turbo 零扣费无限模式：引擎免费分支 + 前台「∞ 无限」档 + 自检脚本，额度池链路不动（notes/056） | 已上线（备份 backup-turbo-20261119-002629） |
+| 2026-11-19 | `feat/free-cost-watch` | 零扣费失效自检：`free_watch` 基线 + 会话开始前/生成前后对比 + `free_warn` 横幅 + `free_alert` 落盘（notes/056 §4.1） | 开发中 |
 
 > 规矩：分支从 `main` 切出；质量门禁通过后可自行 commit / push / 部署 / 合并（见上「Claude 执行规范」）。
 > 不可逆操作（删数据 / 改库 / `.env.production` / force-push）前先确认。

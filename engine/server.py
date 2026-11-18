@@ -472,6 +472,35 @@ def model_meta(model_id):
     return {}
 
 
+FREE_WATCH_EPS = 0.05     # 小于这个差额视为浮点误差/舍入，不算扣费
+
+
+def note_free_charge(st, name, model, prev, credit, phase, emit=None):
+    """免费模型被检测到扣费：落盘告警 + 推给前端（notes/056 §5）。
+
+    phase=before：本次请求开始前，和上一次免费生成后的基线对比；
+    phase=after ：本次生成前后对比（本次这一笔就扣了）。
+    """
+    try:
+        prev, credit = round(float(prev), 2), round(float(credit), 2)
+    except (TypeError, ValueError):
+        return None
+    spent = round(prev - credit, 2)
+    rec = {"at": int(time.time()), "account": name, "model": model,
+           "prev": prev, "credit": credit, "spent": spent, "phase": phase}
+    st["free_alert"] = rec
+    save_state(st)
+    log("零扣费失效：%s credit %s → %s（-%.2f，%s）"
+        % (name, prev, credit, spent, phase), "warn")
+    if emit:
+        emit("free_warn", dict(
+            rec,
+            message=("检测到无限模型开始扣费（账号 %s：%.2f → %.2f，-%.2f 积分）。"
+                     "零扣费可能已被上游修复，建议切回付费档，避免继续消耗额度。"
+                     % (name, prev, credit, spent))))
+    return rec
+
+
 def _clean_surrogates(t):
     """上游 SSE 会把 emoji 代理对拆到两个 token，拼接后留下孤立 surrogate，
     直接 json.dumps + encode("utf-8") 会抛 UnicodeEncodeError。这里修掉。"""
@@ -1869,6 +1898,7 @@ def run_site_chat(payload, emit, stop_event=None):
         try:
             # 零扣费模式先取一次实时余额做基线：状态文件里的 credit 可能早就过期，
             # 拿它当基线会在「免费模型偷偷开始扣费」时误报/漏报（notes/056）。
+            # 同时和「上一次免费生成后的余额」对比：会话开始前就能发现上游修洞。
             base_credit = None
             if free:
                 okb, cb, _u, _e = get_me(pool[name]["cookie"])
@@ -1876,6 +1906,11 @@ def run_site_chat(payload, emit, stop_event=None):
                     base_credit = round(cb, 2)
                     a["credit"] = base_credit
                     save_state(st)
+                    fw = (st.get("free_watch") or {}).get(name) or {}
+                    prev = fw.get("credit")
+                    if isinstance(prev, (int, float)) and base_credit < prev - FREE_WATCH_EPS:
+                        note_free_charge(st, name, model, prev, base_credit,
+                                         "before", emit)
             # 换号 = 新 chat：上游没有前文，只靠摘要会串回旧场景，补最近几轮原文。
             prev_chat = active_chat
             prev_acct = active_acct
@@ -1927,10 +1962,20 @@ def run_site_chat(payload, emit, stop_event=None):
                 a["credit"] = round(credit2, 2)
                 a["exhausted"] = credit2 < MIN_PREPAY
                 save_state(st)
-                if free and base_credit is not None and credit2 < base_credit - 0.05:
-                    # 免费模型开始扣费 = 上游策略变了；记一笔，方便立刻发现并回退回付费链路
-                    log("零扣费模型出现扣费：%s %s → %s（%.2f）"
-                        % (model, base_credit, credit2, base_credit - credit2), "warn")
+            if free:
+                # 本次这一笔就扣了：立刻告警（会话开始前的对比已在生成前做过）
+                if ok and base_credit is not None and a["credit"] < base_credit - FREE_WATCH_EPS:
+                    note_free_charge(st, name, model, base_credit, a["credit"],
+                                     "after", emit)
+                # 记录本次免费生成后的余额，供下一次「会话开始前对比」
+                if ok:
+                    st.setdefault("free_watch", {})[name] = {
+                        "credit": a["credit"], "at": int(time.time())}
+                    save_state(st)
+            elif ok:
+                # 付费生成正常扣费：作废该号的免费基线，避免下次免费对话误报
+                if (st.get("free_watch") or {}).pop(name, None) is not None:
+                    save_state(st)
             # —— 本站用户：生成成功才扣费（失败/换号不扣）；零扣费模型不扣
             user_credit = None
             if site_uid and not free:
@@ -2118,6 +2163,9 @@ def run_job(payload, emit):
             spent_total += delta
             if credit < MIN_PREPAY:
                 a["exhausted"] = True
+            # 付费批量生成会正常扣费：作废该号的免费基线，避免免费对话误报（notes/056）
+            if (st.get("free_watch") or {}).pop(name, None) is not None:
+                log("付费生成后清除 %s 的免费基线" % name)
         save_state(st)
 
         st["stats"]["generated"] = st["stats"].get("generated", 0) + 1
@@ -2297,7 +2345,8 @@ class Handler(BaseHTTPRequestHandler):
                 rows.append({"name": name, "credit": round(c, 2), "usable": ok})
             rows.sort(key=lambda r: -r["credit"])
             return self._json(200, {"total": round(total, 2), "usable": usable,
-                                    "count": len(pool), "accounts": rows})
+                                    "count": len(pool), "accounts": rows,
+                                    "freeAlert": st.get("free_alert")})
         if path == "/pool":
             pool = load_pool()
             st = load_state()

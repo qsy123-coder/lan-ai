@@ -120,3 +120,18 @@ git rm --cached scripts/verify_free.py   # 或直接删除该文件
 按 `CLAUDE.md` 换节点即可。`verify_free.py` 已把 418 单独识别并提示换节点。
 
 > 空正文与 418 都不是「模型扣费」：三次运行的 credit 前后都是 `0.71`。
+
+### 生产冒烟（2026-11-19 00:3x，服务器 `43.135.10.175`）
+
+服务器 mihomo 原节点已失效（`BoringSSL SSL_connect: Connection closed abruptly`），
+按节点矩阵切到 `US-N-5` 后通过：
+
+```
+event: complete
+data: {"text":"\n她站在办","account":"d147","cardId":430690,
+       "credit":10.0,"userCredit":null,"free":true,
+       "model":"nalang-turbo-1115-16k"}
+```
+
+`free: true` + `event: complete` 同时出现；账号 d147 状态文件里是 0.0（过期值），
+预检查实测 10.0——这也验证了「免费分支先取实时余额做基线」的必要性。

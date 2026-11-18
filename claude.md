@@ -704,7 +704,7 @@ Remove-Item -Recurse -Force out\*,notes\*.tmp -ErrorAction SilentlyContinue     
 | 2026-11-17 | `fix/fact-guard-repair` | 摘要事实守卫（妹妹→养女拒收）+ 批量重修 rule 摘要 + 清理测试残留（notes/054） | 已上线 |
 | 2026-11-17 | `fix/graceful-restart-prefix` | 重启等待活跃生成（不再切断 SSE）+ 引擎块不再被抽成锚点 + 脏锚点清理（notes/055） | 已上线 |
 | 2026-11-19 | `feat/turbo-unlimited` | 接入 turbo 零扣费无限模式：引擎免费分支 + 前台「∞ 无限」档 + 自检脚本，额度池链路不动（notes/056） | 已上线（备份 backup-turbo-20261119-002629） |
-| 2026-11-19 | `feat/free-cost-watch` | 零扣费失效自检：`free_watch` 基线 + 会话开始前/生成前后对比 + `free_warn` 横幅 + `free_alert` 落盘（notes/056 §4.1） | 开发中 |
+| 2026-11-19 | `feat/free-cost-watch` | 零扣费失效自检：`free_watch` 基线 + 会话开始前/生成前后对比 + `free_warn` 横幅 + `free_alert` 落盘（notes/056 §4.1） | 已上线（备份 backup-freewatch-20261119-003559） |
 
 > 规矩：分支从 `main` 切出；质量门禁通过后可自行 commit / push / 部署 / 合并（见上「Claude 执行规范」）。
 > 不可逆操作（删数据 / 改库 / `.env.production` / force-push）前先确认。

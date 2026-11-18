@@ -112,6 +112,28 @@ D clean-zero OK    余额不变 → 不告警，基线更新
 > 它表示「免费模式期间余额掉了」，排查时先看 `phase=after`（一定是本次生成扣的）；
 > `phase=before` 则结合该号最近的付费使用记录判断。
 
+### 生产端告警链路实测（2026-11-19 00:4x）
+
+不对上游做任何破坏，只在 `webstate.json` 里把 5 个最低余额号的 `free_watch`
+基线临时改成 999，然后跑一次免费对话：
+
+```
+event: free_warn
+data: {"account":"b032","prev":999.0,"credit":0.02,"spent":998.98,"phase":"before",...}
+event: switch
+data: {"from":"b032","reason":"empty","detail":"上游返回空正文"}
+event: free_warn
+data: {"account":"b039","prev":999.0,"credit":0.47,"spent":998.53,"phase":"before",...}
+event: complete
+data: {...,"account":"b039","credit":0.47,"free":true,"model":"nalang-turbo-1115-16k"}
+```
+
+- 两个号各自在**生成前**触发告警，说明 `before` 分支生效；
+- `/site/pool` 的 `freeAlert` 同步为最后一次告警（前端轮询可显示）；
+- 顺带验证了空正文兜底：b032 返回空正文 → 自动换到 b039 并正常出文；
+- 测试后从 `/tmp/webstate.freewatch.bak` 还原，`freeAlert=None`、`free_watch=None`，
+  号池 `202` 个号、`158` 可用、总余额 `13497.11` 保持不变。
+
 ## 5. 回滚
 
 ```powershell

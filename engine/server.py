@@ -113,8 +113,22 @@ def card_candidates():
     _CARD_CACHE["key"], _CARD_CACHE["ids"] = key, ids
     return ids
 
+# —— 零扣费模型（notes/056，2026-11-19 落地）：上游对 nalang-turbo-* 系列不做积分扣减。
+# 与额度池方案互不干扰：免费模型走独立分支（不看池子余额、不扣站内积分、
+# 后台摘要也切到免费模型），apex/nalang 等付费模型的老链路原样保留。
+FREE_MODEL_PREFIX = "nalang-turbo-"
+FREE_MODEL = os.environ.get("FREE_MODEL", "nalang-turbo-1115-16k")
+FREE_MODELS = [
+    {"id": "nalang-turbo-1115-16k", "label": "∞ 无限 16K", "ctx": 16000,
+     "hint": "零扣费：上游 turbo 系列不扣积分", "free": True},
+    {"id": "nalang-turbo-1115-10k", "label": "∞ 无限 10K", "ctx": 10000,
+     "hint": "零扣费，上下文 10K", "free": True},
+    {"id": "nalang-turbo-0826-16k", "label": "∞ 无限 16K · 0826", "ctx": 16000,
+     "hint": "零扣费，旧版 turbo", "free": True},
+]
+
 # ctx = 上游模型上下文（chat.models 实测）。长对话优先选 32K 以上。
-MODELS = [
+MODELS = FREE_MODELS + [
     {"id": "x-apex-surge-0505", "label": "Surge 32K", "ctx": 32000,
      "hint": "默认档，稳定均衡"},
     {"id": "x-apex-pulse-0731-128k", "label": "Pulse 128K", "ctx": 128000,
@@ -138,6 +152,8 @@ DEFAULT_MODEL = "x-apex-flux-0217-16k"
 # 直接续写剧情（0 字 / 1000+ 字角色扮演），Dash 128K 因 strictModeration 稳定拒答；
 # 只有 Pulse 128K 两轮都稳定产出正经摘要，且单价更低（0.2 积分/1K）。
 SUMMARY_MODEL = os.environ.get("MEMORY_SUMMARY_MODEL", "x-apex-pulse-0731-128k")
+# 免费模式的后台摘要也用零扣费模型，否则每轮摘要都会从池子里扣一笔（notes/056）
+SUMMARY_MODEL_FREE = os.environ.get("MEMORY_SUMMARY_MODEL_FREE", FREE_MODEL)
 MEMORY_MODEL_SUMMARY = os.environ.get("MEMORY_MODEL_SUMMARY", "1") != "0"
 
 ROOT = os.environ.get("DZMM_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -443,6 +459,17 @@ def normalize_model(v):
     label_map = {m["label"].lower(): m["id"] for m in MODELS}
     return label_map.get(low, DEFAULT_MODEL)
 
+
+def is_free_model(model_id):
+    """零扣费模型判定：上游对 nalang-turbo-* 系列不做积分扣减（notes/056）。"""
+    return str(model_id or "").lower().startswith(FREE_MODEL_PREFIX)
+
+
+def model_meta(model_id):
+    for m in MODELS:
+        if m["id"] == model_id:
+            return m
+    return {}
 
 
 def _clean_surrogates(t):
@@ -1464,12 +1491,13 @@ def fresh_chat_for_card(cookie, card_id, session_id=None, active_chat=None):
     return None, "no_fresh_chat"
 
 
-def start_summary(pool, name, card_id, mem, history, stop_event=None):
+def start_summary(pool, name, card_id, mem, history, stop_event=None, free=False):
     """把摘要放到后台线程：不占 SSE 连接、不阻塞下一条消息。"""
     def run():
         try:
             st2 = load_state()
-            maybe_summarize(pool, name, st2, card_id, mem, history, stop_event=stop_event)
+            maybe_summarize(pool, name, st2, card_id, mem, history,
+                            stop_event=stop_event, free=free)
         except Exception as e:
             log("后台摘要失败：%s" % str(e)[:160], "warn")
 
@@ -1477,16 +1505,20 @@ def start_summary(pool, name, card_id, mem, history, stop_event=None):
     t.start()
 
 
-def summary_accounts(pool, st, primary, limit=3):
+def summary_accounts(pool, st, primary, limit=3, free=False):
     """摘要候选账号：原号优先，再按余额挑其它可用号。
 
     摘要失败最常见的原因是「原号刚被榨到 < 3.2」（upgrade_needed）或 cookie 失效
     （auth_error）。摘要与主对话解耦，可以换任意有额度的号来做。
+    free=True（零扣费模式）时不再看余额：摘要模型本身不扣积分，零余额号也能干活。
     """
     def usable(n):
         a = account_state(st, n)
-        return (not a.get("exhausted")) and (not a.get("disabled")) \
-               and (a.get("credit") or 0) >= MIN_PREPAY
+        if a.get("disabled"):
+            return False
+        if free:
+            return True
+        return (not a.get("exhausted")) and (a.get("credit") or 0) >= MIN_PREPAY
 
     out = []
     if primary in pool and usable(primary):
@@ -1500,7 +1532,7 @@ def summary_accounts(pool, st, primary, limit=3):
     return out
 
 
-def maybe_summarize(pool, name, st, card_id, mem, history, stop_event=None):
+def maybe_summarize(pool, name, st, card_id, mem, history, stop_event=None, free=False):
     """压缩旧消息；失败降级为规则摘要，绝不阻塞主流程。"""
     msgs = memlib.sanitize_history(history)
     up = memlib.summary_up(msgs, mem)
@@ -1528,10 +1560,11 @@ def maybe_summarize(pool, name, st, card_id, mem, history, stop_event=None):
     text = ""
     why = ""
     model_ok = False
+    sum_model = SUMMARY_MODEL_FREE if free else SUMMARY_MODEL
     if not MEMORY_MODEL_SUMMARY:
         why = "model_summary_off"
     elif chunks:
-        accts = summary_accounts(pool, st, name)
+        accts = summary_accounts(pool, st, name, free=free)
         if not accts:
             why = "no_account"
         for cand in accts:
@@ -1547,7 +1580,7 @@ def maybe_summarize(pool, name, st, card_id, mem, history, stop_event=None):
                         ch, running, pins,
                         recent=recent if i == len(chunks) - 1 else None)
                     res = generate(pool[cand]["cookie"], batch_cid, batch_card,
-                                   SUMMARY_MODEL, 800, prompt, lambda *a, **k: None,
+                                   sum_model, 800, prompt, lambda *a, **k: None,
                                    want_sug=False, stop_event=stop_event)
                     if res.get("status") != "ok":
                         ok_all = False
@@ -1628,6 +1661,7 @@ def run_site_chat(payload, emit, stop_event=None):
         emit("end", {"reason": "bad_request", "message": "内容为空"})
         return
     model = normalize_model(payload.get("model"))
+    free = is_free_model(model)
     ctx = model_ctx(model)
     max_tokens = clamp_tokens(payload.get("maxTokens"), ctx)
 
@@ -1676,7 +1710,13 @@ def run_site_chat(payload, emit, stop_event=None):
     cands = []
     for name in pool:
         a = account_state(st, name)
-        if a.get("exhausted") or a.get("disabled"):
+        if a.get("disabled"):
+            continue
+        if free:
+            # 零扣费模型不看信用卡余额：被榨干的号照样能无限对话（notes/056）
+            cands.append(((a.get("credit") or 0), name))
+            continue
+        if a.get("exhausted"):
             continue
         if (a.get("credit") or 0) < MIN_PREPAY:
             continue
@@ -1686,8 +1726,8 @@ def run_site_chat(payload, emit, stop_event=None):
     want_acct = (payload.get("account") or "").strip() or None
     if want_chat and want_acct and want_acct in pool:
         a = account_state(st, want_acct)
-        if not a.get("exhausted") and not a.get("disabled") \
-                and (a.get("credit") or 0) >= MIN_PREPAY:
+        if not a.get("disabled") and (free or (
+                not a.get("exhausted") and (a.get("credit") or 0) >= MIN_PREPAY)):
             # 优先用原会话所属的号，保证 chatId 与 owner 一致
             cands = [((a.get("credit") or 0), want_acct)] + \
                     [c for c in cands if c[1] != want_acct]
@@ -1734,8 +1774,9 @@ def run_site_chat(payload, emit, stop_event=None):
         emit("end", {"reason": "no_credit", "message": "池子里没有可用额度"})
         return
 
-    # 用户账本预检查：余额不够就不发起生成，避免白跑上游
-    if site_uid and float(user.get("credit") or 0) + 1e-9 < USER_PREPAY:
+    # 用户账本预检查：余额不够就不发起生成，避免白跑上游。
+    # 零扣费模型不计站内积分，也就不需要预检查（notes/056）。
+    if site_uid and not free and float(user.get("credit") or 0) + 1e-9 < USER_PREPAY:
         emit("end", {"reason": "user_credit",
                      "message": "积分不足（当前 %.2f，至少需要 %.1f），请先充值。" %
                                 (float(user.get("credit") or 0), USER_PREPAY)})
@@ -1747,8 +1788,8 @@ def run_site_chat(payload, emit, stop_event=None):
     for credit, name in cands:
         a = account_state(st, name)
         emit("account", {"name": name, "credit": a.get("credit")})
-        usable = (not a.get("exhausted") and not a.get("disabled")
-                  and (a.get("credit") or 0) >= MIN_PREPAY)
+        usable = (not a.get("disabled")) and (free or (
+            not a.get("exhausted") and (a.get("credit") or 0) >= MIN_PREPAY))
         # 只有「本会话当前绑定的那个号 + 那个 chat」允许续写。其它情况一律新建
         # **空**会话：换号后回到某个号以前建过的旧会话，模型会从那个旧轮次接着
         # 演，表现为剧情凭空倒退（notes/052）。
@@ -1826,6 +1867,15 @@ def run_site_chat(payload, emit, stop_event=None):
             emit("switch", {"from": name, "reason": "busy", "detail": "该账号正在生成中"})
             continue
         try:
+            # 零扣费模式先取一次实时余额做基线：状态文件里的 credit 可能早就过期，
+            # 拿它当基线会在「免费模型偷偷开始扣费」时误报/漏报（notes/056）。
+            base_credit = None
+            if free:
+                okb, cb, _u, _e = get_me(pool[name]["cookie"])
+                if okb:
+                    base_credit = round(cb, 2)
+                    a["credit"] = base_credit
+                    save_state(st)
             # 换号 = 新 chat：上游没有前文，只靠摘要会串回旧场景，补最近几轮原文。
             prev_chat = active_chat
             prev_acct = active_acct
@@ -1853,10 +1903,19 @@ def run_site_chat(payload, emit, stop_event=None):
             # classification=internal 不扣费；createByCard 幂等去重拿回同一 chatId，直接换号
             emit("switch", {"from": name, "reason": "internal", "detail": "upstream internal"})
             continue
+        if res["status"] == "ok" and free and not (res.get("text") or "").strip():
+            # 免费档偶发「200 + complete 但 0 字」（0826 实测）。别把空正文发给用户：
+            # 直接换下一个号重试，付费链路行为不变。
+            log("零扣费模型返回空正文（%s/%s），换号重试" % (name, str(cid)[:8]), "warn")
+            emit("switch", {"from": name, "reason": "empty",
+                            "detail": "上游返回空正文"})
+            continue
         if res["status"] == "ok":
-            # 建议兜底放在结算前：这次短生成的扣费也能体现在 credit 里
+            # 建议兜底放在结算前：这次短生成的扣费也能体现在 credit 里。
+            # 零扣费模式不做建议兜底：主生成已带 SUG_INSTR，兜底会额外打一次付费模型
+            # （Flux/Max），把「无限」变成「每轮偷偷扣一笔」（notes/056）。
             final_text = _sanitize_user_names(res["text"])
-            if SUG_INSTR and not SUG_BLOCK_RE.search(final_text):
+            if SUG_INSTR and not free and not SUG_BLOCK_RE.search(final_text):
                 try:
                     sug_items = suggest_followup(pool, st, name, final_text, stop_event=stop_event)
                     if sug_items:
@@ -1868,24 +1927,32 @@ def run_site_chat(payload, emit, stop_event=None):
                 a["credit"] = round(credit2, 2)
                 a["exhausted"] = credit2 < MIN_PREPAY
                 save_state(st)
-            # —— 本站用户：生成成功才扣费（失败/换号不扣）
+                if free and base_credit is not None and credit2 < base_credit - 0.05:
+                    # 免费模型开始扣费 = 上游策略变了；记一笔，方便立刻发现并回退回付费链路
+                    log("零扣费模型出现扣费：%s %s → %s（%.2f）"
+                        % (model, base_credit, credit2, base_credit - credit2), "warn")
+            # —— 本站用户：生成成功才扣费（失败/换号不扣）；零扣费模型不扣
             user_credit = None
-            if site_uid:
+            if site_uid and not free:
                 try:
                     u2 = userslib.charge(USERS_PATH, site_uid, USER_SETTLE,
                                          "生成扣费 · card %s" % card_id)
                     user_credit = u2["credit"] if u2 else None
                 except Exception as e:
                     log("用户扣费失败：%s" % str(e)[:120], "warn")
+            elif site_uid:
+                user_credit = float(user.get("credit") or 0)
             emit("complete", {"text": final_text, "account": name, "chatId": cid,
                               "cardId": card_id, "credit": a.get("credit"),
-                              "userCredit": user_credit})
+                              "userCredit": user_credit, "free": free,
+                              "model": model})
             # 用户已经拿到正文；摘要丢到后台，失败也不影响这次回复
             try:
                 _msgs = memlib.sanitize_history(history)
                 _up = memlib.summary_up(_msgs, mem)
                 if memlib.should_summarize(len(_msgs), mem, up=_up):
-                    start_summary(pool, name, card_id, mem, history, stop_event=stop_event)
+                    start_summary(pool, name, card_id, mem, history,
+                                  stop_event=stop_event, free=free)
             except Exception as e:
                 log("记忆更新失败：%s" % str(e)[:160], "warn")
             return
@@ -1893,8 +1960,11 @@ def run_site_chat(payload, emit, stop_event=None):
             if res.get("reason") == "internal":
                 emit("switch", {"from": name, "reason": "internal", "detail": "upstream internal"})
                 continue
-            a["exhausted"] = True
-            save_state(st)
+            if not free:
+                # 免费模式不落 exhausted：零余额号本来就该继续可用，
+                # 标脏会把整池状态改成「见底」，污染付费链路（notes/056）。
+                a["exhausted"] = True
+                save_state(st)
             emit("switch", {"from": name, "reason": "credit", "detail": res.get("reason"), "text": (res.get("text") or "")[:120]})
             continue
         if is_gate(res.get("error")):

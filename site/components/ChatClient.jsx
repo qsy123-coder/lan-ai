@@ -7,6 +7,10 @@ import SessionList from "./SessionList";
 import ThemeToggle, { ThemeSegments } from "./ThemeToggle";
 
 const MODELS = [
+  // 零扣费（notes/056）：上游对 nalang-turbo-* 系列不扣积分，可无限对话。
+  // 放最前面作为新用户默认档；付费模型链路完全不变，随时可切回。
+  { id: "nalang-turbo-1115-16k", label: "∞ 无限 16K（0 积分）", ctx: 16000, free: true },
+  { id: "nalang-turbo-1115-10k", label: "∞ 无限 10K（0 积分）", ctx: 10000, free: true },
   // 默认 Turbo(Flux)：上游平台只对它和 nalang-max 下发 suggestedReplies（三建议块）
   { id: "x-apex-flux-0217-16k", label: "Turbo 16K", ctx: 16000 },
   { id: "x-apex-surge-0505", label: "Surge 32K", ctx: 32000 },
@@ -42,6 +46,9 @@ function clampTokens(v) {
   if (!Number.isFinite(n)) return TOKEN_DEFAULT;
   return Math.min(TOKEN_MAX, Math.max(TOKEN_MIN, n));
 }
+
+// 零扣费模型（notes/056）：id 前缀 nalang-turbo-，上游不扣积分。
+const isFreeModel = (id) => String(id || "").toLowerCase().startsWith("nalang-turbo-");
 
 const SKEY = "lg.sessions.v3";
 const MKEY = "lg.model.v2";
@@ -819,9 +826,11 @@ export default function ChatClient({ card, initialSession }) {
             const mine =
               d.userCredit != null ? ` · 我的积分 ${Number(d.userCredit).toFixed(2)}` : "";
             setNote(
-              d.credit != null
-                ? `完成 · ${d.account} · 余额 ${Number(d.credit).toFixed(2)}${mine}`
-                : `完成${mine}`
+              d.free
+                ? `完成 · 无限模型零扣费${mine}`
+                : d.credit != null
+                  ? `完成 · ${d.account} · 余额 ${Number(d.credit).toFixed(2)}${mine}`
+                  : `完成${mine}`
             );
             loadPool();
           } else if (ev === "switch") {
@@ -1072,7 +1081,7 @@ export default function ChatClient({ card, initialSession }) {
             <span className="spacer" />
             {pool && !pool.offline ? (
               <span className={`pool-badge head-pool ${pool.total < 3.4 ? "empty" : ""}`}>
-                池 {Number(pool.total).toFixed(1)}
+                {isFreeModel(model) ? "∞ 零扣费" : `池 ${Number(pool.total).toFixed(1)}`}
               </span>
             ) : null}
             <ThemeToggle className="head-theme" />
@@ -1101,9 +1110,10 @@ export default function ChatClient({ card, initialSession }) {
 
           {note ? <div className="chat-note">{note}</div> : null}
 
-          {pool && !pool.offline && pool.usable === 0 ? (
+          {pool && !pool.offline && pool.usable === 0 && !isFreeModel(model) ? (
             <div className="pool-empty">
-              号池额度已用完（{pool.count} 个号全部见底）。开新号后这里会自动恢复。
+              号池额度已用完（{pool.count} 个号全部见底）。开新号后这里会自动恢复；
+              需要继续对话可切到「∞ 无限」模型（零扣费，不占号池额度）。
             </div>
           ) : null}
 

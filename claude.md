@@ -161,6 +161,26 @@ project/
 - 绘图：`单次消耗 1 额度`、`六连抽消耗 6 额度`。
 - VIP：解锁"使用权限"，**每次使用仍扣积分**；`综合积分 = 普通积分 + 限时积分`。
 
+### 零扣费模型（2026-11-19 落地，notes/056）
+
+上游对 **`nalang-turbo-*` 系列不做积分扣减**（外部实测稿：12 次对话余额 91.47→91.47，
+对照 apex 档每次 1.79~2.30）。「澜」已把它接成独立的**无限模式**，与额度池并行：
+
+| 模式 | 模型 | 账号要求 | 本站积分 | 后台摘要 |
+|---|---|---|---|---|
+| 无限模式 | `nalang-turbo-1115-16k`（默认档）/ `1115-10k` / `0826-16k` | 任意未停用号，不看余额 | 不扣 | turbo（零扣费） |
+| 额度池（原样） | apex / nalang 付费档 | `credit ≥ 3.2` | 成功扣 2.1 | Pulse 128K |
+
+- 引擎侧：`FREE_MODEL_PREFIX` / `is_free_model()`；`run_site_chat` 免费分支不看
+  `exhausted` 与 `MIN_PREPAY`、不扣站内积分、不做建议兜底、`upgrade_needed` 不落盘；
+  摘要模型走 `MEMORY_SUMMARY_MODEL_FREE`。
+- 前台：模型下拉前三项是「∞ 无限」；完成提示 `完成 · 无限模型零扣费`。
+- 自检：`python scripts/verify_free.py`（N 次 turbo 生成，前后比 credit，差额 0 才算过）。
+- 保险：每次免费生成后引擎比对 `getMe` 的 credit，出现扣费立即写
+  `零扣费模型出现扣费` 告警日志。
+- **不影响额度池**：付费链路（选号门槛、扣费、建议兜底、Pulse 摘要）一行未动；
+  回滚只需把前端模型切回任意付费档。
+
 ### tRPC 错误信封（实测）
 
 - `401` → `{"message":"UNAUTHORIZED","code":-32001,"data":{"path":"<PROC>","authBlock":null,"guestBlocked":false,"blockedDrawIds":null}}`
@@ -680,6 +700,7 @@ Remove-Item -Recurse -Force out\*,notes\*.tmp -ErrorAction SilentlyContinue     
 | 2026-11-17 | `fix/summary-account-fallback` | 摘要账号失败自动换号 + fresh chat 判空改看 user 消息 + 线上真实测试（notes/053） | 已上线 |
 | 2026-11-17 | `fix/fact-guard-repair` | 摘要事实守卫（妹妹→养女拒收）+ 批量重修 rule 摘要 + 清理测试残留（notes/054） | 已上线 |
 | 2026-11-17 | `fix/graceful-restart-prefix` | 重启等待活跃生成（不再切断 SSE）+ 引擎块不再被抽成锚点 + 脏锚点清理（notes/055） | 已上线 |
+| 2026-11-19 | `feat/turbo-unlimited` | 接入 turbo 零扣费无限模式：引擎免费分支 + 前台「∞ 无限」档 + 自检脚本，额度池链路不动（notes/056） | 开发中 |
 
 > 规矩：分支从 `main` 切出；质量门禁通过后可自行 commit / push / 部署 / 合并（见上「Claude 执行规范」）。
 > 不可逆操作（删数据 / 改库 / `.env.production` / force-push）前先确认。

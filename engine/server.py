@@ -1308,14 +1308,22 @@ SUG_MODEL = os.environ.get("SUG_MODEL", "x-apex-flux-0217-16k")
 SUG_MODEL_BACKUP = os.environ.get("SUG_MODEL_BACKUP", "nalang-max-0826")
 
 
-def suggest_followup(pool, st, name, text, stop_event=None):
-    """主回复没吐 <sug> 时，用同一账号的通用会话补三条接话建议。
+def suggest_followup(pool, st, name, text, stop_event=None, card_id=None):
+    """主回复没吐 <sug> 时，补三条接话建议。
 
     必须用「平台会 armed 建议块」的模型（实测 Flux / Max 会下发 suggestedReplies，
     Surge / Pulse / Dash 不会）—— 靠模型自觉遵守格式提示只有约 50% 命中率。
     输出很短，按 token 结算的实际扣费远低于一次正常生成。
+
+    card_id 给当前对话的卡：建议必须基于当前卡剧情。之前误用 ensure_chat 的
+    通用会话（账号第一次的卡 + 摘要历史），建议偏到别的卡（notes/060）。
     """
-    cid, card = ensure_chat(st, pool, name, lambda *a, **k: None)
+    if card_id:
+        cid, _err = ensure_chat_for_card(st, pool, name, card_id,
+                                         lambda *a, **k: None)
+        card = card_id
+    else:
+        cid, card = ensure_chat(st, pool, name, lambda *a, **k: None)
     if not cid:
         return []
     tail = _tail_prompt(_strip_status_blocks(_strip_sug(text)), 800)
@@ -1991,7 +1999,8 @@ def run_site_chat(payload, emit, stop_event=None):
             elif SUG_INSTR and not SUG_BLOCK_RE.search(final_text):
                 try:
                     sug_items = suggest_followup(pool, st, name, final_text,
-                                                 stop_event=stop_event)
+                                                 stop_event=stop_event,
+                                                 card_id=card_id)
                     if sug_items:
                         final_text = _append_sug(final_text, sug_items)
                 except Exception as e:

@@ -1410,7 +1410,7 @@ def suggest_own_api(text, card_id=None):
             {"role": "user", "content": prompt},
         ],
         "temperature": 1.0,
-        "max_tokens": 200,
+        "max_tokens": 800,
     }, ensure_ascii=False).encode("utf-8")
     headers = {"Authorization": "Bearer " + OWN_API_KEY,
                "Content-Type": "application/json"}

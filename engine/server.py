@@ -1307,34 +1307,6 @@ def _append_sug(text, items):
 SUG_MODEL = os.environ.get("SUG_MODEL", "x-apex-flux-0217-16k")
 SUG_MODEL_BACKUP = os.environ.get("SUG_MODEL_BACKUP", "nalang-max-0826")
 
-# 免费模型（nalang-turbo-*）不 armed suggestedReplies，但主生成带 SUG_INSTR 时，
-# 它常以「建议一/二/三：…」或「- / 1.」项目符号的自由文本回应（格式不稳定）。
-# 这里剥状态面板后把这类建议行抠出来转成 <sug> 块，零额外调用、零扣费，
-# 状态面板垃圾靠 SUG_JUNK_RE 过滤（notes/057）。
-SUG_ADVICE_RE = re.compile(r"^\s*建议[一二三四五六七八九十][:：]\s*")
-SUG_BULLET_RE = re.compile(r"^\s*(?:\d+[.、)）]|[-*·•])\s*")
-SUG_TAG_RE = re.compile(r"</?[a-zA-Z][^>]*>")
-SUG_JUNK_RE = re.compile(r"[【】\[\]*%]|📊|档案|阶段|Mode|锁定|天平|死穴|软肋|借口壳|数值")
-
-
-def _free_sug(text):
-    """免费模型不产干净 <sug>：剥状态面板，把正文尾的建议行转成建议块。
-
-    返回 (clean_body, items)。建议行按「建议X： / - / 1.」前缀识别，从正文移除。
-    """
-    body = _strip_status_blocks(_strip_sug(text or ""))
-    items = []
-    kept = []
-    for line in body.splitlines():
-        m = SUG_ADVICE_RE.match(line) or SUG_BULLET_RE.match(line)
-        if m:
-            v = SUG_TAG_RE.sub("", line[m.end():]).strip().strip("「」『』“”\"'*")
-            if v and len(v) <= 40 and not SUG_JUNK_RE.search(v) and v not in items:
-                items.append(v)
-            continue
-        kept.append(line)
-    return "\n".join(kept).strip(), items[:3]
-
 
 def suggest_followup(pool, st, name, text, stop_event=None):
     """主回复没吐 <sug> 时，用同一账号的通用会话补三条接话建议。
@@ -2012,11 +1984,10 @@ def run_site_chat(payload, emit, stop_event=None):
             # 建议兜底放在结算前：这次短生成的扣费也能体现在 credit 里。
             final_text = _sanitize_user_names(res["text"])
             if free:
-                # 免费模型不产干净 <sug>（上游不 armed），还常把状态面板写进 <sug>。
-                # 剥掉一切 <sug>，把正文尾的建议行转成建议块，零额外调用、零扣费（notes/057）。
-                final_text, advice = _free_sug(final_text)
-                if advice:
-                    final_text = _append_sug(final_text, advice)
+                # 免费模型不产「动态接话建议」：它只吐卡片固定模板的「建议X/-/1.」行
+                # 或状态面板，抠出来跟当前剧情弱相关/不相关。这里只剥掉写进 <sug> 的
+                # 状态面板垃圾，不补卡片（宁缺毋滥）；要相关卡片切付费档（notes/057）。
+                final_text = _strip_sug(final_text)
             elif SUG_INSTR and not SUG_BLOCK_RE.search(final_text):
                 try:
                     sug_items = suggest_followup(pool, st, name, final_text,

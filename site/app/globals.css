@@ -5248,3 +5248,12 @@ html[data-theme="dark"] .nd-switch > span {
 .home-pager-btn:hover { border-color: rgba(128, 128, 128, 0.7); }
 .home-pager-btn.off { opacity: 0.45; }
 .home-pager-info { white-space: nowrap; }
+
+/* custom suggestion cards */
+.custom-sug { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 0 16px; margin: 0 0 10px; }
+.csug-item { display: inline-flex; align-items: center; gap: 3px; }
+.csug-del { width: 18px; height: 18px; border-radius: 50%; border: 1px solid rgba(128,128,128,0.35); background: transparent; color: inherit; font-size: 13px; line-height: 1; cursor: pointer; padding: 0; opacity: 0.55; }
+.csug-del:hover { opacity: 1; }
+.csug-plus { height: 34px; padding: 0 14px; border-radius: 999px; border: 1px dashed rgba(128,128,128,0.45); background: transparent; color: inherit; font-size: 12.5px; cursor: pointer; }
+.csug-add { display: inline-flex; gap: 6px; align-items: center; }
+.csug-add .inp { width: 220px; height: 34px; }

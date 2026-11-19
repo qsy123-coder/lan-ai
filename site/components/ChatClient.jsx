@@ -57,6 +57,9 @@ const mkey = (id, sid) => `lg.msgs.v3.${id}${sid ? ":" + sid : ""}`;
 // 被「彻底删除」的卡片：删除后不再从 seeds.json 恢复旧历史，
 // 否则删了会话、清了记忆，重新点开卡又会被上游快照复活。
 const DKEY = "lg.deleted.cards";
+// 自定义建议卡片：按卡片存，用户自己加几句固定快捷句，点一下就能发。
+const CKEY = (id) => `lg.custom.sug.v1.${id}`;
+const CUSTOM_MAX = 12;
 const uid = () => Math.random().toString(36).slice(2, 9);
 const newSid = () =>
   (globalThis.crypto && globalThis.crypto.randomUUID && globalThis.crypto.randomUUID()) ||
@@ -239,6 +242,10 @@ export default function ChatClient({ card, initialSession }) {
   const [pool, setPool] = useState(null);
   // 零扣费失效告警（notes/056）：服务端发现免费模型开始扣费时置位，前端常驻提示
   const [freeAlert, setFreeAlert] = useState(null);
+  // 自定义建议卡片：用户自己预设的固定快捷句，点一下直接发
+  const [customSug, setCustomSug] = useState([]);
+  const [customInput, setCustomInput] = useState("");
+  const [showCustomAdd, setShowCustomAdd] = useState(false);
 
   const box = useRef(null);
   const taRef = useRef(null);
@@ -283,6 +290,20 @@ export default function ChatClient({ card, initialSession }) {
       localStorage.setItem(RKEY, JSON.stringify(rounds));
     } catch {}
   }, [rounds]);
+
+  // 自定义建议卡片：按卡加载 / 持久化
+  useEffect(() => {
+    const v = readJSON(CKEY(card.id), []);
+    setCustomSug(Array.isArray(v) ? v.slice(0, CUSTOM_MAX) : []);
+    setCustomInput("");
+    setShowCustomAdd(false);
+  }, [card.id]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CKEY(card.id), JSON.stringify(customSug));
+    } catch {}
+  }, [customSug, card.id]);
 
   // 模型选择持久化
   useEffect(() => {
@@ -974,6 +995,20 @@ export default function ChatClient({ card, initialSession }) {
     setNote("已清空本会话（含记忆）");
   }, [card.id, save, sessionId]);
 
+  // 自定义建议卡片：加一条 / 删一条
+  const addCustom = () => {
+    const v = customInput.trim().replace(/\s+/g, " ");
+    if (!v || customSug.includes(v)) {
+      setCustomInput("");
+      return;
+    }
+    setCustomSug([...customSug, v].slice(0, CUSTOM_MAX));
+    setCustomInput("");
+    setShowCustomAdd(false);
+  };
+
+  const delCustom = (idx) => setCustomSug(customSug.filter((_, i) => i !== idx));
+
   // 从列表移除一个会话：消息体 + 索引 + 该会话上游存档；共享记忆不动。
   const dropSession = useCallback(
     (sid) => {
@@ -1262,6 +1297,55 @@ export default function ChatClient({ card, initialSession }) {
                 </div>
               </div>
             ) : null}
+          </div>
+
+          <div className="custom-sug">
+            {customSug.map((txt, i) => (
+              <span className="csug-item" key={txt}>
+                <button className="sug-chip press" onClick={() => send(txt)} disabled={busy}>
+                  {txt}
+                </button>
+                <button
+                  className="csug-del"
+                  onClick={() => delCustom(i)}
+                  aria-label="删除自定义建议"
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            {showCustomAdd ? (
+              <span className="csug-add">
+                <input
+                  className="inp"
+                  value={customInput}
+                  onChange={(e) => setCustomInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addCustom();
+                    }
+                    if (e.key === "Escape") setShowCustomAdd(false);
+                  }}
+                  placeholder="输入一条自定义建议，回车添加"
+                  maxLength={60}
+                />
+                <button
+                  className="btn btn-ghost press"
+                  onClick={addCustom}
+                  disabled={!customInput.trim()}
+                >
+                  添加
+                </button>
+                <button className="btn btn-ghost press" onClick={() => setShowCustomAdd(false)}>
+                  取消
+                </button>
+              </span>
+            ) : (
+              <button className="csug-plus press" onClick={() => setShowCustomAdd(true)}>
+                + 自定义
+              </button>
+            )}
           </div>
 
           <div className="composer">

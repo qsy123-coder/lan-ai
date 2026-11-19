@@ -707,6 +707,7 @@ Remove-Item -Recurse -Force out\*,notes\*.tmp -ErrorAction SilentlyContinue     
 | 2026-11-19 | `feat/turbo-unlimited` | 接入 turbo 零扣费无限模式：引擎免费分支 + 前台「∞ 无限」档 + 自检脚本，额度池链路不动（notes/056） | 已上线（备份 backup-turbo-20261119-002629） |
 | 2026-11-19 | `feat/free-cost-watch` | 零扣费失效自检：`free_watch` 基线 + 会话开始前/生成前后对比 + `free_warn` 横幅 + `free_alert` 落盘（notes/056 §4.1） | 已上线（备份 backup-freewatch-20261119-003559） |
 | 2026-11-19 | `fix/free-model-suggestions` | 免费模型（∞ 无限）无底部提示词卡片：`_free_sug` 从主生成正文抠建议行，零额外调用/扣费，付费链路不变（notes/057） | 已上线 |
+| 2026-11-19 | `fix/continue-empty-shell` | 「继续」跳回卡片开场：复用空壳会话（只有卡片开场、无 user 消息）也按 fresh 注入摘要+最近原文（notes/058） | 已上线（备份 backup-empty-shell-20261119-223132） |
 
 > 规矩：分支从 `main` 切出；质量门禁通过后可自行 commit / push / 部署 / 合并（见上「Claude 执行规范」）。
 > 不可逆操作（删数据 / 改库 / `.env.production` / force-push）前先确认。

@@ -1285,33 +1285,54 @@ def _append_sug(text, items):
 
 SUG_MODEL = os.environ.get("SUG_MODEL", "x-apex-flux-0217-16k")
 SUG_MODEL_BACKUP = os.environ.get("SUG_MODEL_BACKUP", "nalang-max-0826")
+# 免费模式（nalang-turbo-*）的建议兜底也用零扣费模型，不额外打付费 Flux/Max，
+# 否则「无限」会变成「每轮偷偷扣一笔」（notes/056）。
+SUG_MODEL_FREE = os.environ.get("SUG_MODEL_FREE", "nalang-turbo-1115-16k")
+SUG_MODEL_FREE_BACKUP = os.environ.get("SUG_MODEL_FREE_BACKUP", "nalang-turbo-0826-16k")
 
 
-def suggest_followup(pool, st, name, text, stop_event=None):
+def suggest_followup(pool, st, name, text, stop_event=None, free=False):
     """主回复没吐 <sug> 时，用同一账号的通用会话补三条接话建议。
 
-    必须用「平台会 armed 建议块」的模型（实测 Flux / Max 会下发 suggestedReplies，
-    Surge / Pulse / Dash 不会）—— 靠模型自觉遵守格式提示只有约 50% 命中率。
+    付费模式必须用「平台会 armed 建议块」的模型（实测 Flux / Max 会下发
+    suggestedReplies，Surge / Pulse / Dash 不会）—— 靠模型自觉遵守格式提示
+    只有约 50% 命中率。免费模式（nalang-turbo-*）不 armed suggestedReplies，
+    改用零扣费模型 + 显式要求输出 <sug> 块，命中率略低但仍是零扣费。
     输出很短，按 token 结算的实际扣费远低于一次正常生成。
     """
     cid, card = ensure_chat(st, pool, name, lambda *a, **k: None)
     if not cid:
         return []
     tail = _tail_prompt(_strip_sug(text), 800)
-    prompt = (
-        "下面是角色对话的最后一段。请给出三条简短的接话建议（每条不超过 20 字）。\n\n"
-        + tail
-    )
-    for m in (SUG_MODEL, SUG_MODEL_BACKUP):
+    if free:
+        # 免费模型不会下发 suggestedReplies，只能让它自己吐 <sug> 块。
+        prompt = (
+            "下面是角色对话的最后一段。\n\n" + tail + "\n\n"
+            "请直接输出一行三条接话建议（用户接下来可能说的话，每条不超过 20 字），"
+            "格式严格为 <sug>建议一|建议二|建议三</sug>，不要输出任何其它文字。"
+        )
+        models = (SUG_MODEL_FREE, SUG_MODEL_FREE_BACKUP)
+    else:
+        prompt = (
+            "下面是角色对话的最后一段。请给出三条简短的接话建议（每条不超过 20 字）。\n\n"
+            + tail
+        )
+        models = (SUG_MODEL, SUG_MODEL_BACKUP)
+    for m in models:
         res = generate(pool[name]["cookie"], cid, card, m, 400, prompt,
                        lambda *a, **k: None, want_sug=False, stop_event=stop_event)
         body = res.get("text") or ""
         hit = SUG_BLOCK_RE.search(body)
-        if not hit:
+        inner = None
+        if hit:
+            inner = hit.group(0)[len("<sug>"):-len("</sug>")]
+        elif free:
+            # 免费模型偶发不带 <sug> 标签、只吐「|」或换行分隔的裸列表，兜底解析。
+            inner = re.sub(r"[\n|]", "|", body)
+        if not inner:
             continue
-        inner = hit.group(0)[len("<sug>"):-len("</sug>")]
         items = [x.strip() for x in inner.split('|')]
-        items = [x for x in items if x][:3]
+        items = [x for x in items if x and len(x) <= 40][:3]
         if items:
             log("建议兜底 %s：%d 条" % (m, len(items)))
             return items
@@ -1947,12 +1968,14 @@ def run_site_chat(payload, emit, stop_event=None):
             continue
         if res["status"] == "ok":
             # 建议兜底放在结算前：这次短生成的扣费也能体现在 credit 里。
-            # 零扣费模式不做建议兜底：主生成已带 SUG_INSTR，兜底会额外打一次付费模型
-            # （Flux/Max），把「无限」变成「每轮偷偷扣一笔」（notes/056）。
+            # 免费模式用零扣费模型做兜底（SUG_MODEL_FREE），不额外打付费 Flux/Max，
+            # 保住「无限」承诺；若免费模型开始扣费，结算前的 getMe 与 free_watch
+            # 仍会照常告警（notes/056）。
             final_text = _sanitize_user_names(res["text"])
-            if SUG_INSTR and not free and not SUG_BLOCK_RE.search(final_text):
+            if SUG_INSTR and not SUG_BLOCK_RE.search(final_text):
                 try:
-                    sug_items = suggest_followup(pool, st, name, final_text, stop_event=stop_event)
+                    sug_items = suggest_followup(pool, st, name, final_text,
+                                                 stop_event=stop_event, free=free)
                     if sug_items:
                         final_text = _append_sug(final_text, sug_items)
                 except Exception as e:

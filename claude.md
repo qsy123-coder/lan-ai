@@ -172,7 +172,8 @@ project/
 | 额度池（原样） | apex / nalang 付费档 | `credit ≥ 3.2` | 成功扣 2.1 | Pulse 128K |
 
 - 引擎侧：`FREE_MODEL_PREFIX` / `is_free_model()`；`run_site_chat` 免费分支不看
-  `exhausted` 与 `MIN_PREPAY`、不扣站内积分、不做建议兜底、`upgrade_needed` 不落盘；
+  `exhausted` 与 `MIN_PREPAY`、不扣站内积分、`upgrade_needed` 不落盘；
+  建议兜底走零扣费模型（`SUG_MODEL_FREE` / `SUG_MODEL_FREE_BACKUP`），
   摘要模型走 `MEMORY_SUMMARY_MODEL_FREE`。
 - 前台：模型下拉前三项是「∞ 无限」；完成提示 `完成 · 无限模型零扣费`。
 - 自检：`python scripts/verify_free.py`（N 次 turbo 生成，前后比 credit，差额 0 才算过）。
@@ -705,6 +706,7 @@ Remove-Item -Recurse -Force out\*,notes\*.tmp -ErrorAction SilentlyContinue     
 | 2026-11-17 | `fix/graceful-restart-prefix` | 重启等待活跃生成（不再切断 SSE）+ 引擎块不再被抽成锚点 + 脏锚点清理（notes/055） | 已上线 |
 | 2026-11-19 | `feat/turbo-unlimited` | 接入 turbo 零扣费无限模式：引擎免费分支 + 前台「∞ 无限」档 + 自检脚本，额度池链路不动（notes/056） | 已上线（备份 backup-turbo-20261119-002629） |
 | 2026-11-19 | `feat/free-cost-watch` | 零扣费失效自检：`free_watch` 基线 + 会话开始前/生成前后对比 + `free_warn` 横幅 + `free_alert` 落盘（notes/056 §4.1） | 已上线（备份 backup-freewatch-20261119-003559） |
+| 2026-11-19 | `fix/free-model-suggestions` | 免费模型（∞ 无限）无底部提示词卡片：建议兜底改用零扣费模型，付费链路不变（notes/057） | 待部署 |
 
 > 规矩：分支从 `main` 切出；质量门禁通过后可自行 commit / push / 部署 / 合并（见上「Claude 执行规范」）。
 > 不可逆操作（删数据 / 改库 / `.env.production` / force-push）前先确认。

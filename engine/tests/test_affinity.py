@@ -107,6 +107,32 @@ class FreshChatTest(unittest.TestCase):
                          (None, "active_chat_reused"))
 
 
+class ChatHasHistoryTest(unittest.TestCase):
+    """notes/058：复用的会话可能是「空壳」，只有卡片开场没有 user 消息。"""
+
+    def setUp(self):
+        self.old = s.fetch_chat_messages
+        self.messages = None
+        s.fetch_chat_messages = lambda cookie, cid: (self.messages, "")
+
+    def tearDown(self):
+        s.fetch_chat_messages = self.old
+
+    def test_only_opening_is_not_history(self):
+        self.messages = [{"role": "assistant", "content": "卡片开场"}]
+        self.assertEqual(s.chat_has_history("ck", "c1"), (False, ""))
+
+    def test_user_message_counts_as_history(self):
+        self.messages = [{"role": "assistant", "content": "卡片开场"},
+                         {"role": "user", "content": "继续"}]
+        self.assertEqual(s.chat_has_history("ck", "c1"), (True, ""))
+
+    def test_read_failure_is_none(self):
+        self.messages = None
+        has_hist, _ = s.chat_has_history("ck", "c1")
+        self.assertIsNone(has_hist)
+
+
 class RecentTurnsTest(unittest.TestCase):
     def test_last_assistant_keeps_tail(self):
         tail = "停在玄关：她把门反锁，回头看你。"

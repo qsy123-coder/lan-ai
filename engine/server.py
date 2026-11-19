@@ -781,7 +781,10 @@ def generate(cookie, chat_id, card_id, model, max_tokens, prompt, emit, history=
 
     text = _append_sug("".join(text_parts), suggest)
     if classification:
-        return {"status": "exhausted", "reason": classification, "text": text}
+        # 保留 upgradeReason：credit 才是真余额不足；trial/vip 是档位/会员限制，
+        # 账号余额还在，换档位即可用，不能标 exhausted（notes/057）。
+        return {"status": "exhausted", "reason": classification,
+                "upgradeReason": reason, "text": text}
     if not done and not text:
         return {"status": "error", "error": "空响应（无 token 且无 complete）"}
     return {"status": "ok", "text": text, "done": done}
@@ -2056,12 +2059,20 @@ def run_site_chat(payload, emit, stop_event=None):
             if res.get("reason") == "internal":
                 emit("switch", {"from": name, "reason": "internal", "detail": "upstream internal"})
                 continue
-            if not free:
+            # upgrade_needed 分两种：upgradeReason=credit 才是余额不足（标 exhausted）；
+            # trial/vip 只是这个号用不了这个档位，余额还在、换档位即可用，标 exhausted
+            # 会把高余额号打脏，导致误报「所有账号都没能完成」（notes/057）。
+            up = res.get("upgradeReason")
+            not_broke = res.get("reason") == "upgrade_needed" and up and up != "credit"
+            if not free and not not_broke:
                 # 免费模式不落 exhausted：零余额号本来就该继续可用，
                 # 标脏会把整池状态改成「见底」，污染付费链路（notes/056）。
                 a["exhausted"] = True
                 save_state(st)
-            emit("switch", {"from": name, "reason": "credit", "detail": res.get("reason"), "text": (res.get("text") or "")[:120]})
+            emit("switch", {"from": name,
+                            "reason": "upgrade_needed" if not_broke else "credit",
+                            "detail": up or res.get("reason"),
+                            "text": (res.get("text") or "")[:120]})
             continue
         if is_gate(res.get("error")):
             gate_hits += 1

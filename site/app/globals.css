@@ -5257,3 +5257,13 @@ html[data-theme="dark"] .nd-switch > span {
 .csug-plus { height: 34px; padding: 0 14px; border-radius: 999px; border: 1px dashed rgba(128,128,128,0.45); background: transparent; color: inherit; font-size: 12.5px; cursor: pointer; }
 .csug-add { display: inline-flex; gap: 6px; align-items: center; }
 .csug-add .inp { width: 220px; height: 34px; }
+/* own-sug toggle (right panel) */
+.own-sug-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 14px 0 4px; }
+.own-sug-txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.own-sug-txt b { font-size: 13px; font-weight: 600; }
+.own-sug-txt .tip { font-size: 11.5px; opacity: 0.6; line-height: 1.4; }
+.switch { position: relative; flex: 0 0 auto; width: 44px; height: 24px; border-radius: 999px; border: 1px solid rgba(128,128,128,0.4); background: rgba(128,128,128,0.18); padding: 0; cursor: pointer; transition: background 160ms, border-color 160ms; }
+.switch .knob { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.25); transition: left 160ms; }
+.switch.on { background: rgba(85,123,121,0.85); border-color: rgba(85,123,121,0.9); }
+.switch.on .knob { left: 22px; }
+.switch:disabled { opacity: 0.5; cursor: default; }

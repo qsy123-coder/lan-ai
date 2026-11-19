@@ -60,6 +60,8 @@ const DKEY = "lg.deleted.cards";
 // 自定义建议卡片：按卡片存，用户自己加几句固定快捷句，点一下就能发。
 const CKEY = (id) => `lg.custom.sug.v1.${id}`;
 const CUSTOM_MAX = 12;
+// 自建建议卡片开关（右栏），控制是否用用户自己的 API key 额外生成 3 条
+const OKEY = "lg.own.sug.v1";
 const uid = () => Math.random().toString(36).slice(2, 9);
 const newSid = () =>
   (globalThis.crypto && globalThis.crypto.randomUUID && globalThis.crypto.randomUUID()) ||
@@ -262,6 +264,8 @@ export default function ChatClient({ card, initialSession }) {
   const [customSug, setCustomSug] = useState([]);
   const [customInput, setCustomInput] = useState("");
   const [showCustomAdd, setShowCustomAdd] = useState(false);
+  // 自建建议卡片开关：是否用用户自己的 API key 额外生成 3 条（默认开）
+  const [ownSug, setOwnSug] = useState(true);
 
   const box = useRef(null);
   const taRef = useRef(null);
@@ -320,6 +324,18 @@ export default function ChatClient({ card, initialSession }) {
       localStorage.setItem(CKEY(card.id), JSON.stringify(customSug));
     } catch {}
   }, [customSug, card.id]);
+
+  // 自建建议开关：全局（不分卡）持久化
+  useEffect(() => {
+    const v = readJSON(OKEY, true);
+    setOwnSug(v !== false);
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(OKEY, JSON.stringify(!!ownSug));
+    } catch {}
+  }, [ownSug]);
 
   // 模型选择持久化
   useEffect(() => {
@@ -856,6 +872,8 @@ export default function ChatClient({ card, initialSession }) {
             account: seedAcctRef.current || undefined,
             // 撤回/重新生成：让引擎丢掉上游旧会话，从当前 head 重开一条
             rewind: rewind || undefined,
+            // 自建建议开关：关掉时引擎不调用户自己的 API（省 key 额度）
+            ownSug: !!ownSug,
           }),
           signal: ctl.signal,
         });
@@ -930,7 +948,7 @@ export default function ChatClient({ card, initialSession }) {
         taRef.current?.focus();
       }
     },
-    [input, busy, msgs, card.id, model, maxTokens, rounds, save, loadMemory, kickReveal, stopReveal]
+    [input, busy, msgs, card.id, model, maxTokens, rounds, ownSug, save, loadMemory, kickReveal, stopReveal]
   );
 
   // 把本机这条会话的完整消息上传到引擎（手机 → 云端），其它设备即可拉到。
@@ -1491,6 +1509,24 @@ export default function ChatClient({ card, initialSession }) {
                     </option>
                   ))}
                 </select>
+
+                <div className="own-sug-row">
+                  <div className="own-sug-txt">
+                    <b>DeepSeek 建议卡片</b>
+                    <span className="tip">用你的 API key 多生成 3 条推剧情建议</span>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={ownSug}
+                    aria-label="DeepSeek 建议卡片开关"
+                    className={`switch press ${ownSug ? "on" : ""}`}
+                    onClick={() => setOwnSug((v) => !v)}
+                    disabled={busy}
+                  >
+                    <span className="knob" />
+                  </button>
+                </div>
 
                 <div className="divider" />
                 <label className="fld">长期记忆</label>

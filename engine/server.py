@@ -2093,9 +2093,11 @@ def run_site_chat(payload, emit, stop_event=None):
                         final_text = _append_sug(final_text, sug_items)
                 except Exception as e:
                     log("建议补全失败：%s" % str(e)[:120], "warn")
-            # 我的 API key 生成额外 3 条建议（可选），合并成 6 条（3 原 + 3 我）
+            # 我的 API key 生成额外 3 条建议（可选），合并成 6 条（3 原 + 3 我）。
+            # 前端右栏开关关闭（ownSug=false）时不调，省 key 额度。
             try:
-                own_items = suggest_own_api(final_text, card_id)
+                own_items = ([] if payload.get("ownSug") is False
+                             else suggest_own_api(final_text, card_id))
                 if own_items:
                     final_text = _merge_sug(final_text, own_items)
             except Exception as e:

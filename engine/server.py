@@ -1873,8 +1873,15 @@ def run_site_chat(payload, emit, stop_event=None):
         # 演，表现为剧情凭空倒退（notes/052）。
         reuse = bool(want_chat) and name == want_acct and name == active_acct \
             and usable and chat_id_ok(pool, name, want_chat)
+        # 复用会话也可能是「空壳」：上一次生成（多为 free 模型空响应）只建了会话、
+        # 没真正产出正文，上游里只有卡片开场、没有一条 user 消息。这种会话没有
+        # 剧情上下文，「继续」会从卡片开场重新演。必须按 fresh 注入摘要+最近原文
+        # （notes/058）。
+        cid_empty = False
         if reuse:
             cid, chat_err = want_chat, None
+            has_hist, _herr = chat_has_history(pool[name]["cookie"], cid)
+            cid_empty = (has_hist is False)
             _k = "site:%s:%s" % (name, card_id)
             if session_id:
                 _k = "site:%s:%s:%s" % (name, card_id, session_id)
@@ -1883,7 +1890,9 @@ def run_site_chat(payload, emit, stop_event=None):
             save_state(st)
             if session_id:
                 bind_session(card_id, session_id, name, want_chat)
-            emit("note", {"message": "接上原会话 %s" % want_chat[:8]})
+            emit("note", {"message": ("接上原会话 %s" % want_chat[:8])
+                          if not cid_empty else
+                          ("原会话为空，重新带入剧情 %s" % want_chat[:8])})
         else:
             cid, chat_err = ensure_chat_for_card(
                 st, pool, name, card_id, emit, session_id=session_id,
@@ -1964,12 +1973,12 @@ def run_site_chat(payload, emit, stop_event=None):
             prev_chat = active_chat
             prev_acct = active_acct
             switched = bool(prev_chat) and (prev_chat != cid or prev_acct != name)
-            fresh_chat = bool(not prev_chat or switched)
+            fresh_chat = bool(not prev_chat or switched or cid_empty)
             recent_text = (recent_turns_text(history)
                            if history and fresh_chat else None)
-            log("site: card=%s session=%s account=%s chat=%s switched=%s fresh=%s recent=%d"
+            log("site: card=%s session=%s account=%s chat=%s switched=%s fresh=%s empty=%s recent=%d"
                 % (card_id, str(session_id or "")[:8], name, str(cid)[:8],
-                   switched, fresh_chat, len(recent_text or "")))
+                   switched, fresh_chat, cid_empty, len(recent_text or "")))
             if switched:
                 emit("note", {"message": "已换号，正在新会话里接着刚才的剧情写"})
             if rounds <= 1:

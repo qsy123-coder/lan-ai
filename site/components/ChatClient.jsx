@@ -121,6 +121,20 @@ const STATUS_BLOCK_RE_G = /<StatusBlocks>[\s\S]*?<\/StatusBlocks>/gi;
 const DETAILS_BLOCK_RE_G = /<details>[\s\S]*?<\/details>/gi;
 const STATUS_STRAY_RE = /<\/?(?:StatusBlocks|details|summary)>/gi;
 
+// 上游会在正文中间注入 <system-reminder>```yaml 当前场景要素 …```</system-reminder>
+// 的场景追踪块，与剧情无关，整块删（含未闭合尾部）。
+const SYSTEM_REMINDER_RE_G = /<system-reminder>[\s\S]*?<\/system-reminder>/gi;
+const SYSTEM_REMINDER_STRAY_RE = /<\/?system-reminder>/gi;
+
+function stripSystemReminder(src) {
+  let s = src || "";
+  s = s.replace(SYSTEM_REMINDER_RE_G, "");
+  const low = s.toLowerCase();
+  const open = low.indexOf("<system-reminder");
+  if (open >= 0) s = s.slice(0, open);
+  return s.replace(SYSTEM_REMINDER_STRAY_RE, "");
+}
+
 function stripStatusBlocks(src) {
   let s = src || "";
   s = s.replace(STATUS_BLOCK_RE_G, "").replace(DETAILS_BLOCK_RE_G, "");
@@ -155,6 +169,8 @@ function splitSug(text) {
 
   // 2) 状态面块（含未闭合）整块删
   src = stripStatusBlocks(src);
+  // 2.5) 上游注入的场景追踪块（含未闭合）整块删
+  src = stripSystemReminder(src);
   // 3) <lug> 是更长的建议块，整块删
   src = src.replace(LUG_RE_G, "");
   // 4) 流式中未闭合的尾部块

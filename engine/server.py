@@ -780,6 +780,7 @@ def generate(cookie, chat_id, card_id, model, max_tokens, prompt, emit, history=
         log("stream error: %s" % str(e)[:120], "warn")
 
     text = _append_sug("".join(text_parts), suggest)
+    text = _strip_system_reminder(text)
     if classification:
         # 保留 upgradeReason：credit 才是真余额不足；trial/vip 是档位/会员限制，
         # 账号余额还在，换档位即可用，不能标 exhausted（notes/057）。
@@ -1015,6 +1016,7 @@ def fetch_chat_messages(cookie, chat_id):
         if role not in ("user", "assistant") or not isinstance(content, str):
             continue
         content = re.sub(r"<sug>.*?</sug>", "", content, flags=re.S).strip()
+        content = _strip_system_reminder(content).strip()
         if content:
             out.append({"role": role, "content": content})
     return out, ""
@@ -1246,6 +1248,21 @@ SUG_STRAY_RE = re.compile(r"</?sug>", re.I)
 STATUS_BLOCK_RE = re.compile(r"<(?:StatusBlocks|details)>[\s\S]*?</(?:StatusBlocks|details)>", re.I)
 STATUS_STRAY_RE = re.compile(r"</?(?:StatusBlocks|details|summary)>", re.I)
 
+# 上游（dzmm）会在正文中间注入 <system-reminder>```yaml 当前场景要素 …```</system-reminder>
+# 的场景追踪块，与剧情无关。原样转发会以字面标签漏进网页聊天（notes/063）。
+SYSTEM_REMINDER_RE = re.compile(r"<system-reminder>[\s\S]*?</system-reminder>", re.I)
+SYSTEM_REMINDER_STRAY_RE = re.compile(r"</?system-reminder>", re.I)
+
+
+def _strip_system_reminder(text):
+    """剥掉上游注入的场景追踪块（含未闭合尾部），与前端 splitSug 对齐。"""
+    t = SYSTEM_REMINDER_RE.sub("", text or "")
+    low = t.lower()
+    idx = low.find("<system-reminder")
+    if idx >= 0:
+        t = t[:idx]
+    return SYSTEM_REMINDER_STRAY_RE.sub("", t)
+
 
 def _strip_sug(text):
     """续写回灌前必须剥掉 <sug> 块。
@@ -1384,7 +1401,7 @@ def suggest_own_api(text, card_id=None):
     prompt = (
         "下面是故事的最新一段剧情。请给出三条能把剧情推向更精彩、更有张力、"
         "更有冲突或更刺激方向的分支（角色接下来会说的话或做的动作），"
-        "每条不超过 30 字，直接输出三行，不要编号、不要解释。\n\n" + tail
+        "每条不超过 60 字，直接输出三行，不要编号、不要解释。\n\n" + tail
     )
     body = json.dumps({
         "model": OWN_API_MODEL,
@@ -1413,7 +1430,7 @@ def suggest_own_api(text, card_id=None):
     items = []
     for line in content.split("\n"):
         v = re.sub(r"^\s*(?:\d+[.、)）]|[-*·•])\s*", "", line).strip().strip("「」『』“”\"'")
-        if 1 <= len(v) <= 40 and v not in items:
+        if 1 <= len(v) <= 80 and v not in items:
             items.append(v)
     return items[:3]
 

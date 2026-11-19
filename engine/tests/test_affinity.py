@@ -160,5 +160,25 @@ class ClipTest(unittest.TestCase):
         self.assertLessEqual(len(out), 62)
 
 
+class SystemReminderStripTest(unittest.TestCase):
+    """上游注入 <system-reminder> 场景追踪块，正文里不该露字面标签（notes/063）。"""
+
+    def test_block_removed(self):
+        txt = "星屑。* <system-reminder>\n```yaml\n当前场景要素: x\n```\n</system-reminder> 你的拇指"
+        out = s._strip_system_reminder(txt)
+        self.assertNotIn("system-reminder", out)
+        self.assertNotIn("当前场景要素", out)
+        self.assertIn("星屑", out)
+        self.assertIn("你的拇指", out)
+
+    def test_unclosed_tail_cut(self):
+        out = s._strip_system_reminder("正文 <system-reminder> 未闭合")
+        self.assertNotIn("system-reminder", out)
+        self.assertEqual(out, "正文 ")
+
+    def test_no_block_untouched(self):
+        self.assertEqual(s._strip_system_reminder("普通正文"), "普通正文")
+
+
 if __name__ == "__main__":
     unittest.main()

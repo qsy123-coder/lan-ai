@@ -165,7 +165,7 @@ function splitSug(text) {
 
   // 5) 收尾
   const body = src.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trimEnd();
-  return { text: body, sug: sug.slice(0, 4) };
+  return { text: body, sug: sug.slice(0, 6) };
 }
 
 // 上游账号显示名是注册时生成的「用户xxxxx」，模型偶尔会写进正文；

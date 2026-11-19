@@ -138,7 +138,14 @@ function splitSug(text) {
   const sug = [];
   for (const m of src.matchAll(SUG_RE_G)) {
     for (const part of m[1].split("|")) {
-      const v = part.trim().replace(/^[“"「『]|[”"」』]$/g, "").trim();
+      // 模型偶发在块内再嵌一层 <sug>/<lug> 标签（本该用 | 分隔），先剥掉，
+      // 否则会以字面 "<sug>xxx" 漏进卡片。
+      const v = part
+        .replace(SUG_STRAY_RE, "")
+        .replace(LUG_STRAY_RE, "")
+        .trim()
+        .replace(/^[“"「『]|[”"」』]$/g, "")
+        .trim();
       if (v && !sug.includes(v)) sug.push(v);
     }
   }

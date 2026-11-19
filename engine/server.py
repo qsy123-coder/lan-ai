@@ -1973,6 +1973,11 @@ def run_site_chat(payload, emit, stop_event=None):
             prev_chat = active_chat
             prev_acct = active_acct
             switched = bool(prev_chat) and (prev_chat != cid or prev_acct != name)
+            # 本迭代已成功拿到 cid 并 bind 到 session：把「当前会话绑定」推进到它。
+            # 否则下一轮换号时 ensure_chat_for_card 里 cur.chatId != active_chat 恒真，
+            # 每个号都被判 session_bound_elsewhere → stale 累计成 no_clean_chat（notes/058）。
+            active_chat = cid
+            active_acct = name
             fresh_chat = bool(not prev_chat or switched or cid_empty)
             recent_text = (recent_turns_text(history)
                            if history and fresh_chat else None)

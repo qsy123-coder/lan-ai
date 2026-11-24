@@ -1,0 +1,10 @@
+(function(){try{var e=typeof window<`u`?window:typeof global<`u`?global:typeof globalThis<`u`?globalThis:typeof self<`u`?self:{};e.SENTRY_RELEASE={id:`7ec7b96b406e10cfe9f0432f02653d13fed71fae`},e._sentryModuleMetadata=e._sentryModuleMetadata||{},e._sentryModuleMetadata[new e.Error().stack]=function(e){for(var t=1;t<arguments.length;t++){var n=arguments[t];if(n!=null)for(var r in n)n.hasOwnProperty(r)&&(e[r]=n[r])}return e}({},e._sentryModuleMetadata[new e.Error().stack],{"_sentryBundlerPluginAppKey:dzmm-web":!0});var t=new e.Error().stack;t&&(e._sentryDebugIds=e._sentryDebugIds||{},e._sentryDebugIds[t]=`b54ed598-246b-4022-bf6c-92fc91e390ac`,e._sentryDebugIdIdentifier=`sentry-dbid-b54ed598-246b-4022-bf6c-92fc91e390ac`)}catch{}})();import{r as e}from"./Q_o_XKpy.js";import{t}from"./WKZqy2YT.js";var n=e();function r(e){let r={code:`code`,h1:`h1`,li:`li`,p:`p`,ul:`ul`,...t(),...e.components};return(0,n.jsxs)(n.Fragment,{children:[(0,n.jsx)(r.h1,{children:`ai-json`}),`
+`,(0,n.jsx)(r.p,{children:`用于让 AI 返回结构化 JSON，例如生成任务、剧情节点、NPC 状态。`}),`
+`,(0,n.jsx)(r.p,{children:`核心规则：`}),`
+`,(0,n.jsxs)(r.ul,{children:[`
+`,(0,n.jsxs)(r.li,{children:[`用 `,(0,n.jsx)(r.code,{children:`instructions`}),` 和 `,(0,n.jsx)(r.code,{children:`userText`}),` 组织 prompt，不生成 `,(0,n.jsx)(r.code,{children:`system`}),` role`]}),`
+`,(0,n.jsxs)(r.li,{children:[`要求 AI 只输出 JSON，并对返回值做严格解析、字段校验与递归净化；拒绝 `,(0,n.jsx)(r.code,{children:`__proto__`}),` / `,(0,n.jsx)(r.code,{children:`constructor`}),` / `,(0,n.jsx)(r.code,{children:`prototype`}),` 等原型敏感 key`]}),`
+`,(0,n.jsx)(r.li,{children:`一次用户动作最多调用一次 AI；解析或校验失败后直接使用本地确定性降级结果，不再发送修复或重试请求`}),`
+`,(0,n.jsx)(r.li,{children:`validator 用手写 JS 函数，不为了小游戏引入 schema 库`}),`
+`,(0,n.jsxs)(r.li,{children:[`所有 AI 调用复用 `,(0,n.jsx)(r.code,{children:`completions-safe`})]}),`
+`]})]})}function i(e={}){let{wrapper:i}={...t(),...e.components};return i?(0,n.jsx)(i,{...e,children:(0,n.jsx)(r,{...e})}):r(e)}var a=i;export{a as component};

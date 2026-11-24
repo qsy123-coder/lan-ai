@@ -710,6 +710,21 @@ Remove-Item -Recurse -Force out\*,notes\*.tmp -ErrorAction SilentlyContinue     
 | 2026-11-19 | `fix/continue-empty-shell` | 「继续」跳回卡片开场：复用空壳会话（只有卡片开场、无 user 消息）也按 fresh 注入摘要+最近原文（notes/058） | 已上线（备份 backup-empty-shell-20261119-223132） |
 | 2026-11-19 | `fix/upgrade-needed-exhausted` | upgrade_needed 区分 credit/trial：只有 credit 才标账号 exhausted，trial/vip 档位限制只换号（notes/057） | 已上线 |
 | 2026-11-19 | `fix/session-rebind-deadlock` | 换号链 session_bound_elsewhere 死锁：拿到 cid 后推进 active_chat/active_acct 基准，不再误报「会话都被占用」（notes/059） | 已上线（备份 backup-20261119224131） |
+| 2026-11-24 | `chore/desktop-workspace-import` | 桌面工作区整体迁入：`dzmm/` `recon/` `tools/` `sub3/` `sub_new/` `sub_new2/` + `PROGRESS-desktop.md`；记忆归入 `docs/memory/`；入口文档 `docs/HOWTO-dzmm工具链.md` | 已提交并推送 |
 
 > 规矩：分支从 `main` 切出；质量门禁通过后可自行 commit / push / 部署 / 合并（见上「Claude 执行规范」）。
 > 不可逆操作（删数据 / 改库 / `.env.production` / force-push）前先确认。
+
+---
+
+## 桌面工作区迁移（2026-11-24）
+
+- 原桌面目录 `C:\Users\WINDOWS11\Desktop\新建文件夹 (7)` 已整体复制进本仓库（原目录未删，可回滚）。
+- 迁入内容：`dzmm/`（桌面版注册/签到/支付/验证码工具链，号池 311）、`recon/`（bundle/chunks/mgwan SDK）、
+  `tools/`（早期侦察脚本）、`sub3/` `sub_new/` `sub_new2/`、`PROGRESS-desktop.md`。
+- 两套账号文件并存、格式不同：本文件同级的 `accounts.json` 是「命名账号 + cookie 字典」（202），
+  `dzmm/accounts.json` 是「列表号池」（311）。合并前先看结构，不要互相覆盖。
+- 入口文档：`docs/HOWTO-dzmm工具链.md`（环境、命令、占位符、故障分支、回滚）。
+- 项目记忆：`docs/memory/`（repo 内）；Claude 侧同步到 `~/.claude/projects/F--Projects-lan-ai/memory/`，新会话自动加载。
+- **解释器**：F: 盘下 `python` 默认是 3.10（无 requests/playwright）；跑 `dzmm/` 用
+  `C:/Users/WINDOWS11/AppData/Local/Programs/Python/Python312/python.exe`。

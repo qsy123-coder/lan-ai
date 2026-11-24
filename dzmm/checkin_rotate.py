@@ -1,0 +1,162 @@
+# -*- coding: utf-8 -*-
+"""
+dzmm.ai IP 轮换签到 —— 每个账号换一个出口 IP，绕开「签到需人机验证」
+
+原理：captchaRequired 是按 IP 累积的风控。换到干净 IP 后
+      tasks.initCheckin 直接返回 captchaRequired=false，纯 API 秒签。
+
+用法:
+  python checkin_rotate.py            # 全部账号
+  python checkin_rotate.py --reclaim  # 顺带领取已完成任务
+"""
+import asyncio
+import json
+import os
+import sys
+import time
+
+try:
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import clash_api as K
+import client as C
+
+POOL = os.path.join(HERE, "ip_pool.json")
+LOG = os.path.join(HERE, "checkin_rotate.log")
+
+
+def log(msg):
+    line = "[%s] %s" % (time.strftime("%H:%M:%S"), msg)
+    print(line, flush=True)
+    try:
+        with open(LOG, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
+
+
+def load_ips():
+    if not os.path.exists(POOL):
+        return []
+    return json.load(open(POOL, encoding="utf-8")).get("unique") or []
+
+
+async def main():
+    reclaim = "--reclaim" in sys.argv
+    sticky = "--sticky" in sys.argv      # 固定节点模式：只有连续失败才切换
+    ips = load_ips()
+    if not ips:
+        log("ip_pool.json 为空")
+        return
+    orig = K.current("GLOBAL")
+    pool = C.load_pool()
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    log("开始：%d 个账号，%d 个可用 IP" % (len(pool), len(ips)))
+    before = sum((a.get("credit") or 0) for a in pool)
+    gained = 0
+    ip_i = 0
+    for i, a in enumerate(pool):
+        tok = a.get("access_token")
+        if not tok:
+            continue
+        uid = (a.get("user_id") or "?")[:13]
+        if a.get("last_checkin") == today:
+            # 已签，只补余额
+            try:
+                st, bal = C.get_balance(tok)
+                a["credit"] = bal[0]["result"]["data"]["json"].get("total")
+                log("[%d/%d] %s 今日已签 credit=%s" % (i + 1, len(pool), uid, a["credit"]))
+            except Exception:
+                pass
+            continue
+        # 换 IP（sticky 模式下固定用同一个，只有失败才换）
+        if sticky:
+            node = ips[0]["node"]
+        else:
+            node = ips[ip_i % len(ips)]["node"]
+            ip_i += 1
+        if not sticky or i == 0:
+            try:
+                K.switch("GLOBAL", node)
+                await asyncio.sleep(2.0)
+            except Exception:
+                pass
+        ok, det = False, None
+        for att in range(3):
+            if att > 0:
+                if sticky:
+                    node = ips[(att) % len(ips)]["node"]
+                else:
+                    node = ips[ip_i % len(ips)]["node"]
+                    ip_i += 1
+                try:
+                    K.switch("GLOBAL", node)
+                    await asyncio.sleep(2.0)
+                except Exception:
+                    pass
+                log("      重试 %d (ip=%s)" % (att, node[:16]))
+            try:
+                ok, det = await C.daily_checkin_async(tok, auto_captcha=True, acc=a)
+            except Exception as e:
+                ok, det = False, {"err": type(e).__name__}
+            if ok:
+                break
+        try:
+            st, bal = C.get_balance(tok)
+            a["credit"] = bal[0]["result"]["data"]["json"].get("total")
+        except Exception:
+            pass
+        if ok:
+            a["last_checkin"] = today
+            gained += 5
+            log("[%d/%d] %s OK +5 credit=%s (ip=%s)" % (i + 1, len(pool), uid, a.get("credit"), node[:16]))
+        else:
+            cap = isinstance(det, dict) and det.get("captchaRequired")
+            log("[%d/%d] %s FAIL %s (ip=%s)" % (i + 1, len(pool), uid,
+                                             "需验证码" if cap else str(det)[:50], node[:16]))
+        # 顺带领任务
+        if reclaim:
+            try:
+                st, j = C.trpc_get("tasks.list", tok)
+                tasks = j[0]["result"]["data"]["json"]["tasks"]
+                for t in tasks:
+                    if t.get("canClaim") and not t.get("claimed") and t["key"] != "daily_checkin":
+                        st2, j2 = C.claim_task(tok, t["key"])
+                        try:
+                            if j2["result"]["data"]["json"].get("success"):
+                                rw = t.get("reward", 0)
+                                gained += rw
+                                log("      + 任务 %s +%s" % (t["key"], rw))
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+        C.save_pool(pool)
+    C.save_pool(pool)
+    if orig:
+        try:
+            K.switch("GLOBAL", orig)
+        except Exception:
+            pass
+    after = sum((a.get("credit") or 0) for a in pool)
+    log("完成：总积分 %.2f -> %.2f (收益 +%d)" % (before, after, gained))
+    try:
+        import captcha_bridge
+        await captcha_bridge.close_browser()
+    except Exception:
+        pass
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    finally:
+        try:
+            import asyncio as _a
+        except Exception:
+            pass

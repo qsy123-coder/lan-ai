@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DZMM 访问验证</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      --bg: #eef4f8;
+      --page-bg: linear-gradient(180deg, #edf5f8 0%, #f8fafc 52%, #ffffff 100%);
+      --paper: #ffffff;
+      --ink: #172033;
+      --muted: #5f6b7a;
+      --line: #d8e2ee;
+      --accent: #2864d8;
+      --accent-strong: #174ea6;
+      --start: #49776c;
+      --amber: #f0a92c;
+      --danger: #b42318;
+      --shadow-soft: rgba(23, 32, 51, .08);
+      --shadow: rgba(23, 32, 51, .12);
+      --brand-border: #bccde0;
+      --notice-border: #c8ded4;
+      --notice-bg: #f3fbf6;
+      --notice-ink: #166849;
+      --control-border: #c8d3e1;
+      --stage-bg: #f8fafc;
+      --handle-ring: #ffffff;
+      --handle-shadow: rgba(73, 119, 108, .32);
+      --status: #475569;
+      --ready: #166849;
+      --link-ink: var(--accent);
+      --link-bg: #ffffff;
+      --link-hover-bg: #f6f9ff;
+      --disabled: #9aa8b8;
+      --hint: #6b7482;
+      --error-bg: #fff2f1;
+      --error-ink: #8a1f17;
+    }
+     
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #09090b;
+      --page-bg: #09090b;
+      --paper: #17171b;
+      --ink: #f5f3f4;
+      --muted: #a9a3a6;
+      --line: #5a5357;
+      --accent: #3d6fd6;
+      --accent-strong: #2f5cb8;
+      --start: #88b6ab;
+      --danger: #f87171;
+      --shadow-soft: rgba(0, 0, 0, .4);
+      --shadow: rgba(0, 0, 0, .5);
+      --brand-border: #5a5357;
+      --notice-border: #1f4a36;
+      --notice-bg: #0f2119;
+      --notice-ink: #7fdcae;
+      --control-border: #5a5357;
+      --stage-bg: #060809;
+      --handle-ring: #17171b;
+      --handle-shadow: rgba(0, 0, 0, .5);
+      --status: #b6bdc8;
+      --ready: #6fd3a0;
+      --link-ink: #8ab0ff;
+      --link-bg: #1f1f24;
+      --link-hover-bg: #26262c;
+      --disabled: #4a4a52;
+      --hint: #a9a3a6;
+      --error-bg: #2a1513;
+      --error-ink: #fca5a5;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 32px 18px;
+      background: var(--page-bg);
+    }
+    .page {
+      width: min(100%, 900px);
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 380px;
+      gap: 34px;
+      align-items: center;
+    }
+    .intro {
+      padding: 20px 0;
+    }
+    .brand-mark {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 44px;
+      padding: 0 15px;
+      border: 1px solid var(--brand-border);
+      border-radius: 8px;
+      background: var(--paper);
+      color: var(--ink);
+      font-size: 24px;
+      font-weight: 900;
+      letter-spacing: 0;
+      line-height: 1;
+      box-shadow: 0 10px 28px var(--shadow-soft);
+    }
+    .tagline {
+      margin: 16px 0 0;
+      max-width: 560px;
+      font-size: 34px;
+      line-height: 1.16;
+      font-weight: 850;
+      color: var(--ink);
+    }
+    .copy {
+      margin: 16px 0 0;
+      max-width: 520px;
+      color: var(--muted);
+      line-height: 1.75;
+      font-size: 16px;
+    }
+    .notice {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 34px;
+      margin-top: 22px;
+      padding: 0 12px;
+      border: 1px solid var(--notice-border);
+      border-radius: 8px;
+      background: var(--notice-bg);
+      color: var(--notice-ink);
+      font-size: 13px;
+      font-weight: 750;
+    }
+    .notice-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--start);
+    }
+    .panel {
+      width: 100%;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: 0 20px 48px var(--shadow);
+      padding: 24px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.25;
+      color: var(--ink);
+    }
+    p {
+      margin: 8px 0 18px;
+      color: var(--muted);
+      line-height: 1.55;
+      font-size: 14px;
+    }
+	    .captcha {
+	      display: grid;
+	      grid-template-columns: 1fr;
+	      gap: 12px;
+	      margin-bottom: 16px;
+	    }
+	    .drag-stage {
+	      position: relative;
+	      width: 100%;
+	      overflow: hidden;
+	      border: 1px solid var(--control-border);
+	      border-radius: 8px;
+	      background: var(--stage-bg);
+	      touch-action: none;
+	      user-select: none;
+	      cursor: grab;
+	    }
+	    .drag-stage.dragging {
+	      cursor: grabbing;
+	    }
+	    .drag-stage img {
+	      display: block;
+	      width: 100%;
+	      height: auto;
+	      pointer-events: none;
+	      user-select: none;
+	    }
+	    .drag-handle {
+	      position: absolute;
+	      width: 34px;
+	      height: 34px;
+	      border: 3px solid var(--handle-ring);
+	      border-radius: 50%;
+	      background: var(--start);
+	      box-shadow: 0 8px 18px var(--handle-shadow);
+	      transform: translate(-50%, -50%);
+	      left: calc(var(--handle-x) * 1%);
+	      top: calc(var(--handle-y) * 1%);
+	      pointer-events: none;
+	    }
+	    .drag-status {
+	      min-height: 20px;
+	      color: var(--status);
+	      font-size: 13px;
+	      line-height: 1.5;
+	    }
+	    .drag-status.ready {
+	      color: var(--ready);
+	    }
+	    a {
+	      display: inline-flex;
+	      align-items: center;
+      justify-content: center;
+      min-width: 82px;
+      padding: 0 12px;
+      border: 1px solid var(--control-border);
+      border-radius: 6px;
+      background: var(--link-bg);
+      color: var(--link-ink);
+      font-size: 14px;
+      font-weight: 750;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+	    a:hover {
+	      border-color: var(--link-ink);
+	      background: var(--link-hover-bg);
+	    }
+	    button {
+	      width: 100%;
+	      height: 46px;
+      border: 0;
+      border-radius: 6px;
+      margin-top: 15px;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 800;
+      font-size: 15px;
+      cursor: pointer;
+    }
+	    button:hover {
+	      background: var(--accent-strong);
+	    }
+	    button:disabled {
+	      background: var(--disabled);
+	      cursor: not-allowed;
+	    }
+    .hint {
+      margin: 12px 0 0;
+      color: var(--hint);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    .error {
+      border-left: 3px solid var(--danger);
+      background: var(--error-bg);
+      color: var(--error-ink);
+      padding: 10px 12px;
+      border-radius: 4px;
+      margin-bottom: 14px;
+      font-size: 14px;
+    }
+    @media (max-width: 760px) {
+      body {
+        align-items: flex-start;
+        padding: 24px 16px;
+      }
+      .page {
+        grid-template-columns: 1fr;
+        gap: 22px;
+      }
+      .intro {
+        padding: 0;
+      }
+      .brand-mark {
+        height: 40px;
+        font-size: 22px;
+      }
+      .tagline {
+        margin-top: 14px;
+        font-size: 26px;
+        line-height: 1.22;
+      }
+      .copy {
+        margin-top: 12px;
+        font-size: 15px;
+      }
+      .notice {
+        margin-top: 16px;
+      }
+      .panel {
+        padding: 20px;
+      }
+    }
+    @media (max-width: 420px) {
+      body {
+        padding: 18px 12px;
+      }
+      .tagline {
+        font-size: 23px;
+      }
+      .captcha {
+        grid-template-columns: 1fr;
+      }
+      a {
+        height: 40px;
+      }
+    }
+  </style>
+  <style>
+     
+    :root {
+      background: var(--paper);
+    }
+    body {
+      display: block;
+      min-height: 0;
+      margin: 0;
+      padding: 0;
+      background: var(--paper);
+    }
+    .page {
+      display: block;
+      width: 100%;
+    }
+    .panel {
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+      padding: 0;
+    }
+    h1 {
+      font-size: 17px;
+      line-height: 1.3;
+    }
+    p {
+      margin: 2px 0 8px;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .captcha {
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 6px 8px;
+      margin-bottom: 0;
+    }
+    .drag-stage {
+      grid-column: 1 / -1;
+    }
+    .drag-status {
+      min-height: 0;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .drag-failed {
+      color: var(--danger);
+    }
+    a {
+      height: 30px;
+      min-width: 72px;
+      font-size: 13px;
+    }
+    button {
+      height: 40px;
+      margin-top: 8px;
+    }
+    #clientError {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+	    <section class="panel" aria-labelledby="captcha-heading">
+	      <h1 id="captcha-heading">安全验证</h1>
+	      <p>按住左侧起点，沿唯一连续的通道拖到终点</p>
+	      
+	      <form id="captchaForm" method="post" action="/__captcha/verify" autocomplete="off">
+	        <input type="hidden" name="id" value="7b301940940dfdde96452547e6125915">
+	        <input type="hidden" name="next" value="/api/health?captcha_completed=1"><input type="hidden" name="embed" value="1"><input id="themeInput" type="hidden" name="theme" value="light">
+	        <input id="dragTrace" type="hidden" name="trace" value="">
+	        <div class="captcha">
+	          <div id="dragStage" class="drag-stage" data-width="320" data-height="180" data-start-x="35" data-start-y="90" style="aspect-ratio: 320 / 180; --handle-x: 11; --handle-y: 50;">
+	            <img src="/__captcha/image?id=7b301940940dfdde96452547e6125915" width="320" height="180" alt="多终点拖拽验证路径" draggable="false">
+	            <div id="dragHandle" class="drag-handle" aria-hidden="true"></div>
+	          </div>
+	          <div id="dragStatus" class="drag-status">从左侧起点开始，沿完整通道拖动。</div>
+	          <a href="/__captcha/?src=ratelimit&amp;embed=1&amp;theme=light&amp;next=%2Fapi%2Fhealth%3Fcaptcha_completed%3D1" aria-label="刷新验证码图片">换一张</a>
+	        </div>
+	        <div id="clientError" class="error" hidden>先完成拖拽验证。</div>
+	        <button id="submitButton" type="submit" disabled>完成验证</button>
+	        
+	      </form>
+	    </section>
+	  </main>
+	  <script>
+	    (function () {
+	      var stage = document.getElementById('dragStage');
+	      var handle = document.getElementById('dragHandle');
+	      var status = document.getElementById('dragStatus');
+	      var traceInput = document.getElementById('dragTrace');
+	      var submitButton = document.getElementById('submitButton');
+	      var form = document.getElementById('captchaForm');
+	      var clientError = document.getElementById('clientError');
+	      if (!stage || !handle || !status || !traceInput || !submitButton || !form) return;
+
+	      var width = Number(stage.dataset.width);
+	      var height = Number(stage.dataset.height);
+	      var startX = Number(stage.dataset.startX);
+	      var startY = Number(stage.dataset.startY);
+	      var dragging = false;
+	      var completed = false;
+	      var submitted = false;
+	      var startedAt = 0;
+	      var trace = [];
+
+	      function clamp(value, min, max) {
+	        return Math.max(min, Math.min(max, value));
+	      }
+
+	      function setHandle(x, y) {
+	        handle.style.left = (x / width * 100) + '%';
+	        handle.style.top = (y / height * 100) + '%';
+	      }
+
+	      function stagePoint(event) {
+	        var rect = stage.getBoundingClientRect();
+	        return {
+	          x: clamp((event.clientX - rect.left) * width / rect.width, 0, width),
+	          y: clamp((event.clientY - rect.top) * height / rect.height, 0, height)
+	        };
+	      }
+
+	      function pushPoint(event) {
+	        var p = stagePoint(event);
+	        var t = Math.round(performance.now() - startedAt);
+	        var last = trace.length ? trace[trace.length - 1] : null;
+	        if (last && Math.hypot(last.x - p.x, last.y - p.y) < 1.5 && t - last.t < 24) {
+	          return;
+	        }
+	        if (trace.length < 480) {
+	          trace.push({
+	            x: Math.round(p.x * 10) / 10,
+	            y: Math.round(p.y * 10) / 10,
+	            t: t
+	          });
+	        }
+	        setHandle(p.x, p.y);
+	      }
+
+	      function finish(event) {
+	        if (!dragging) return;
+	        pushPoint(event);
+	        dragging = false;
+	        stage.classList.remove('dragging');
+	        try {
+	          stage.releasePointerCapture(event.pointerId);
+	        } catch (_) {}
+	        completed = trace.length >= 10;
+	        traceInput.value = JSON.stringify(trace);
+	        submitButton.disabled = !completed;
+	        status.classList.toggle('ready', completed);
+	        status.textContent = completed ? '轨迹已记录，可以继续。' : '拖动距离太短，请重新来一次。';
+	      }
+
+	      setHandle(startX, startY);
+
+	      stage.addEventListener('pointerdown', function (event) {
+	        if (submitted) return;
+	        var p = stagePoint(event);
+	        if (Math.hypot(p.x - startX, p.y - startY) > 48) {
+	          status.classList.remove('ready');
+	          status.textContent = '请从左侧起点开始拖动。';
+	          return;
+	        }
+	        event.preventDefault();
+	        dragging = true;
+	        completed = false;
+	        trace = [];
+	        traceInput.value = '';
+	        submitButton.disabled = true;
+	        clientError.hidden = true;
+	        startedAt = performance.now();
+	        stage.classList.add('dragging');
+	        stage.setPointerCapture(event.pointerId);
+	        status.classList.remove('ready');
+	        status.textContent = '继续沿完整通道拖到它连接的终点。';
+	        pushPoint(event);
+	      });
+
+	      stage.addEventListener('pointermove', function (event) {
+	        if (!dragging) return;
+	        event.preventDefault();
+	        pushPoint(event);
+	      });
+	      stage.addEventListener('pointerup', finish);
+	      stage.addEventListener('pointercancel', finish);
+
+	      
+	      
+	      
+	      form.addEventListener('submit', function (event) {
+	        if (submitted) {
+	          event.preventDefault();
+	          return;
+	        }
+	        if (!completed || !traceInput.value) {
+	          event.preventDefault();
+	          clientError.hidden = false;
+	          status.classList.remove('ready');
+	          status.textContent = '先完成拖拽验证。';
+	          return;
+	        }
+	        submitted = true;
+	        stage.classList.add('submitted');
+	        status.textContent = '正在验证，请稍候…';
+	        window.setTimeout(function () { submitButton.disabled = true; }, 0);
+	      });
+	      
+	      
+	      window.addEventListener('pageshow', function (event) {
+	        if (event.persisted && submitted) window.location.reload();
+	      });
+	    })();
+	  </script>
+	</body>
+	</html>
+	

@@ -1,0 +1,220 @@
+# -*- coding: utf-8 -*-
+"""
+dzmm.ai 纯 API 游客注册（游客 UI 入口已下线后的主路线）
+
+流程：
+1. Python 用 bw.py 生成合法设备指纹（hash 与服务端算法一致）
+2. 无头浏览器打开站点（必要时先过全站验证）
+3. 在页面上下文 fetch /api/auth/anonymous-sign-in
+4. 428 human_check_required → 走 /__captcha/ 过拖拽验证码 → 重试
+5. 200 → 读 sb-rls-auth-token → 入池
+
+用法:
+  python register_api.py        # 注册 1 个
+  python register_api.py 10     # 注册 10 个
+"""
+import asyncio
+import copy
+import json
+import os
+import random
+import sys
+import time
+import uuid
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import bw
+import captcha_solver as SOLVER
+import client as C
+import register as R
+
+FP_TEMPLATE = os.path.join(HERE, "fp_template.json")
+
+
+def make_fp():
+    """生成结构合法、hash 正确的设备指纹"""
+    base = json.load(open(FP_TEMPLATE, encoding="utf-8"))["fp"]
+    fp = copy.deepcopy(base)
+    d = fp["data"]
+    d["audio"]["sampleHash"] = round(random.uniform(1050, 1350), 6)
+    d["canvas"]["commonImageDataHash"] = uuid.uuid4().hex[:32]
+    d["webgl"]["commonImageHash"] = uuid.uuid4().hex[:32]
+    for k in list(d["math"].keys()):
+        if isinstance(d["math"][k], (int, float)):
+            d["math"][k] = float(d["math"][k]) * random.uniform(0.99995, 1.00005)
+    payload = json.dumps(d, ensure_ascii=False, separators=(",", ":"))
+    fp["hash"] = bw.bw(payload)
+    return fp
+
+
+async def _anon_signin(page, fp, tries=2):
+    """页面内 fetch 注册；遇到 428 过验证码后重试"""
+    for i in range(tries):
+        try:
+            res = await page.evaluate(
+                """async (fp) => {
+                    const r = await fetch('/api/auth/anonymous-sign-in', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({fp}),
+                        credentials: 'include'
+                    });
+                    let body = '';
+                    try { body = await r.text(); } catch(e) {}
+                    return {status: r.status, body: body.slice(0, 300)};
+                }""", fp)
+        except Exception as e:
+            print("    fetch err:", str(e)[:70])
+            await page.wait_for_timeout(2000)
+            continue
+        st = res["status"]
+        print("    anonymous-sign-in -> %d %s" % (st, res["body"][:110]))
+        if st == 200:
+            return True
+        if st == 428 or "human_check" in res["body"]:
+            # 走已验证的 captcha_bridge（共享同一 ctx，cookie 会保留）
+            try:
+                import captcha_bridge as CB
+                ok = await CB.bridge(None, headless=True, acc=None, ctx=page.context)
+            except Exception as e:
+                print("    bridge err:", str(e)[:70])
+                ok = False
+            print("    验证码:", "通过" if ok else "失败")
+            await page.wait_for_timeout(2000)
+            continue
+        if st == 429:
+            await page.wait_for_timeout(15000)
+            continue
+        await page.wait_for_timeout(4000)
+    return False
+
+
+async def register_one():
+    from playwright.async_api import async_playwright
+
+    fp = make_fp()
+    print("  fp hash=%s" % fp["hash"])
+    async with async_playwright() as p:
+        b = await p.chromium.launch(
+            executable_path=R.CHROME, headless=True,
+            proxy={"server": R._pw()},
+            args=["--no-sandbox", "--disable-blink-features=AutomationControlled",
+                  "--headless=new", "--disable-gpu", "--disable-dev-shm-usage",
+                  "--disable-extensions", "--disable-background-networking",
+                  "--renderer-process-limit=1", "--js-flags=--max-old-space-size=192",
+                  "--no-zygote", "--single-process"])
+        ctx = await b.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                       "(KHTML, like Gecko) Chrome/%d.0.0.0 Safari/537.36" % random.randint(126, 133),
+            viewport={"width": random.choice([1366, 1440, 1536, 1920]),
+                      "height": random.choice([768, 900, 864, 1080])},
+            locale="zh-CN", timezone_id="Asia/Shanghai")
+        page = await ctx.new_page()
+        # 省流量：只拦图片/字体/媒体（样式表必须保留，验证码拖拽依赖 CSS 定位；验证码图放行）
+        async def _route(route):
+            try:
+                req = route.request
+                rt = req.resource_type
+                url = req.url
+                if "__captcha/image" in url:
+                    await route.continue_()
+                    return
+                if rt in ("image", "font", "media"):
+                    await route.abort()
+                else:
+                    await route.continue_()
+            except Exception:
+                try:
+                    await route.continue_()
+                except Exception:
+                    pass
+        await page.route("**/*", _route)
+        try:
+            # 省流量+提速：用轻量 JSON 端点建立同源上下文，不加载 10MB 的 SPA
+            try:
+                await page.goto("https://dzmm.ai/api/health", wait_until="domcontentloaded", timeout=45000)
+            except Exception:
+                await page.goto("https://dzmm.ai/api/health", wait_until="commit", timeout=45000)
+            await page.wait_for_timeout(600)
+            # 全站验证
+            if "/__captcha" in page.url or any("__captcha" in f.url for f in page.frames):
+                print("  全站验证")
+                if not await R.solve_captcha(page):
+                    print("  全站验证失败")
+                    return None
+                await page.wait_for_timeout(2000)
+            # 注册
+            ok = await _anon_signin(page, fp)
+            if not ok:
+                print("  注册未成功")
+                return None
+            await page.wait_for_timeout(2500)
+            cookies = await ctx.cookies()
+            auth = None
+            for c in cookies:
+                if c["name"] == "sb-rls-auth-token":
+                    auth = C.decode_sb_cookie(c["value"])
+            if not auth or not auth.get("access_token"):
+                print("  未取到 token")
+                return None
+            try:
+                st, me = C.get_me(auth["access_token"])
+                prof = me[0]["result"]["data"]["json"]
+                auth["user_id"] = prof.get("id", auth.get("user_id"))
+                auth["credit"] = prof.get("credit")
+            except Exception:
+                # 风控下 getMe 可能被拦；先用 cookie 里的 uid
+                try:
+                    import base64 as _b64
+                    j = json.loads(_b64.urlsafe_b64decode(
+                        (auth["access_token"].split(".")[1] + "===").encode()).decode("utf-8", "replace"))
+                    auth["user_id"] = auth.get("user_id") or j.get("sub")
+                except Exception:
+                    pass
+            # 立即签到（+5），同时拿到准确余额
+            try:
+                ok_ck, det = C.daily_checkin(auth["access_token"], auto_captcha=False)
+                st2, bal = C.get_balance(auth["access_token"])
+                auth["credit"] = bal[0]["result"]["data"]["json"].get("total")
+                if ok_ck:
+                    auth["last_checkin"] = time.strftime("%Y-%m-%d")
+            except Exception:
+                pass
+            print("  成功: %s credit=%s" % (auth["user_id"], auth.get("credit")))
+            return auth
+        except Exception as e:
+            print("  err:", str(e)[:90])
+            return None
+        finally:
+            try:
+                await b.close()
+            except Exception:
+                pass
+
+
+async def main():
+    n = 1
+    if len(sys.argv) > 1:
+        try:
+            n = int(sys.argv[1])
+        except Exception:
+            pass
+    ok = 0
+    for i in range(n):
+        print("[%d/%d] 注册中..." % (i + 1, n))
+        auth = await register_one()
+        if auth:
+            C.add_account(auth)
+            ok += 1
+        else:
+            print("  失败")
+        if i < n - 1:
+            wait = random.randint(40, 100)
+            print("  冷却 %ds" % wait)
+            await asyncio.sleep(wait)
+    print("\n完成 %d/%d，池内 %d" % (ok, n, len(C.load_pool())))
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

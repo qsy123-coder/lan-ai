@@ -1,0 +1,29 @@
+(function(){try{var e=typeof window<`u`?window:typeof global<`u`?global:typeof globalThis<`u`?globalThis:typeof self<`u`?self:{};e.SENTRY_RELEASE={id:`7ec7b96b406e10cfe9f0432f02653d13fed71fae`},e._sentryModuleMetadata=e._sentryModuleMetadata||{},e._sentryModuleMetadata[new e.Error().stack]=function(e){for(var t=1;t<arguments.length;t++){var n=arguments[t];if(n!=null)for(var r in n)n.hasOwnProperty(r)&&(e[r]=n[r])}return e}({},e._sentryModuleMetadata[new e.Error().stack],{"_sentryBundlerPluginAppKey:dzmm-web":!0});var t=new e.Error().stack;t&&(e._sentryDebugIds=e._sentryDebugIds||{},e._sentryDebugIds[t]=`a256f566-f420-4aa1-ad41-804958633336`,e._sentryDebugIdIdentifier=`sentry-dbid-a256f566-f420-4aa1-ad41-804958633336`)}catch{}})();import{r as e}from"./Q_o_XKpy.js";import{t}from"./WKZqy2YT.js";var n=e();function r(e){let r={a:`a`,h1:`h1`,h2:`h2`,li:`li`,p:`p`,strong:`strong`,ul:`ul`,...t(),...e.components};return(0,n.jsxs)(n.Fragment,{children:[(0,n.jsx)(r.h1,{children:`Blocked Content Policy`}),`
+`,(0,n.jsx)(r.p,{children:(0,n.jsx)(r.strong,{children:`Date of Revision: 06 February 2026`})}),`
+`,(0,n.jsx)(r.p,{children:`This Blocked Content Policy defines what is not allowed on dzmm.io and all associated Services ("Services"). All users must comply with this policy regardless of whether content is generated privately or shared publicly (e.g., through character cards, galleries, or community features).`}),`
+`,(0,n.jsx)(r.p,{children:`The following categories apply to all content on the platform — including text, images, voice, video, character descriptions, and any other AI-generated or user-submitted material.`}),`
+`,(0,n.jsx)(r.h2,{children:`1. Prohibited Content`}),`
+`,(0,n.jsx)(r.p,{children:`The following content is prohibited, including but not limited to text, images, video, audio, and any other AI-generated material:`}),`
+`,(0,n.jsxs)(r.p,{children:[(0,n.jsx)(r.strong,{children:`a) Illegal Content`}),`: Content that violates any applicable local, national, or international law, including content related to illegal drugs, weapons, or activities that advocate illegal actions.`]}),`
+`,(0,n.jsxs)(r.p,{children:[(0,n.jsx)(r.strong,{children:`b) Hate Speech and Discrimination`}),`: Content that promotes hatred, discrimination, or harassment based on race, ethnicity, nationality, religion, gender, sexual orientation, disability, or any other protected characteristic.`]}),`
+`,(0,n.jsxs)(r.p,{children:[(0,n.jsx)(r.strong,{children:`c) Violence and Harm`}),`: Content that encourages, glorifies, or promotes violence, self-harm, suicide, terrorism, or any form of harm to others.`]}),`
+`,(0,n.jsxs)(r.p,{children:[(0,n.jsx)(r.strong,{children:`d) Child Exploitation`}),`: We maintain a `,(0,n.jsx)(r.strong,{children:`zero-tolerance policy`}),` for child sexual abuse material (CSAM) and any content that exploits or endangers minors, including sexual exploitation or any form of harm or harassment.`]}),`
+`,(0,n.jsxs)(r.p,{children:[(0,n.jsx)(r.strong,{children:`e) Content Depicting Minors`}),`: It is strictly prohibited to attempt to generate AI content depicting, resembling, or involving minors in any context. Such attempts are flagged, reviewed, and actioned in accordance with our moderation systems and `,(0,n.jsx)(r.a,{href:`/legal/underage-policy`,children:`Underage Policy`}),`.`]}),`
+`,(0,n.jsxs)(r.p,{children:[(0,n.jsx)(r.strong,{children:`f) Privacy and IP Infringement`}),`: Content that infringes upon the privacy, copyrights, trademarks, or other intellectual property rights of individuals or entities, including unauthorized disclosure of personal information.`]}),`
+`,(0,n.jsxs)(r.p,{children:[(0,n.jsx)(r.strong,{children:`g) Impersonation`}),`: Deceptive or harmful impersonation of real individuals, public figures, or celebrities. This includes any misleading attempt to misrepresent identity.`]}),`
+`,(0,n.jsxs)(r.p,{children:[(0,n.jsx)(r.strong,{children:`h) Non-Consensual Imagery and Deepfakes`}),`: Creation or attempted creation of non-consensual intimate imagery or images intended to resemble actual persons ("deepfakes"). Such content will be removed and appropriate action taken.`]}),`
+`,(0,n.jsx)(r.h2,{children:`2. Content Responsibility`}),`
+`,(0,n.jsx)(r.p,{children:`You are solely responsible for all content generated through your interactions with AI Characters, including text, voice, images, and video. You must ensure that your interactions comply with applicable laws, our Terms of Service, Community Guidelines, and this policy.`}),`
+`,(0,n.jsx)(r.h2,{children:`3. Content Moderation`}),`
+`,(0,n.jsx)(r.p,{children:`We employ automated content moderation systems to detect violations. Content flagged by these systems may be reviewed by our team. Actions taken may include:`}),`
+`,(0,n.jsxs)(r.ul,{children:[`
+`,(0,n.jsx)(r.li,{children:`Content removal;`}),`
+`,(0,n.jsx)(r.li,{children:`Account restriction or termination;`}),`
+`,(0,n.jsx)(r.li,{children:`Reporting to appropriate authorities.`}),`
+`]}),`
+`,(0,n.jsx)(r.h2,{children:`4. CSAM Reporting`}),`
+`,(0,n.jsx)(r.p,{children:`In addition to our automated moderation, we report known CSAM to the National Center for Missing and Exploited Children (NCMEC) or other appropriate local authorities.`}),`
+`,(0,n.jsx)(r.h2,{children:`5. Contact`}),`
+`,(0,n.jsxs)(r.p,{children:[`If you believe content on the Services violates this policy, or if you have questions, contact us at: `,(0,n.jsx)(r.strong,{children:(0,n.jsx)(r.a,{href:`mailto:support@dzmm.ai`,children:`support@dzmm.ai`})})]}),`
+`,(0,n.jsx)(r.h2,{children:`6. Enforcement`}),`
+`,(0,n.jsx)(r.p,{children:`We reserve the right to suspend or terminate the account of any user suspected of violating this policy.`})]})}function i(e={}){let{wrapper:i}={...t(),...e.components};return i?(0,n.jsx)(i,{...e,children:(0,n.jsx)(r,{...e})}):r(e)}var a=i;export{a as component};

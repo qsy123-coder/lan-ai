@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>跳转中</title>
+    <style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{display:flex;flex-direction:column;justify-content:center;align-items:center;min-height:100vh;background:#fff;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif}
+.box{text-align:center;padding:40px}
+.loader{display:flex;justify-content:center;align-items:center;gap:8px;margin-bottom:28px}
+.loader-dot{width:12px;height:12px;border-radius:50%;background:#1677ff;animation:bounce 1.4s ease-in-out infinite}
+.loader-dot:first-child{animation-delay:0s}
+.loader-dot:nth-child(2){animation-delay:.2s}
+.loader-dot:nth-child(3){animation-delay:.4s}
+@keyframes bounce{0%,100%,80%{transform:scale(.6);opacity:.4}
+40%{transform:scale(1);opacity:1}
+}
+.loading-text{color:#1a1a1a;font-size:18px;font-weight:500;line-height:1.5;margin-bottom:8px}
+.loading-sub{color:#999;font-size:14px}
+    </style>
+  </head>
+  <body>
+    <div class="box">
+      <div class="loader">
+        <div class="loader-dot"></div>
+        <div class="loader-dot"></div>
+        <div class="loader-dot"></div>
+      </div>
+      <p class="loading-text">跳转支付中</p>
+      <p class="loading-sub">请稍候...</p>
+      <script>window.location.replace('/pay/qrcode/2026111918320346515/');</script>    </div>
+  </body>
+</html>

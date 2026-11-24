@@ -1,0 +1,16 @@
+(function(){try{var e=typeof window<`u`?window:typeof global<`u`?global:typeof globalThis<`u`?globalThis:typeof self<`u`?self:{};e.SENTRY_RELEASE={id:`7ec7b96b406e10cfe9f0432f02653d13fed71fae`},e._sentryModuleMetadata=e._sentryModuleMetadata||{},e._sentryModuleMetadata[new e.Error().stack]=function(e){for(var t=1;t<arguments.length;t++){var n=arguments[t];if(n!=null)for(var r in n)n.hasOwnProperty(r)&&(e[r]=n[r])}return e}({},e._sentryModuleMetadata[new e.Error().stack],{"_sentryBundlerPluginAppKey:dzmm-web":!0});var t=new e.Error().stack;t&&(e._sentryDebugIds=e._sentryDebugIds||{},e._sentryDebugIds[t]=`d3f7b307-001f-46fa-9e12-7adbf416e84f`,e._sentryDebugIdIdentifier=`sentry-dbid-d3f7b307-001f-46fa-9e12-7adbf416e84f`)}catch{}})();import{r as e}from"./Q_o_XKpy.js";import{t}from"./WKZqy2YT.js";var n=e();function r(e){let r={code:`code`,h1:`h1`,li:`li`,p:`p`,ul:`ul`,...t(),...e.components};return(0,n.jsxs)(n.Fragment,{children:[(0,n.jsx)(r.h1,{children:`save-slots`}),`
+`,(0,n.jsxs)(r.p,{children:[`用于多存档槽、自动存档、读档列表。推荐基于 `,(0,n.jsx)(r.code,{children:`dzmm.kv.namespace()`}),`、`,(0,n.jsx)(r.code,{children:`batchGet()`}),`、
+`,(0,n.jsx)(r.code,{children:`batchPut()`}),` 和 `,(0,n.jsx)(r.code,{children:`list()`}),` 做，不要把大型 base64 / data URL 图片塞进 KV。`]}),`
+`,(0,n.jsx)(r.p,{children:`核心规则：`}),`
+`,(0,n.jsxs)(r.ul,{children:[`
+`,(0,n.jsx)(r.li,{children:`每个 slot 一个小 JSON，对大资源只存 URL / asset id / 轻量引用`}),`
+`,(0,n.jsxs)(r.li,{children:[`用 `,(0,n.jsx)(r.code,{children:`list({ prefix: 'slot:' })`}),` 列槽位，再 `,(0,n.jsx)(r.code,{children:`batchGet(keys)`}),` 取内容`]}),`
+`,(0,n.jsxs)(r.li,{children:[(0,n.jsx)(r.code,{children:`batchGet`}),` / `,(0,n.jsx)(r.code,{children:`batchPut`}),` 每次最多 10 项；槽位更多时按 10 个一组分批`]}),`
+`,(0,n.jsxs)(r.li,{children:[`每个批量请求和响应的完整 UTF-8 JSON 各不能超过 5 MiB（`,(0,n.jsx)(r.code,{children:`5,242,880`}),` 字节）`]}),`
+`,(0,n.jsxs)(r.li,{children:[`同一批 `,(0,n.jsx)(r.code,{children:`batchPut`}),` 是原子的，适合一次提交互相关联的存档字段`]}),`
+`,(0,n.jsxs)(r.li,{children:[`单 key `,(0,n.jsx)(r.code,{children:`put(key, null)`}),` 保存 JSON null；`,(0,n.jsx)(r.code,{children:`batchPut`}),` 顶层 entry value 禁止 null/undefined。清槽位请显式 `,(0,n.jsx)(r.code,{children:`delete`}),`，不要用 null 暗示删除`]}),`
+`,(0,n.jsx)(r.li,{children:`非 DZMM 的普通同源页面可以 best-effort 使用 localStorage fallback；DZMM 生产 iframe 是 opaque origin，不能依赖 localStorage`}),`
+`,(0,n.jsx)(r.li,{children:`远端和 fallback 都失败时必须 reject 或返回明确失败结果，不能把“未保存”静默当成成功`}),`
+`,(0,n.jsxs)(r.li,{children:[`自动存档可用普通 `,(0,n.jsx)(r.code,{children:`put`}),` 削峰：它会等到写进服务端才返回，失败会 reject；每次状态变化都存又不能等 debounce 窗口的地方传 `,(0,n.jsx)(r.code,{children:`{ ack: 'accepted' }`}),`（SDK 收下就返回，写失败不会通知游戏）。手动存档、购买结果和退出前的关键状态必须用 `,(0,n.jsx)(r.code,{children:`{ flush: true }`}),` 立刻写出并等真实响应。Host 文档替换时默认排空 2 秒，在途存档超过 512 KB 时按体积延长，最长 10 秒，但浏览器强杀仍不能保证 unload 写入完成`]}),`
+`,(0,n.jsxs)(r.li,{children:[`存档结构带 `,(0,n.jsx)(r.code,{children:`version`}),`，方便后续迁移`]}),`
+`]})]})}function i(e={}){let{wrapper:i}={...t(),...e.components};return i?(0,n.jsx)(i,{...e,children:(0,n.jsx)(r,{...e})}):r(e)}var a=i;export{a as component};

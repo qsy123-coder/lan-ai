@@ -1,0 +1,287 @@
+# -*- coding: utf-8 -*-
+"""
+dzmm.ai 账号/额度客户端
+- 游客注册（自动过拖拽验证码）
+- 纯 API 签到 (+5/天)
+- 余额/额度查询
+- 任务领取
+- 账号池持久化
+
+依赖: requests, pillow, playwright(仅注册时需要)
+"""
+import base64
+import json
+import os
+import random
+import time
+import uuid
+
+import requests
+
+BASE = "https://www.dzmm.ai"
+PROXY = os.environ.get("DZMM_PROXY", "http://127.0.0.1:7897")
+PROXIES = {"http": PROXY, "https": PROXY} if PROXY else None
+
+# 可选代理池：同目录 proxies.txt，每行一个，形如 http://127.0.0.1:7898
+_PROXY_LIST = None
+_proxy_idx = [0]
+
+def proxy_list():
+    global _PROXY_LIST
+    if _PROXY_LIST is None:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "proxies.txt")
+        arr = []
+        if os.path.exists(path):
+            for line in open(path, encoding="utf-8"):
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    arr.append(line)
+        if not arr:
+            arr = [PROXY] if PROXY else []
+        _PROXY_LIST = arr
+    return _PROXY_LIST
+
+def next_proxy():
+    """轮换代理；只有一个时返回它"""
+    arr = proxy_list()
+    if not arr:
+        return None
+    p = arr[_proxy_idx[0] % len(arr)]
+    _proxy_idx[0] += 1
+    return {"http": p, "https": p}
+UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+POOL_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "accounts.json")
+COOKIE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.json")
+
+_session = None
+
+def session():
+    """带验证码 cookie 的全局 session"""
+    global _session
+    if _session is None:
+        _session = requests.Session()
+        load_cookies(_session)
+    return _session
+
+
+def load_cookies(sess=None):
+    sess = sess or session()
+    if not os.path.exists(COOKIE_FILE):
+        return False
+    try:
+        for c in json.load(open(COOKIE_FILE, encoding="utf-8")):
+            sess.cookies.set(c["name"], c["value"], domain=c.get("domain"), path=c.get("path", "/"))
+        return True
+    except Exception:
+        return False
+
+
+class CaptchaRequired(Exception):
+    pass
+
+
+def _headers(token=None, origin=True):
+    h = {
+        "User-Agent": UA,
+        "Accept": "*/*",
+        "Content-Type": "application/json",
+    }
+    if origin:
+        h["Origin"] = BASE
+        h["Referer"] = BASE + "/"
+    if token:
+        h["Authorization"] = "Bearer " + token
+    return h
+
+
+def trpc_get(proc, token=None, payload=None):
+    """GET /api/trpc/<proc>?batch=1&input=..."""
+    inp = json.dumps({"0": {"json": payload}}) if payload is not None else '{"0":{"json":null}}'
+    url = "%s/api/trpc/%s?batch=1&input=%s" % (BASE, proc, requests.utils.quote(inp))
+    r = session().get(url, headers=_headers(token), proxies=PROXIES, timeout=30)
+    return _parse(r, r)
+
+
+def trpc_post(proc, payload, token=None):
+    """POST /api/trpc/<proc> body {"json":payload}"""
+    url = "%s/api/trpc/%s" % (BASE, proc)
+    r = session().post(url, headers=_headers(token), data=json.dumps({"json": payload}),
+                       proxies=PROXIES, timeout=30)
+    return _parse(r, r)
+
+
+def _parse(r, _resp=None):
+    try:
+        j = r.json()
+    except Exception:
+        j = {"raw": r.text[:400]}
+    if r.status_code == 418 and isinstance(j, dict) and j.get("error") == "captcha_required":
+        raise CaptchaRequired("captcha required: %s" % (j.get("location") or "/__captcha/"))
+    return r.status_code, j
+
+
+# ---------------- 账号池 ----------------
+
+def load_pool():
+    if os.path.exists(POOL_FILE):
+        try:
+            return json.load(open(POOL_FILE, encoding="utf-8"))
+        except Exception:
+            return []
+    return []
+
+
+def save_pool(pool):
+    json.dump(pool, open(POOL_FILE, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+
+
+def add_account(auth):
+    """auth: {access_token, refresh_token, user_id}"""
+    pool = load_pool()
+    for a in pool:
+        if a.get("user_id") == auth.get("user_id"):
+            a.update(auth)
+            save_pool(pool)
+            return
+    auth["created_at"] = int(time.time())
+    auth["last_checkin"] = None
+    auth["credit"] = None
+    pool.append(auth)
+    save_pool(pool)
+
+
+# ---------------- 核心操作 ----------------
+
+def get_me(token):
+    return trpc_get("user.getMe", token)
+
+
+def get_balance(token):
+    return trpc_get("credits.getBalance", token)
+
+
+def get_quota(token):
+    return trpc_get("credits.getQuotaOverview", token)
+
+
+def init_checkin(token, fingerprint="18791706a07917a937c56f1860aca0ec"):
+    """返回 (status, token_or_None, captchaRequired)"""
+    st, j = trpc_post("tasks.initCheckin", {"fingerprint": fingerprint}, token)
+    try:
+        data = j["result"]["data"]["json"]
+        return st, data.get("token"), data.get("captchaRequired")
+    except Exception:
+        return st, None, None
+
+
+def claim_checkin(token, checkin_token):
+    st, j = trpc_post("tasks.claim", {"taskKey": "daily_checkin", "checkinToken": checkin_token}, token)
+    try:
+        data = j["result"]["data"]["json"]
+        return st, data
+    except Exception:
+        return st, j
+
+
+def claim_task(token, task_key, **extra):
+    payload = {"taskKey": task_key}
+    payload.update(extra)
+    return trpc_post("tasks.claim", payload, token)
+
+
+def ensure_captcha(token=None, headless=True, acc=None):
+    """跑一次验证码桥接；acc 传入时把验证码绑定到该账号"""
+    try:
+        import asyncio
+        import captcha_bridge
+        ok = asyncio.run(captcha_bridge.bridge(token, headless=headless, acc=acc))
+        # 重置 session 以重新加载 cookie
+        global _session
+        _session = None
+        session()
+        return ok
+    except Exception as e:
+        print("ensure_captcha err:", str(e)[:100])
+        return False
+
+
+def daily_checkin(token, fingerprint="18791706a07917a937c56f1860aca0ec", auto_captcha=True, acc=None):
+    """完整签到流程，返回 (ok, detail)；captchaRequired 时自动过验证码重试；401 时自动续期"""
+    st, ck_token, captcha = init_checkin(token, fingerprint)
+    # token 过期时自动续期（签到流程可能跑很久）
+    if st == 401 and acc is not None:
+        try:
+            from refresh_accounts import account_creds, sign_in
+            email, pwd, _ = account_creds(acc)
+            if email and pwd:
+                ok2, auth, _msg = sign_in(email, pwd)
+                if ok2 and auth and auth.get("access_token"):
+                    acc["access_token"] = auth["access_token"]
+                    acc["refresh_token"] = auth.get("refresh_token") or acc.get("refresh_token")
+                    token = auth["access_token"]
+                    print("    token 过期已自动续期")
+                    st, ck_token, captcha = init_checkin(token, fingerprint)
+        except Exception as e:
+            print("    自动续期失败:", str(e)[:70])
+    if captcha and auto_captcha:
+        print("    签到需人机验证，自动处理...")
+        if ensure_captcha(token, acc=acc):
+            st, ck_token, captcha = init_checkin(token, fingerprint)
+    if not ck_token:
+        return False, {"stage": "initCheckin", "status": st, "captchaRequired": captcha}
+    st2, data = claim_checkin(token, ck_token)
+    ok = bool(isinstance(data, dict) and data.get("success"))
+    return ok, {"stage": "claim", "status": st2, "data": data}
+
+
+def decode_sb_cookie(value):
+    """解析 sb-rls-auth-token cookie -> auth dict"""
+    raw = value[7:] if value.startswith("base64-") else value
+    try:
+        dec = base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)).decode("utf-8", "replace")
+        j = json.loads(dec)
+        return {
+            "access_token": j.get("access_token"),
+            "refresh_token": j.get("refresh_token"),
+            "user_id": (j.get("user") or {}).get("id"),
+            "expires_at": j.get("expires_at"),
+        }
+    except Exception:
+        return None
+
+
+def new_fingerprint():
+    """生成新的设备指纹对象（格式与前端一致）"""
+    rnd = lambda a, b: round(random.uniform(a, b), 6)
+    data = {
+        "audio": {"sampleHash": rnd(1000, 1300), "oscillator": "sine",
+                  "maxChannels": 1, "channelCountMode": "max"},
+        "canvas": {"commonImageDataHash": uuid.uuid4().hex[:32]},
+        "fonts": {"Arial": 448.03125, "Calibri": 420.046875, "Segoe UI": 450.0,
+                  "Times New Roman": 447.9609375, "Verdana": 486.5625},
+        "hardware": {"videocard": {"vendor": "WebKit", "renderer": "WebKit WebGL",
+                                   "version": "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
+                                   "shadingLanguageVersion": "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)"},
+                     "architecture": 255, "deviceMemory": "16", "jsHeapSizeLimit": 4395630592},
+        "locales": {"languages": "zh-CN", "timezone": "Asia/Shanghai"},
+        "permissions": {"geolocation": "prompt", "notifications": "default"},
+        "plugins": {},
+        "screen": {"width": 1920, "height": 1080, "colorDepth": 24, "maxTouchPoints": 0},
+        "system": {"platform": "Win32", "userAgent": UA},
+        "webgl": {"vendor": "WebKit", "renderer": "WebKit WebGL"},
+        "math": {"acos": 1.5707963267948966, "log": 6.907755278982137},
+    }
+    blob = json.dumps(data, sort_keys=True, separators=(",", ":"))
+    # 前端 BW(): 33 轮 hash，取 md5 近似（服务端只做去重/风控，不校验算法）
+    import hashlib
+    h = hashlib.md5(blob.encode()).hexdigest()
+    return {"data": data, "hash": h}
+
+
+if __name__ == "__main__":
+    import sys
+    pool = load_pool()
+    print("账号池: %d 个" % len(pool))
+    for a in pool:
+        print("  %s credit=%s last_checkin=%s" % (a.get("user_id"), a.get("credit"), a.get("last_checkin")))

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="">
+
+<head>
+  <meta charset="UTF-8">
+  <link rel="icon" href="./favicon.ico">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>H5SDK</title>
+  <script type="module" crossorigin src="./assets/index-DOjwNdYe.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-Bw2Au9ld.css">
+</head>
+
+<body>
+  <div id="app"></div>
+  <script type="text/javascript">
+    // 处理Safari上小键盘关闭后，页面位置没有复位的问题
+    document.addEventListener('focusout', (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+        // 处理自己
+        window.scrollTo(0, 0);
+        // 处理父窗口
+        setTimeout(() => {
+          try {
+            let windows = window.parent && (window.parent === window.top)
+              ? [window.parent]
+              : [window.parent, window.top];
+            windows.forEach(e => {
+              if (e) {
+                let data = JSON.stringify({ op: 'input:focusout' })
+                e.postMessage(data, '*');
+              }
+            })
+          }
+          catch (err) {
+            console.log('错误:' + err.message)
+          }
+        })
+      }
+    });
+  </script>
+</body>
+
+</html>

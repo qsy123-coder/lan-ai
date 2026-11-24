@@ -1,0 +1,177 @@
+
+<head><title>正在使用支付宝付款-全国领先的支付方式</title></head>
+<html>
+<head>
+<meta name="viewport" content="initial-scale=1, maximum-scale=1, user-scalable=no, width=device-width">
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta http-equiv="Content-Language" content="zh-cn">
+<meta name="renderer" content="webkit">
+<title>支付宝付款</title>
+<link href="//www.gzsykjgs.cn/pay//assets/css/alipay_pay.css?v=2" rel="stylesheet" media="screen">
+</head>
+<body>
+<div class="body">
+<h1 class="mod-title">
+<span class="ico-wechat"></span><span class="text">支付宝付款</span>
+</h1>
+<div class="mod-ct">
+<div style="font-size: 20px;
+    padding-top: 1px;">
+  立即付款有机会获得随机优惠哦
+</div>
+
+<div style="font-size: 40px">￥1.00</div>
+<div class="qr-image" id="qrcode"></div>
+<div class="open_app">
+    <a style="
+    border-radius: 10px; 
+    border: 1px solid #1677ff;
+    padding: 18px 50px;
+    color: #fff;
+    background: #1677ff;
+    font-size: 25px;
+    cursor: pointer;
+    font-weight:bold;" href="alipays://platformapi/startapp?appId=20000067&url=http%3A%2F%2Fwww.gzsykjgs.cn%2Fpay%2Fpaygame.php%3Fmoney%3D1.00%26order%3D2620261119175311662%26sign%3Da21939954fee59fe745fac8f40624554">唤起支付宝APP付款</a>
+    <br/><br/>
+    
+    <br/>
+    <!--<font style=" color:red;font-size:20px;">付款前，请先关闭VPN等代理IP软件</font><br>-->
+    <!--<font style=" color:red;font-size:20px;">模拟器玩家，请选择扫码付款</font><br>-->
+    <!--<font style=" color:red;font-size:25px;">如遇中断支付，请申请继续交易</font>-->
+    <br/>
+
+	<!--<button style="-->
+ <!--   border-radius: 10px;-->
+ <!--   border: 4px solid #1677ff;-->
+ <!--   padding: 4px 70px;-->
+ <!--   color: #fff;-->
+ <!--   background: #1677ff;-->
+ <!--   font-size: 30px;-->
+ <!--   cursor: pointer;-->
+ <!--   font-weight: bold;"  id="copy-btn" data-clipboard-text="https://render.alipay.com/p/s/i/?scheme=alipays%3A%2F%2Fplatformapi%2Fstartapp%3FappId%3D20000067%26url%3Dhttp%253A%252F%252Fwww.gzsykjgs.cn%252Fpay%252Fpaygame.php%253Fmoney%253D1.00%2526order%253D2620261119175311662%2526sign%253Da21939954fee59fe745fac8f40624554">复制支付链接</button>-->
+    
+</div>
+
+<div style="margin-top: 1px;
+    border-top: 1px dashed #e5e5e5;
+    padding: 30px 0;
+    position: relative;
+    font-size:20px;">
+<span class="dec dec-left"></span>
+<span class="dec dec-right"></span>
+<!--<div class="ico-scan"></div>-->
+<div  style="text-align:left;font-size: 15px;">
+<p>如果点击按钮没有拉起支付（没反应）,<font style=" color:red;font-size:20px;">解决方案</font>如下：</p><br>
+<!--<p>方案一：<font style="color:red">点击复制支付链接按钮 》 手动打开支付宝 》 在支付宝首页搜索粘贴链接访问</font></p>-->
+<p>方案：<font style="color:red">截图二维码保存到相册 》 手动打开支付宝扫一扫 》选择二维码识别付款</font></p>
+</div>
+</div>
+<div class="tip-text">
+</div>
+</div>
+<script src="//www.gzsykjgs.cn/pay//assets/js/jquery.min.js"></script>
+<script src="//www.gzsykjgs.cn/pay//assets/js/layer.min.js"></script>
+<script src="//www.gzsykjgs.cn/pay//assets/js/jquery.qrcode.min.js"></script>
+<script src="//www.gzsykjgs.cn/pay//assets/js/clipboard.min.js"></script>
+<script>
+    var clipboard = new Clipboard('#copy-btn');
+	clipboard.on('success', function(e) {
+		layer.msg('复制成功，请到支付宝首页顶部搜索里面粘贴访问');
+	});
+	clipboard.on('error', function(e) {
+		layer.msg('复制失败，请选择方案二扫码付款');
+	});
+	var code_url = 'http://www.gzsykjgs.cn/pay/paygame.php?money=1.00&order=2620261119175311662&sign=a21939954fee59fe745fac8f40624554';
+	
+	var url_scheme ='alipays://platformapi/startapp?appId=20000067&url=' + encodeURIComponent(code_url);
+    $('#qrcode').qrcode({
+        text: code_url,
+        width: 230,
+        height: 230,
+        foreground: "#000000",
+        background: "#ffffff",
+        typeNumber: -1
+    });
+    // 订单详情
+    $('#orderDetail .arrow').click(function (event) {
+        if ($('#orderDetail').hasClass('detail-open')) {
+            $('#orderDetail .detail-ct').slideUp(500, function () {
+                $('#orderDetail').removeClass('detail-open');
+            });
+        } else {
+            $('#orderDetail .detail-ct').slideDown(500, function () {
+                $('#orderDetail').addClass('detail-open');
+            });
+        }
+    });
+
+	var isMobile = function (){
+		var ua = navigator.userAgent;
+		var ipad = ua.match(/(iPad).*OS\s([\d_]+)/),
+		isIphone =!ipad && ua.match(/(iPhone\sOS)\s([\d_]+)/),
+		isAndroid = ua.match(/(Android)\s+([\d.]+)/);
+		return isIphone || isAndroid;
+	}
+	function openAlipay(){
+		window.location.href = url_scheme;
+		layer.msg('正在打开支付宝...', {shade: 0,time: 1000});
+	}
+    function wx_open(){
+        layer.alert('请点击屏幕右上角，<b>在浏览器打开</b>即可跳转支付。<br/><font color="red">支付成功后，回到微信即可</font>', {title:'支付提示'});
+    }
+	window.onload = function(){
+		
+        window.location.href = url_scheme;
+         //   location.href = url_scheme;
+
+		setTimeout("loadmsg()", 2000);
+	}
+</script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,2802 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>充值 | DZMM</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#09090b;--surface:#18181b;--surface-2:#27272a;
+  --border:#27272a;--border-hover:#3f3f46;
+  --text:#fafafa;--text-2:#a1a1aa;--text-3:#71717a;
+  --pink:#e84d8a;--pink-dim:rgba(232,77,138,.08);--pink-glow:rgba(232,77,138,.25);
+  --blue:#3b82f6;--green:#22c55e;--violet:#8b5cf6;
+  --danger:#f87171;--danger-dim:rgba(248,113,113,.08);
+  --radius:16px;--radius-sm:12px;
+}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans SC',sans-serif;background:var(--bg);color:var(--text);min-height:100dvh;display:flex;flex-direction:column;align-items:center;padding:0}
+body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellipse 60% 50% at 50% -10%,rgba(232,77,138,.07),transparent);pointer-events:none;z-index:0}
+
+.page{position:relative;z-index:1;width:100%;max-width:440px;padding:24px 20px 40px;min-height:100dvh;display:flex;flex-direction:column}
+
+/* Header */
+.header{display:flex;align-items:center;gap:10px;margin-bottom:28px}
+.logo{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,var(--pink),#a855f7);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.9rem;color:#fff;flex-shrink:0}
+.header-text h1{font-size:1.15rem;font-weight:600;line-height:1.3}
+.header-text p{font-size:.78rem;color:var(--text-3);margin-top:1px}
+.return-link{margin-left:auto;flex-shrink:0;color:var(--text-2);font-size:.78rem;text-decoration:none;border:1px solid var(--border);border-radius:8px;padding:7px 10px;transition:all .15s}
+.return-link:hover{color:var(--text);border-color:var(--border-hover);background:var(--surface)}
+
+/* Section labels */
+.section{margin-bottom:8px;font-size:.75rem;font-weight:500;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em}
+
+/* Package grid */
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:24px}
+.pkg{position:relative;background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:16px 12px;cursor:pointer;text-align:center;transition:all .2s;-webkit-tap-highlight-color:transparent}
+.pkg:hover{border-color:var(--border-hover);background:var(--surface-2)}
+.pkg.sel{border-color:var(--pink);background:var(--pink-dim);box-shadow:0 0 0 1px var(--pink),0 0 20px var(--pink-glow)}
+.pkg .amt{font-size:1.6rem;font-weight:700;letter-spacing:-.02em;line-height:1.2}
+.pkg .amt small{font-size:.65rem;font-weight:500;color:var(--text-2);margin-left:2px;vertical-align:middle}
+.pkg .price{font-size:.78rem;color:var(--text-3);margin-top:4px}
+.pkg .bonus{position:absolute;top:-9px;right:-4px;background:linear-gradient(135deg,var(--pink),#f472b6);color:#fff;font-size:.65rem;padding:2px 8px;border-radius:20px;font-weight:600;box-shadow:0 2px 8px rgba(232,77,138,.3)}
+.pkg .popular{position:absolute;top:-9px;left:8px;background:var(--surface-2);border:1px solid var(--border);color:var(--text-2);font-size:.6rem;padding:1px 6px;border-radius:8px;font-weight:500}
+.pkg .first-time{position:absolute;top:-9px;left:8px;background:linear-gradient(135deg,#f97316,#fb923c);color:#fff;font-size:.65rem;padding:2px 8px;border-radius:20px;font-weight:600;box-shadow:0 2px 8px rgba(249,115,22,.3)}
+/* 人民币档位（rmb_v1）。复用 .pkg 的选中/网格行为，只加自己的行：人民币大字、到账积分、约可聊。 */
+.pkg .amt .cur{font-size:.9rem;font-weight:600;color:var(--text-2);margin-right:1px;vertical-align:baseline}
+.pkg .pts{font-size:.8rem;color:var(--text-2);margin-top:4px}
+.pkg .rounds{font-size:.68rem;color:var(--text-3);margin-top:2px}
+.pkg .badge-tag{position:absolute;top:-9px;left:8px;background:var(--surface-2);border:1px solid var(--border);color:var(--text-2);font-size:.6rem;padding:1px 6px;border-radius:8px;font-weight:500}
+.pkg .badge-tag.gift{left:auto;right:-4px;background:linear-gradient(135deg,var(--pink),#f472b6);border:none;color:#fff;font-size:.65rem;padding:2px 8px;border-radius:20px;font-weight:600;box-shadow:0 2px 8px rgba(232,77,138,.3)}
+.pkg.disabled{opacity:.45;cursor:not-allowed}
+.pkg.disabled:hover{border-color:var(--border);background:var(--surface)}
+/* 自定义金额 */
+.custom{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:14px 12px;margin:-14px 0 24px;transition:all .2s;display:none}
+.custom.sel{border-color:var(--pink);background:var(--pink-dim);box-shadow:0 0 0 1px var(--pink),0 0 20px var(--pink-glow)}
+.custom .row{display:flex;align-items:center;gap:8px}
+.custom .cur{font-size:1.1rem;font-weight:600;color:var(--text-2)}
+.custom input{flex:1;min-width:0;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:1.05rem;padding:10px 12px;outline:none;-moz-appearance:textfield}
+.custom input::-webkit-outer-spin-button,.custom input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.custom input:focus{border-color:var(--pink)}
+.custom .quote{margin-top:10px;font-size:.8rem;color:var(--text-2);line-height:1.7;display:none}
+.custom .quote .line{display:flex;justify-content:space-between}
+.custom .quote .total{color:var(--text);font-weight:600}
+.custom .quote .rounds{color:var(--text-3);font-size:.7rem}
+.custom .err{margin-top:8px;font-size:.78rem;color:var(--danger);display:none}
+.custom .hint{margin-top:8px;font-size:.72rem;color:var(--text-3)}
+/* 活动期占住自定义金额框的位置，只说一句什么时候恢复；与 .custom 同一套外边距 */
+.custom-paused{background:var(--surface);border:1.5px dashed var(--border);border-radius:var(--radius);padding:12px;margin:-14px 0 24px;font-size:.8rem;color:var(--text-2);text-align:center;line-height:1.5;display:none}
+/* 人民币档位下方的一句小字；紧跟的上一个块都带 24px 下边距，收回 14px 与档位贴近 */
+.rmb-price-note{margin:-14px 0 20px;font-size:.78rem;color:var(--text-2);line-height:1.6;display:none}
+.rmb-price-note p{margin:6px 0}
+.rmb-price-note a{color:inherit;text-decoration:underline;text-underline-offset:2px}
+.rmb-price-note summary{cursor:pointer;list-style:none}
+.rmb-price-note summary::-webkit-details-marker{display:none}
+.rmb-price-note summary .more{color:var(--text);text-decoration:underline;text-underline-offset:2px;margin-left:4px}
+.rmb-price-note details[open] summary .more{color:var(--text-3)}
+/* 置灰的支付方式 */
+.method.disabled{opacity:.72;cursor:help;border-style:dashed;background:var(--surface-2)}
+.method.disabled:hover{border-color:var(--border-hover);background:var(--surface-2)}
+.method-unavailable{display:block;margin-top:5px;color:var(--text-3);font-size:.64rem;line-height:1.35}
+.method-hint{font-size:.75rem;color:var(--text-3);margin:-16px 0 16px;line-height:1.5;display:none}
+.card-fx{font-size:.78rem;color:var(--text-2);text-align:center;margin-bottom:8px;line-height:1.5;display:none}
+
+/* 月卡曝光位（引流，不是套餐）。
+   刻意不复用 .pkg：它是「可选中的套餐」那一族，共用 class 就会被 .pkg.sel、
+   querySelectorAll('.pkg') 那些既有逻辑当成一个档位。这里只借它的排版尺寸，
+   让大号数字跟下面的积分档位对齐，行为上是一个链接。 */
+.promo-card{position:relative;background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:16px 12px;cursor:pointer;text-align:center;transition:all .2s;-webkit-tap-highlight-color:transparent;margin-bottom:10px;animation:fadeIn .3s ease both}
+.promo-card:hover{border-color:var(--border-hover);background:var(--surface-2)}
+.promo-card .amt{font-size:1.6rem;font-weight:700;letter-spacing:-.02em;line-height:1.2}
+.promo-card .amt .lead{font-size:.7rem;font-weight:500;color:var(--text-2);margin-right:4px;vertical-align:middle}
+.promo-card .amt small{font-size:.65rem;font-weight:500;color:var(--text-2);margin-left:2px;vertical-align:middle}
+.promo-card .sub{font-size:.72rem;color:var(--text-2);margin-top:4px}
+.promo-card .price{font-size:.78rem;color:var(--text-3);margin-top:4px}
+.promo-card .cny{font-size:.68rem;color:var(--text-3);margin-top:2px}
+.promo-card .go{font-size:.7rem;color:var(--pink);margin-top:6px;font-weight:500}
+.offer-tabs{display:flex;gap:8px;margin-bottom:10px}
+.offer-tab{flex:1;background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:8px 10px;color:var(--text-2);font-size:.82rem;font-weight:500;cursor:pointer;transition:all .2s;-webkit-tap-highlight-color:transparent}
+.offer-tab.sel{border-color:var(--pink);color:var(--text);background:var(--surface-2)}
+.card-tab-note{font-size:.75rem;color:var(--text-2);margin:0 2px 14px;line-height:1.5}
+/* 月卡详情付款页（月卡 tab 点卡片进来）：顶上一行返回月卡列表，下面是这张卡的完整介绍 */
+.card-detail-back{display:inline-flex;align-items:center;gap:4px;background:none;border:none;color:var(--text-2);cursor:pointer;font-size:.82rem;padding:4px 0;margin-bottom:10px}
+.card-detail-back:hover{color:var(--text)}
+.card-detail-back svg{width:16px;height:16px}
+.card-sec{font-size:.8rem;font-weight:600;color:var(--text);margin:10px 0 2px}
+/* 「你将获得」列表在 .card-quote 外面（标题 .card-sec 之后），不能挂在 .card-quote 下；左缩进与「购买须知」同一个值，两组圆点竖向对齐。 */
+.card-perks{margin:2px 0 0;padding-left:18px;font-size:.8rem;line-height:1.7;color:var(--text-2)}
+.card-notes{margin:2px 0 0;padding-left:18px;font-size:.78rem;line-height:1.7;color:var(--text-2)}
+.card-info{background:var(--surface);border:1.5px solid var(--pink);border-radius:var(--radius);padding:16px 14px;margin-bottom:24px;text-align:left}
+.card-info .card-quote{margin-top:4px}
+/* 月卡卡片按档位上色（FEATURE-148，卡面方案 A，与主站卡面同一组色值）。档位只按 plan_code 前缀认
+   （pointsCardTier）；认不出的前缀不加类，仍是上面这张中性卡片。 */
+.promo-card.tier-gold{background:linear-gradient(160deg,#FBE7A1 0%,#E9C15A 38%,#C9962E 72%,#A87A1F 100%);border-color:#E9C15A;color:#3B2A05}
+.promo-card.tier-bronze{background:linear-gradient(160deg,#E6AA80 0%,#C57F4C 38%,#A0592A 72%,#76401F 100%);border-color:#C57F4C;color:#FFF7F0}
+.promo-card.tier-gold:hover,.promo-card.tier-bronze:hover{filter:brightness(1.06)}
+.promo-card.tier-gold .amt .lead,.promo-card.tier-gold .amt small,.promo-card.tier-bronze .amt .lead,.promo-card.tier-bronze .amt small{color:inherit;opacity:.8}
+.promo-card.tier-gold .sub,.promo-card.tier-bronze .sub{color:inherit;opacity:.85}
+.promo-card.tier-gold .price,.promo-card.tier-gold .cny,.promo-card.tier-bronze .price,.promo-card.tier-bronze .cny{color:inherit;opacity:.75}
+.promo-card.tier-gold .go,.promo-card.tier-bronze .go{color:inherit;font-weight:700}
+.promo-card .tier-chip{position:absolute;top:-9px;left:8px;font-size:.6rem;padding:1px 7px;border-radius:8px;font-weight:700}
+.promo-card.tier-gold .tier-chip{background:#3B2A05;border-color:#3B2A05;color:#FBE7A1}
+.promo-card.tier-bronze .tier-chip{background:#3a2012;border-color:#3a2012;color:#F1C29E}
+/* 付款屏标题前的档位角标，与卡片同色 */
+.tierchip{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:6px;font-size:11px;font-weight:800}
+.tierchip.tier-gold{background:linear-gradient(90deg,#FBE7A1,#C9962E);color:#3B2A05}
+.tierchip.tier-bronze{background:linear-gradient(90deg,#E6AA80,#A0592A);color:#FFF7F0}
+
+/* 月卡付款屏的报价与权益块（在 .pkg 里，左对齐） */
+.card-quote{margin:4px 0 10px;padding:10px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+.card-quote .card-price{font-size:1.5rem;font-weight:700;letter-spacing:-.02em;line-height:1.2}
+.card-quote .card-price small{font-size:.8rem;font-weight:500;color:var(--text-2);margin-left:4px;vertical-align:middle}
+.card-quote .card-price.muted{font-size:.9rem;font-weight:500;color:var(--text-3)}
+.card-quote .card-term{font-size:.78rem;color:var(--text-3);margin-top:2px}
+.card-quote .card-total{font-size:.85rem;color:var(--text);margin-top:6px}
+.card-quote .card-unavailable{font-size:.85rem;color:var(--danger);line-height:1.5}
+
+/* Payment methods */
+.methods{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:24px}
+.method{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius-sm);padding:14px 8px 10px;cursor:pointer;text-align:center;transition:all .2s;-webkit-tap-highlight-color:transparent}
+.method:hover{border-color:var(--border-hover)}
+.method.sel{border-color:var(--pink);background:var(--pink-dim)}
+.method.sel[data-method="alipay"]{border-color:var(--blue);background:rgba(59,130,246,.06);box-shadow:0 0 0 1px var(--blue)}
+.method.sel[data-method="alipay-2"]{border-color:var(--blue);background:rgba(59,130,246,.06);box-shadow:0 0 0 1px var(--blue)}
+.method.sel[data-method="alipay-3"]{border-color:var(--blue);background:rgba(59,130,246,.06);box-shadow:0 0 0 1px var(--blue)}
+.method.sel[data-method="wechat"]{border-color:var(--green);background:rgba(34,197,94,.06);box-shadow:0 0 0 1px var(--green)}
+.method.sel[data-method="wechat-2"]{border-color:var(--green);background:rgba(34,197,94,.06);box-shadow:0 0 0 1px var(--green)}
+.method.sel[data-method="wechat-3"]{border-color:var(--green);background:rgba(34,197,94,.06);box-shadow:0 0 0 1px var(--green)}
+.method.sel[data-method="stripe"]{border-color:var(--violet);background:rgba(139,92,246,.06);box-shadow:0 0 0 1px var(--violet)}
+.method svg{display:block;margin:0 auto 6px;width:28px;height:28px}
+.method .name{font-size:.78rem;color:var(--text-2);font-weight:500;transition:color .2s}
+.method .chan{font-size:.68rem;color:var(--text-3);margin-top:2px}
+.method.sel .name{color:var(--text)}
+.method.sel .chan{color:var(--text-2)}
+.method-note{font-size:.75rem;color:var(--text-3);margin:-16px 0 20px;line-height:1.5;display:none}
+
+/* CTA Button */
+.cta-area{margin-top:auto;padding-top:8px}
+.btn{width:100%;padding:15px;border:none;border-radius:var(--radius-sm);font-size:.95rem;font-weight:600;cursor:pointer;color:#fff;transition:all .2s;background:linear-gradient(135deg,var(--pink),#d946a8)}
+.btn:disabled{opacity:.35;cursor:not-allowed;filter:none}
+.btn:not(:disabled):hover{box-shadow:0 4px 20px rgba(232,77,138,.35);transform:translateY(-1px)}
+.btn:not(:disabled):active{transform:translateY(0)}
+.btn-sub{font-size:.72rem;color:var(--text-3);text-align:center;margin-top:8px}
+
+/* Error */
+.error{background:var(--danger-dim);border:1px solid rgba(248,113,113,.2);color:var(--danger);border-radius:var(--radius-sm);padding:12px 14px;font-size:.82rem;margin-bottom:14px;display:none;line-height:1.5}
+.error .vpn-hint{margin-top:10px;padding-top:10px;border-top:1px solid rgba(248,113,113,.15)}
+.error .vpn-btn{display:inline-flex;align-items:center;gap:4px;padding:7px 14px;border:1px solid rgba(248,113,113,.3);border-radius:8px;color:var(--danger);background:transparent;cursor:pointer;font-size:.78rem;transition:all .15s}
+.error .vpn-btn:hover{background:rgba(248,113,113,.08)}
+/* 地区限制说明：这不是报错（用户没做错任何事），所以刻意不用 .error 的告警红，
+   用中性的 surface + 次级文字色，和「支付方式」这一段读起来是同一层信息。 */
+.region-notice{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;font-size:.82rem;color:var(--text-2);margin:-4px 0 14px;line-height:1.6;display:none}
+.region-notice-hint{margin-top:8px;padding-top:8px;border-top:1px solid var(--border)}
+
+/* Spinner */
+.spinner{display:none;text-align:center;padding:16px}
+.spinner::after{content:'';display:inline-block;width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--pink);border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* User identity banner */
+.user-banner{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:20px;display:none}
+.user-banner .ub-label{font-size:.72rem;color:var(--text-3);margin-bottom:10px;text-transform:uppercase;letter-spacing:.04em}
+.user-banner .ub-row{display:flex;align-items:center;gap:14px}
+.user-banner .ub-avatar{width:52px;height:52px;border-radius:50%;object-fit:cover;background:var(--surface-2);flex-shrink:0;border:2px solid var(--border)}
+.user-banner .ub-name{font-weight:600;font-size:1.05rem;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.user-banner .ub-id{font-size:.75rem;color:var(--text-3);font-family:'SF Mono',SFMono-Regular,Consolas,monospace;margin-top:2px}
+.user-banner .ub-noavatar{width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,var(--pink),#a855f7);display:flex;align-items:center;justify-content:center;font-size:1.3rem;font-weight:700;color:#fff;flex-shrink:0}
+.user-banner .anon-warning{margin-top:10px;padding:10px 12px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:var(--radius-sm);font-size:.82rem;color:#f59e0b;line-height:1.5}
+
+/* Info card */
+.info{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px 16px;margin-top:20px;font-size:.75rem;color:var(--text-3);line-height:1.7}
+.info strong{color:var(--text-2);font-weight:500;font-size:.78rem}
+.info ul{list-style:none;margin-top:6px}
+.info li{padding-left:14px;position:relative}
+.info li::before{content:'';position:absolute;left:0;top:8px;width:5px;height:5px;border-radius:50%;background:var(--border-hover)}
+
+/* Community */
+.community{margin-top:16px;display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap}
+.community span{font-size:.72rem;color:var(--text-3)}
+.community a{color:var(--text-2);font-size:.75rem;text-decoration:none;padding:4px 10px;border-radius:8px;border:1px solid var(--border);transition:all .15s}
+.community a:hover{border-color:var(--border-hover);color:var(--text)}
+
+/* No UUID */
+.no-uuid{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:var(--text-3);gap:8px}
+.no-uuid p:first-child{font-size:1rem;color:var(--text-2)}
+
+/* ---- Result view ---- */
+.result{display:none}
+.result .back-row{margin-bottom:20px}
+.result .back{display:inline-flex;align-items:center;gap:4px;background:none;border:none;color:var(--text-3);cursor:pointer;font-size:.82rem;padding:4px 0;transition:color .15s}
+.result .back:hover{color:var(--text)}
+.result .back svg{width:16px;height:16px}
+.result h2{text-align:center;font-size:1.1rem;font-weight:600;margin-bottom:20px}
+.qr-wrap{background:#fff;border-radius:var(--radius);padding:16px;margin:0 auto;width:fit-content;box-shadow:0 8px 32px rgba(0,0,0,.4)}
+.qr-wrap canvas{display:block}
+.result .hint{text-align:center;font-size:.82rem;color:var(--text-3);margin-top:16px}
+.result .actions{display:flex;flex-direction:column;gap:10px;margin-top:20px}
+.btn-outline{width:100%;padding:13px;border:1.5px solid var(--border);border-radius:var(--radius-sm);background:transparent;color:var(--text);font-size:.88rem;cursor:pointer;transition:all .15s;text-decoration:none;text-align:center;font-weight:500}
+.btn-outline:hover{border-color:var(--border-hover);background:var(--surface)}
+.result .notice{text-align:center;font-size:.72rem;color:var(--text-3);margin-top:14px}
+
+/* Animations */
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.pkg,.method{animation:fadeIn .3s ease both}
+.pkg:nth-child(1){animation-delay:.05s}.pkg:nth-child(2){animation-delay:.1s}
+.pkg:nth-child(3){animation-delay:.15s}.pkg:nth-child(4){animation-delay:.2s}
+.method:nth-child(1){animation-delay:.25s}.method:nth-child(2){animation-delay:.3s}.method:nth-child(3){animation-delay:.35s}
+
+/* 连续包月（FEATURE-150，u26 #7141）：月卡 tab／月卡付款屏上「单次购买 / 连续包月」切换与订阅三张卡 */
+.sub-toggle{display:flex;background:var(--surface);border:1.5px solid var(--border);border-radius:999px;padding:3px;margin-bottom:12px}
+.sub-toggle button{flex:1;border:none;background:transparent;color:var(--text-2);font-size:.82rem;font-weight:600;padding:8px 10px;border-radius:999px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.sub-toggle button.sel{background:linear-gradient(135deg,var(--pink),#d946a8);color:#fff}
+.sub-card{text-align:left;padding:16px 14px 14px}
+.sub-card.sel{box-shadow:0 0 0 2px var(--pink),0 0 20px var(--pink-glow)}
+.sub-card.locked{opacity:.45;cursor:not-allowed;filter:grayscale(.6)}
+.sub-card .sub-head{display:flex;align-items:center;gap:8px}
+.sub-card .sub-name{font-size:.95rem;font-weight:700}
+.sub-card .sub-price-row{display:flex;align-items:baseline;gap:8px;margin-top:6px;flex-wrap:wrap}
+.sub-card .sub-price{font-size:1.5rem;font-weight:800;letter-spacing:-.02em}
+.sub-card .sub-price small{font-size:.75rem;font-weight:600;margin-left:2px;opacity:.8}
+.sub-card .sub-list{font-size:.78rem;text-decoration:line-through;opacity:.6}
+.sub-card .sub-off{font-size:.66rem;font-weight:800;padding:1px 7px;border-radius:6px;background:#e84d8a;color:#fff}
+.sub-card .sub-copy{font-size:.75rem;margin-top:6px;line-height:1.5;opacity:.9}
+.promo-card.tier-plus{background:linear-gradient(160deg,#C4B5FD 0%,#8B5CF6 45%,#6D28D9 100%);border-color:#8B5CF6;color:#FAF5FF}
+.promo-card.tier-plus .tier-chip{background:#2E1065;color:#DDD6FE}
+.sub-drawer{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:12px 14px;margin:-4px 0 12px;font-size:.78rem;line-height:1.7;color:var(--text-2);animation:fadeIn .2s ease both}
+.sub-drawer ul{padding-left:18px}
+.sub-drawer b{color:var(--text)}
+.sub-notice{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;font-size:.82rem;color:var(--text-2);margin:0 0 14px;line-height:1.6;display:none}
+.sub-notice a{color:var(--pink);font-weight:600;text-decoration:none;margin-left:6px}
+.sub-method{display:flex;align-items:center;gap:10px;background:var(--surface);border:1.5px solid var(--violet);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:14px;font-size:.85rem;font-weight:600}
+.sub-method svg{width:26px;height:26px;flex-shrink:0}
+.sub-method .chan{font-size:.72rem;font-weight:500;color:var(--text-3);margin-left:auto}
+.sub-agree{display:flex;align-items:flex-start;gap:8px;font-size:.78rem;color:var(--text-2);margin:0 0 14px;line-height:1.5;cursor:pointer}
+.sub-agree input{margin-top:2px;accent-color:var(--pink)}
+.sub-confirm{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:20px 16px;margin-bottom:16px;text-align:center}
+.sub-confirm.done{border-color:var(--pink);box-shadow:0 0 20px var(--pink-glow);text-align:left}
+.sub-confirm .sc-spin{display:inline-block;width:28px;height:28px;border:2.5px solid var(--border);border-top-color:var(--pink);border-radius:50%;animation:spin .7s linear infinite;margin:6px auto 12px}
+.sub-confirm .sc-title{font-size:1.05rem;font-weight:700;margin-bottom:6px}
+.sub-confirm .sc-hint{font-size:.8rem;color:var(--text-3);line-height:1.6}
+.sub-confirm .sc-label{font-size:.72rem;color:var(--text-3);margin:12px 0 4px}
+.sub-confirm .sc-price{font-size:.88rem;color:var(--text-2);margin-top:2px}
+.sub-confirm ul{margin:4px 0 0;padding-left:18px;font-size:.82rem;line-height:1.8;color:var(--text-2)}
+.sub-confirm ul b{color:var(--text)}
+.sub-confirm .sc-kv{display:flex;justify-content:space-between;font-size:.84rem;color:var(--text-2);border-top:1px solid var(--border);margin-top:12px;padding-top:10px}
+.sub-confirm .sc-kv b{color:var(--text)}
+.sub-confirm .sc-actions{display:flex;flex-direction:column;gap:10px;margin-top:16px}
+.sub-btn-sub{font-size:.72rem;color:var(--text-3);text-align:center;margin-top:8px;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="page" id="app">
+  <!-- No UUID fallback -->
+  <div class="no-uuid" id="noUuid" style="display:none">
+    <p>请从应用内进入充值</p>
+    <p style="font-size:.82rem">在应用中点击「充值」按钮获取专属链接</p>
+  </div>
+
+  <!-- Selection view (hidden until token resolves) -->
+  <div id="selectView" style="display:none">
+    <div class="header">
+      <div class="logo">D</div>
+      <div class="header-text">
+        <h1>充值积分</h1>
+        <p>酒馆AI / DZMM 通用</p>
+      </div>
+      <a class="return-link" id="returnLink" href="https://dzmm.io" onclick="return returnToDzmm('payment_page')">返回 DZMM</a>
+    </div>
+
+    <div class="user-banner" id="userBanner">
+      <div class="ub-label">正在为以下用户充值</div>
+      <div class="ub-row">
+        <img class="ub-avatar" id="userAvatar" src="" alt="">
+        <div class="ub-noavatar" id="userAvatarFallback" style="display:none"></div>
+        <div style="min-width:0;flex:1">
+          <div class="ub-name" id="userName"></div>
+          <div class="ub-id" id="userIdLabel"></div>
+        </div>
+      </div>
+      <div class="anon-warning" id="anonWarning" style="display:none">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+          <span style="font-size:1.1rem">⚠️</span>
+          <strong>游客账号提醒</strong>
+        </div>
+        <div>你当前使用的是游客账号。充值前请确保已<strong>备份登录码</strong>，否则清除浏览器数据后将无法找回账号和积分。</div>
+      </div>
+    </div>
+
+    <div id="priceNotice" style="text-align:center;color:#FFD700;font-size:.82rem;font-weight:500;padding:8px 12px;margin-bottom:12px;background:rgba(255,215,0,.06);border:1px solid rgba(255,215,0,.15);border-radius:var(--radius-sm)">
+      💱 所有价格以<strong>美元 (USD)</strong> 标价
+    </div>
+    <div id="promoBanner" style="display:none;text-align:center;padding:12px 14px;margin-bottom:12px;background:linear-gradient(135deg,rgba(232,77,138,.12),rgba(244,114,182,.12));border:1.5px solid rgba(232,77,138,.35);border-radius:var(--radius-sm);box-shadow:0 0 20px rgba(232,77,138,.15)">
+      <div style="font-size:1rem;font-weight:700;color:#f472b6;letter-spacing:.02em;margin-bottom:4px">
+        🎉 <span id="promoBannerText">活动进行中</span> 🎉
+      </div>
+      <div style="font-size:.82rem;color:#fde7f4;font-weight:500">
+        充值积分加赠中，套餐价格不变、积分更多
+      </div>
+    </div>
+    <div class="section">选择套餐</div>
+    <!-- 充值 / 月卡两个 tab。默认是充值，充值那一屏与今天逐字不变；
+         没有可摆的月卡时整条 tab 不出现，页面就是今天那一页。 -->
+    <div class="offer-tabs" id="offerTabs" style="display:none">
+      <button type="button" class="offer-tab sel" id="offerTabTopup" onclick="selectOfferTab('topup')">充值</button>
+      <button type="button" class="offer-tab" id="offerTabCard" onclick="selectOfferTab('card')">月卡</button>
+    </div>
+    <!-- 连续包月切换（u26 #7141）：只在签名链接放行、信用卡全局开关开着、主后端报价可用时出现；
+         否则整块不出现，月卡 tab 与月卡付款屏保持现网样子。 -->
+    <div class="sub-toggle" id="subToggle" style="display:none">
+      <button type="button" class="sel" id="subToggleOnce" onclick="selectSubscriptionMode('once')">单次购买</button>
+      <button type="button" id="subToggleSub" onclick="selectSubscriptionMode('sub')">连续包月</button>
+    </div>
+    <!-- 月卡 tab 的卡片。🔴 刻意不用 .pkg 类名：选中态是按 .pkg 的下标实现的，
+         混进来会让充值档位的选中态串位。 -->
+    <div id="pointsCardTiles" style="display:none"></div>
+    <!-- 月卡详情付款页（u26 #7092）：月卡 tab 点卡片进来，不建单；下面仍是支付方式与底部付款按钮。 -->
+    <div id="cardDetail" style="display:none">
+      <button type="button" class="card-detail-back" onclick="closeCardDetail()">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3L5 8l5 5"/></svg>
+        返回月卡列表
+      </button>
+      <!-- 🔴 不用 .pkg：充值档位的选中与恢复按 document 里 .pkg 的下标取，混进一个会让它们串位。 -->
+      <div class="card-info" id="cardDetailInfo"></div>
+    </div>
+    <!-- 连续包月整屏：三张卡（点卡片原地展开权益抽屉，Plus 不展开）、美元信用卡、知悉勾选、开通按钮。 -->
+    <div id="subscriptionView" style="display:none">
+      <div class="sub-notice" id="subNotice"></div>
+      <div id="subTiles"></div>
+      <div class="section">支付方式</div>
+      <div class="sub-method" id="subMethod"></div>
+      <label class="sub-agree"><input type="checkbox" id="subAgree" onchange="onSubscriptionAgree()"><span>我已知悉首期及后续每月按上述金额自动扣款，可在订阅管理关闭自动续费</span></label>
+      <div class="error" id="subError"></div>
+      <button class="btn" id="subBtn" onclick="startSubscription()" disabled>请选择连续包月档位</button>
+      <div class="sub-btn-sub" id="subBtnSub">按月自动续费，可随时在订阅管理关闭；关闭后本期照常用到期，之后不再扣款。每期扣款成功后才发放当期权益。</div>
+    </div>
+    <!-- 开通确认（开发单 B4）：点开通、新窗口去付款的同时，原页原地切到这里，用只读结果凭证轮询开通结果。 -->
+    <div id="subConfirm" style="display:none"><div class="sub-confirm" id="subConfirmBody"></div></div>
+    <div class="grid" id="packages"></div>
+    <!-- 自定义金额（只在人民币版本 rmb_v1 出现）。三个数由 resolve 下发的规则算出，页面不内置价格或比例。 -->
+    <div class="custom" id="customBox">
+      <div class="row">
+        <span class="cur">¥</span>
+        <input type="number" inputmode="numeric" id="customInput" placeholder="输入 10–500 的整数金额" oninput="onCustomInput()" onfocus="onCustomInput()">
+      </div>
+      <div class="quote" id="customQuote">
+        <div class="line"><span>基础积分</span><span id="customBase"></span></div>
+        <div class="line" id="customBonusLine"><span>赠送积分</span><span id="customBonus"></span></div>
+        <div class="line total"><span>预计到账</span><span id="customTotal"></span></div>
+        <div class="rounds" id="customRounds"></div>
+      </div>
+      <div class="err" id="customErr"></div>
+      <div class="hint" id="customHint"></div>
+    </div>
+    <!-- 活动期自定义金额框藏起来时，同一位置换成这一句（文字由 syncRmbCustomBox 按 resolve 下发的截止时间写入）。 -->
+    <div class="custom-paused" id="customPaused"></div>
+    <!-- 人民币版本充值 tab 的一句小字。各档每元所得积分与原美元标价（按 7.3 折算）逐档核过一致（误差是取整）；
+         档位或活动积分若改到不再一致，这句要跟着改或撤。 -->
+    <div class="rmb-price-note" id="rmbPriceNote">
+      <p>现已改为人民币标价，各档每元所得积分与原标价一致。<strong>充值到账的积分（含套餐加赠）不设到期日，具体以<a id="tosLink" href="https://dzmm.io/legal/tos" target="_blank" rel="noopener">服务条款</a>为准。</strong></p>
+      <!-- 有效期这句与服务条款 3.2.1、支付服务账本一致：充值与加赠都入永久积分、无到期时间（moedisk 2026-10-05 定）。
+           条款里还有「永久停止运营时失效」，所以这里只说「不设到期日」并指向条款，不写成无条件的「永不过期」。 -->
+      <details><summary>“约可聊”按每轮 1–2 积分估算，实际因模型和上下文而异。<span class="more">怎么算？</span></summary>
+        <p>1 轮指 AI 生成一次回复，不是你发出一条消息；范围是到账积分分别除以 2 和 1，向下取整。</p>
+        <p>想按自己的消耗估算：在「我的 → 积分」看一次 AI 回复的实际扣费，用「到账积分 ÷ 该次扣费」。一次记录仅供参考，之后每轮扣费不一定相同。</p>
+      </details>
+    </div>
+
+    <!-- 支付方式整块。月卡 tab 按这个 id 藏它；🔴 别改回藏 methodsContainer.parentElement——
+         它的父节点就是 #selectView，藏了等于整页黑屏（工单 #5917）。 -->
+    <div id="methodsSection">
+    <div class="section">支付方式</div>
+    <div class="methods" id="methodsContainer"></div>
+    <div class="method-note" id="methodChannelNote"></div>
+    <div class="method-hint" id="methodHint"></div>
+    <div class="region-notice" id="cnyRegionNotice" style="display:none"></div>
+    </div>
+
+
+
+    <div class="error" id="error"></div>
+    <div class="spinner" id="spinner"></div>
+
+    <div class="cta-area" id="ctaArea">
+      <div class="card-fx" id="cardFxNote"></div>
+      <button class="btn" id="payBtn" onclick="checkout()" disabled>选择套餐和支付方式</button>
+      <div class="btn-sub" id="payBtnSub">充值后最长可能需要 10 分钟到账</div>
+    </div>
+
+    <div class="info">
+      <strong>积分说明</strong>
+      <ul>
+        <li>积分可在酒馆AI、DZMM、NovelGPT 通用</li>
+        <li id="infoPricingLine">标价为美元 (USD)，支付宝/微信按 ≈7.3（含手续费）汇率自动转为人民币结算</li>
+        <li>充值后最长可能需要 10 分钟到账</li>
+        <li>VIP升级在10分钟以内完成</li>
+      </ul>
+    </div>
+
+    <div class="community">
+      <span>遇到问题？</span>
+      <a id="ticketLink" href="https://dzmm.io/settings/credits" target="_blank" rel="noopener">工单入口</a>
+    </div>
+  </div>
+
+  <!-- Result view (QR code / payment link) -->
+  <div class="result" id="resultView">
+    <div class="back-row">
+      <button class="back" onclick="backToSelect()">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3L5 8l5 5"/></svg>
+        返回
+      </button>
+    </div>
+    <h2 id="resultTitle">扫码支付</h2>
+    <div class="qr-wrap" id="qrWrap" style="display:none"><div id="qrContainer"></div></div>
+    <div class="hint" id="resultHint"></div>
+    <div class="actions" id="resultActions"></div>
+    <div class="notice">充值后最长可能需要 10 分钟到账</div>
+  </div>
+</div>
+
+<script src="/qrcode.min.js"></script>
+<script>
+const EXCHANGE_RATE = 7.3;
+
+let selectedPkg = null;
+// New links bind the monthly-card order in their signed payload. The URL copy
+// is read only for old links; /api/resolve replaces it with the signed value.
+let pointsCardOrderId = null;
+// 月卡付款屏的报价与权益（/api/resolve 在月卡模式下发的 pointsCardPlan）。
+// 三态：undefined = 还没从服务端拿到；null = 服务端说读不到（暂时买不了）；对象 = 可付。
+// 金额（美元 / 人民币）都是服务端算好的数，这里只格式化，**不做任何换算**——
+// 人民币那个数与服务端 checkout 收款走同一个函数，页面上写的就是要收的。
+let pointsCardPlan = undefined;
+/** 月卡 tab 摆出来的那几张卡（/api/resolve 的 pointsCardOffers）。 */
+let pointsCardOffers = [];
+/** 收银台直接下月卡的灰度位（签名链接里带的，resolve 回报）。关着时卡片只是回主站月卡页的入口。 */
+let pointsCardCashierDirect = false;
+let directPointsCardStarting = false;
+/**
+ * 月卡信用卡单次购买（u26 #7533）：resolve 下发的 { rateMilli, minUsdCents }；null 表示这条链接不出信用卡。
+ * 服务端只在签名展示位、直接下月卡、信用卡全局开关、充值规则四样都成立时给。
+ */
+let cardOnetime = null;
+/** 信用卡单次购买这一次点击的请求号：网络错误或服务端 5xx 后再点沿用它（主后端按它返回同一个付款链接）。 */
+let cardOnetimeRequest = null;
+/** 月卡详情付款页正在看的那张卡（在售报价对象）；null 表示不在详情页。 */
+let cardDetailOffer = null;
+// 连续包月（u26 #7141）：resolve 下发的 subscription（报价、已开通、待付款、管理页链接）；没有就是 null。
+let subscriptionState = null;
+// 月卡 tab／月卡付款屏上选的是单次购买还是连续包月，默认单次购买。
+let subscriptionMode = 'once';
+let selectedSubscriptionPlan = null;
+let subscriptionDrawerOpen = false;
+let subscriptionAgreed = false;
+let subscriptionStarting = false;
+// 原地开通确认：{ token, subscriptionId, startedAt, phase: 'waiting'|'slow'|'done'|'stopped', sub, reason }；没在确认就是 null。
+let subscriptionConfirm = null;
+const SUB_POLL_FAST_MS = 3000;
+const SUB_POLL_SLOW_MS = 30000;
+const SUB_SLOW_AFTER_MS = 10 * 60 * 1000;
+/** 进详情页之前充值 tab 选中的支付方式，回列表时还原。 */
+let paymentBeforeCardDetail = null;
+/** 充值 / 月卡两个 tab 这一条要不要出现（有可摆的月卡才出现）。 */
+let offerTabsVisible = false;
+/** 当前在哪个 tab；默认充值，与今天那一页一致。 */
+let offerTab = 'topup';
+let selectedPayment = null;
+let userUUID = null;
+let currentToken = null;
+let currentCheckoutSessionId = null;
+let currentPaymentAttemptId = null;
+let currentLinkId = null;
+let checkoutMode = 'topup';
+let lastStep = 'page_loaded';
+let jsErrorTracked = false;
+const DEFAULT_RETURN_URL = 'https://dzmm.io';
+// 月卡详情页的兜底地址。**故意跟 DEFAULT_RETURN_URL 不是同一个域**：
+// 那一个是「回到刚才那个应用」的兜底，这一个是「去月卡详情页」的兜底，
+// 链接创建时没带 return_url（老链接、非网页端来的链接）时用它。
+const DEFAULT_POINTS_CARD_URL = 'https://www.dzmm.ai/points-card';
+const POINTS_CARD_PATH = '/points-card';
+let returnUrl = null;
+let sourceContext = null;
+let trackedMethodSelectionKey = null;
+let availableMethods = ['alipay', 'wechat', 'stripe'];
+
+// ---- 人民币版本（rmb_v1）状态。usd_v0 下这些一律不动，老页面的每一条路径逐字节照旧。 ----
+// 版本只认 /api/resolve 下发的 pricing.version === 'rmb_v1'（它从签名载荷读），URL 参数改不了它。
+let pricingMode = 'usd_v0';
+let rmbPricing = null;            // resolve 下发的 { rule_version, rate_milli, min_cny, max_cny, bands, card_min_cny, items }
+let selectedCustomCny = null;     // 自定义金额（分）；选中自定义时四卡取消选中，反之亦然
+const RMB_CUSTOM_SYMBOL = 'custom';
+
+function markStep(step) {
+  lastStep = step;
+}
+
+function rememberCheckoutIdentity() {
+  try {
+    if (currentCheckoutSessionId) sessionStorage.setItem('payweld:checkout-session-id', currentCheckoutSessionId);
+    if (currentPaymentAttemptId) sessionStorage.setItem('payweld:payment-attempt-id', currentPaymentAttemptId);
+    if (currentLinkId) sessionStorage.setItem('payweld:link-id', currentLinkId);
+  } catch {}
+}
+
+function sessionKey(prefix) {
+  return currentCheckoutSessionId ? 'payweld:' + prefix + ':' + currentCheckoutSessionId : null;
+}
+
+function hasSessionMarker(prefix) {
+  const key = sessionKey(prefix);
+  if (!key) return false;
+  try { return sessionStorage.getItem(key) === '1'; } catch { return false; }
+}
+
+function setSessionMarker(prefix) {
+  const key = sessionKey(prefix);
+  if (!key) return;
+  try { sessionStorage.setItem(key, '1'); } catch {}
+}
+
+// 月卡只走支付宝/微信这一族，与服务端 checkout 那道 CNY 白名单保持同一份名单。
+// 少一个的后果是「买不了」，多一个的后果是「钱收了发错东西」，所以宁可漏加不可漏减。
+const CNY_METHODS = ['alipay', 'wechat', 'alipay-2', 'wechat-2', 'alipay-3', 'wechat-3'];
+
+const METHOD_DEFS = {
+  alipay: {
+    name: '支付宝',
+    svg: '<svg viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="6" fill="#1677FF"/><path d="M17.5 8.4c-.5-.8-1.5-1.4-2.4-1.4h-2c.2.3.5.7.5 1.2 0 .2 0 .4-.1.6h1.6c.5 0 1 .3 1.2.7l.3.5H8.8c-.2.3-.4.7-.5 1h9.2l-.4 1H8v1h8.8l-.5 1H8.5c.1.3.3.6.5.8.5.6 1.2 1 2 1h4.2c.8 0 1.5-.4 2-1l1.3-2.2c.3-.5.5-1.1.5-1.7 0-.9-.4-1.7-1-2.3z" fill="#fff"/><path d="M5 14.2c0 .6.2 1.2.5 1.7.3.4.7.8 1.2 1.1h-.1c-.8 0-1.5-.4-2-1L3.3 13.8c-.3-.5-.5-1.1-.5-1.7 0-.9.4-1.7 1-2.3.5-.8 1.5-1.4 2.4-1.4h3.4c-.2.3-.5.7-.5 1.2 0 .2 0 .4.1.6H6.8c-.5 0-1 .3-1.2.7L5.3 11.4c-.2.3-.3.6-.3 1v1.8z" fill="#fff"/></svg>',
+  },
+  wechat: {
+    name: '微信支付',
+    svg: '<svg viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="6" fill="#07C160"/><path d="M10.2 8.5c-2.4 0-4.4 1.7-4.4 3.8 0 1.2.7 2.3 1.7 3l-.4 1.5 1.7-1c.4.1.9.2 1.4.2.2 0 .3 0 .5 0-.1-.3-.2-.7-.2-1 0-2.2 2-4 4.5-4h.4c-.4-1.5-2.2-2.5-5.2-2.5zm-1.6 2.3c-.4 0-.7-.3-.7-.7s.3-.7.7-.7.7.3.7.7-.3.7-.7.7zm3.3 0c-.4 0-.7-.3-.7-.7s.3-.7.7-.7.7.3.7.7-.3.7-.7.7z" fill="#fff"/><path d="M18.2 14.8c0-1.8-1.8-3.2-3.8-3.2s-3.8 1.4-3.8 3.2 1.8 3.2 3.8 3.2c.4 0 .7 0 1.1-.2l1.3.7-.3-1.2c.8-.6 1.7-1.5 1.7-2.5zm-5.1-.5c-.3 0-.6-.3-.6-.6s.3-.6.6-.6.6.3.6.6-.3.6-.6.6zm2.6 0c-.3 0-.6-.3-.6-.6s.3-.6.6-.6.6.3.6.6-.3.6-.6.6z" fill="#fff"/></svg>',
+  },
+  stripe: {
+    name: '信用卡',
+    svg: '<svg viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="6" fill="#635BFF"/><path d="M5 9.5h14v1.5H5zm0 3h6v1H5zm0 2h4v1H5zm10-2h4v3h-4z" fill="#fff"/><rect x="4" y="7" width="16" height="10" rx="2" stroke="#fff" stroke-width="1.2" fill="none"/></svg>',
+  },
+  'alipay-2': {
+    name: '支付宝2',
+    svg: '<svg viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="6" fill="#4F9EF8"/><path d="M18.7 14.8c-1.3-.5-2.8-1.2-4.2-1.9.5-.9.9-1.9 1.2-3h-3v-1.2h3.6V7.5h-3.6V6h-1.8v1.5H7.3v1.2h3.6v1.2H7.8v1.2h5.7c-.2.7-.6 1.4-1 2-.9-.4-1.9-.7-2.8-.7-1.8 0-3 .9-3 2.2 0 1.4 1.2 2.3 3.1 2.3 1.5 0 2.8-.6 3.8-1.6 1.3.7 2.7 1.3 4 1.8l1.1-1.3zM9.8 15.7c-1 0-1.5-.4-1.5-1 0-.6.6-1 1.5-1 .7 0 1.4.2 2.1.5-.7.9-1.4 1.5-2.1 1.5z" fill="#fff"/></svg>',
+  },
+  'wechat-2': {
+    name: '微信2',
+    svg: '<svg viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="6" fill="#2DD277"/><path d="M10.2 8.5c-2.4 0-4.4 1.7-4.4 3.8 0 1.2.7 2.3 1.7 3l-.4 1.5 1.7-1c.4.1.9.2 1.4.2.2 0 .3 0 .5 0-.1-.3-.2-.7-.2-1 0-2.2 2-4 4.5-4h.4c-.4-1.5-2.2-2.5-5.2-2.5zm-1.6 2.3c-.4 0-.7-.3-.7-.7s.3-.7.7-.7.7.3.7.7-.3.7-.7.7zm3.3 0c-.4 0-.7-.3-.7-.7s.3-.7.7-.7.7.3.7.7-.3.7-.7.7z" fill="#fff"/><path d="M18.2 14.8c0-1.8-1.8-3.2-3.8-3.2s-3.8 1.4-3.8 3.2 1.8 3.2 3.8 3.2c.4 0 .7 0 1.1-.2l1.3.7-.3-1.2c.8-.6 1.7-1.5 1.7-2.5zm-5.1-.5c-.3 0-.6-.3-.6-.6s.3-.6.6-.6.6.3.6.6-.3.6-.6.6zm2.6 0c-.3 0-.6-.3-.6-.6s.3-.6.6-.6.6.3.6.6-.3.6-.6.6z" fill="#fff"/></svg>',
+  },
+  'alipay-3': {
+    name: '支付宝3',
+    svg: '<svg viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="6" fill="#2563EB"/><path d="M18.7 14.8c-1.3-.5-2.8-1.2-4.2-1.9.5-.9.9-1.9 1.2-3h-3v-1.2h3.6V7.5h-3.6V6h-1.8v1.5H7.3v1.2h3.6v1.2H7.8v1.2h5.7c-.2.7-.6 1.4-1 2-.9-.4-1.9-.7-2.8-.7-1.8 0-3 .9-3 2.2 0 1.4 1.2 2.3 3.1 2.3 1.5 0 2.8-.6 3.8-1.6 1.3.7 2.7 1.3 4 1.8l1.1-1.3zM9.8 15.7c-1 0-1.5-.4-1.5-1 0-.6.6-1 1.5-1 .7 0 1.4.2 2.1.5-.7.9-1.4 1.5-2.1 1.5z" fill="#fff"/></svg>',
+  },
+  'wechat-3': {
+    name: '微信3',
+    svg: '<svg viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="6" fill="#16A34A"/><path d="M10.2 8.5c-2.4 0-4.4 1.7-4.4 3.8 0 1.2.7 2.3 1.7 3l-.4 1.5 1.7-1c.4.1.9.2 1.4.2.2 0 .3 0 .5 0-.1-.3-.2-.7-.2-1 0-2.2 2-4 4.5-4h.4c-.4-1.5-2.2-2.5-5.2-2.5zm-1.6 2.3c-.4 0-.7-.3-.7-.7s.3-.7.7-.7.7.3.7.7-.3.7-.7.7zm3.3 0c-.4 0-.7-.3-.7-.7s.3-.7.7-.7.7.3.7.7-.3.7-.7.7z" fill="#fff"/><path d="M18.2 14.8c0-1.8-1.8-3.2-3.8-3.2s-3.8 1.4-3.8 3.2 1.8 3.2 3.8 3.2c.4 0 .7 0 1.1-.2l1.3.7-.3-1.2c.8-.6 1.7-1.5 1.7-2.5zm-5.1-.5c-.3 0-.6-.3-.6-.6s.3-.6.6-.6.6.3.6.6-.3.6-.6.6zm2.6 0c-.3 0-.6-.3-.6-.6s.3-.6.6-.6.6.3.6.6-.3.6-.6.6z" fill="#fff"/></svg>',
+  },
+  'stripe-2': {
+    name: '信用卡2',
+    svg: '<svg viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="6" fill="#8B5CF6"/><path d="M5 9.5h14v1.5H5zm0 3h6v1H5zm0 2h4v1H5zm10-2h4v3h-4z" fill="#fff"/><rect x="4" y="7" width="16" height="10" rx="2" stroke="#fff" stroke-width="1.2" fill="none"/></svg>',
+  },
+};
+
+function normalizeSignedReturnUrl(value) {
+  if (!value || typeof value !== 'string') return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' || url.username || url.password) return null;
+    if (url.pathname !== '/' || url.search || url.hash) return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
+function setupReturnContext(params) {
+  sourceContext = params.get('source_context') || params.get('source') || null;
+  returnUrl = null;
+  const link = document.getElementById('returnLink');
+  if (link) link.href = DEFAULT_RETURN_URL;
+  updateTicketLink();
+}
+
+function applySignedReturnUrl(value) {
+  returnUrl = normalizeSignedReturnUrl(value);
+  const link = document.getElementById('returnLink');
+  if (link) link.href = returnUrl || DEFAULT_RETURN_URL;
+  updateTicketLink();
+}
+
+function updateTicketLink() {
+  const link = document.getElementById('ticketLink');
+  if (!link) return;
+  try {
+    link.href = new URL('/settings/credits', returnUrl || DEFAULT_RETURN_URL).toString();
+  } catch {
+    link.href = DEFAULT_RETURN_URL + '/settings/credits';
+  }
+  // 收银台小字里的「服务条款」跟积分页链接同一个站点
+  const tos = document.getElementById('tosLink');
+  if (tos) {
+    try { tos.href = new URL('/legal/tos', returnUrl || DEFAULT_RETURN_URL).toString(); }
+    catch { tos.href = DEFAULT_RETURN_URL + '/legal/tos'; }
+  }
+}
+
+function methodFamily(method) {
+  if (!method) return null;
+  if (method.startsWith('alipay')) return 'alipay';
+  if (method.startsWith('wechat')) return 'wechat';
+  if (method === 'stripe') return 'card';
+  return null;
+}
+
+function methodProvider(method) {
+  if (!method) return null;
+  if (method === 'stripe') return 'payments_service';
+  if (method.endsWith('-2')) return 'xy_gateway';
+  if (method.endsWith('-3')) return 'jeepay_gateway';
+  if (method === 'alipay' || method === 'wechat') return 'main_backend';
+  return null;
+}
+
+function trackClientEvent(event, props = {}) {
+  try {
+    const payload = JSON.stringify({
+      event,
+      supa_id: userUUID,
+      checkout_session_id: currentCheckoutSessionId,
+      payment_attempt_id: currentPaymentAttemptId,
+      link_id: currentLinkId,
+      mode: checkoutMode,
+      last_step: lastStep,
+      trigger_page: 'payment_page',
+      source_entry: sourceContext,
+      source_context: sourceContext,
+      payment_page_domain: location.host,
+      ...props,
+    });
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon('/api/track', new Blob([payload], { type: 'application/json' }));
+      return;
+    }
+    fetch('/api/track', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload,
+      keepalive: true,
+    }).catch(() => {});
+  } catch {}
+}
+
+function trackTopupPageOpened() {
+  if (!currentCheckoutSessionId || hasSessionMarker('page-opened')) return;
+  setSessionMarker('page-opened');
+  markStep('page_interactive');
+  trackClientEvent('topup_page_opened', { trigger_page: 'payment_page' });
+}
+
+function trackCheckoutApiFailed(errorCode, httpStatus = null) {
+  markStep('checkout_api_failed');
+  trackClientEvent('checkout_api_failed', {
+    stage: 'checkout',
+    error_code: errorCode,
+    http_status: httpStatus,
+  });
+}
+
+function scrubExceptionUrl(value) {
+  try {
+    const url = new URL(value, location.href);
+    return url.origin + url.pathname;
+  } catch {
+    return '[url-present]';
+  }
+}
+
+function scrubExceptionField(value) {
+  let text = String(value || '').slice(0, 500);
+  text = text.replace(/https?:\/\/[^\s"'<>]+/gi, scrubExceptionUrl);
+  text = text.replace(/([?&#](?:t|token|access_token|id_token)=)[^&#\s"'<>]+/gi, '$1[redacted]');
+  text = text.replace(/\b[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b/g, '[signed-token-present]');
+  return text.slice(0, 500);
+}
+
+function trackCheckoutJsError(message, source, lineNumber, columnNumber) {
+  if (!currentCheckoutSessionId || jsErrorTracked || hasSessionMarker('js-error')) return;
+  jsErrorTracked = true;
+  setSessionMarker('js-error');
+  trackClientEvent('checkout_js_error', {
+    error_name: 'window.onerror',
+    error_message: scrubExceptionField(message),
+    error_message_present: Boolean(message),
+    error_source: scrubExceptionField(source),
+    error_source_present: Boolean(source),
+    line_number: Number.isFinite(lineNumber) ? lineNumber : null,
+    column_number: Number.isFinite(columnNumber) ? columnNumber : null,
+  });
+}
+
+window.onerror = function(message, source, lineNumber, columnNumber) {
+  trackCheckoutJsError(message, source, lineNumber, columnNumber);
+  return false;
+};
+
+window.addEventListener('pagehide', () => {
+  if (!currentToken || !userUUID || location.pathname === '/ok.html' || location.pathname === '/failed.html') return;
+  trackClientEvent('checkout_exited', { last_step: lastStep });
+});
+
+function returnToDzmm(page) {
+  markStep('return_clicked');
+  trackClientEvent('topup_return_clicked', { page, trigger_page: page });
+  setTimeout(() => { location.href = returnUrl || DEFAULT_RETURN_URL; }, 80);
+  return false;
+}
+
+/** 买完月卡回主站月卡页（用户从哪个域来就回哪个域）。 */
+function returnToPointsCard(page) {
+  markStep('return_clicked');
+  trackClientEvent('topup_return_clicked', { page, trigger_page: page });
+  setTimeout(() => { window.location.href = pointsCardLandingUrl(null); }, 80);
+  return false;
+}
+
+function maybeTrackPaymentMethodSelection(selectSource = 'user_click') {
+  if (!selectedPayment) return;
+  const key = selectedPayment + ':' + (selectedPkg ? selectedPkg.symbol : 'none');
+  if (trackedMethodSelectionKey === key) return;
+  trackedMethodSelectionKey = key;
+  markStep('payment_method_selected');
+  trackClientEvent('payment_method_selected', {
+    payment_method: selectedPayment,
+    method_family: methodFamily(selectedPayment),
+    provider: methodProvider(selectedPayment),
+    package_id: selectedPkg ? selectedPkg.symbol : null,
+    select_source: selectSource,
+  });
+}
+
+function trackViewedMethods(methods) {
+  methods.forEach((method) => {
+    if (!method || hasSessionMarker('method-viewed-' + method)) return;
+    setSessionMarker('method-viewed-' + method);
+    markStep('payment_method_viewed');
+    trackClientEvent('payment_method_viewed', {
+      payment_method: method,
+      method_family: methodFamily(method),
+      provider: methodProvider(method),
+    });
+  });
+}
+
+// 显示用的分族（与 methodFamily 那个遥测口径分开：遥测里 stripe-2 刻意不归 card，这里
+// 只管「用户眼里这是哪种付款方式」，信用卡 2 当然是信用卡）。
+const FAMILY_DISPLAY_NAMES = { alipay: '支付宝', wechat: '微信支付', card: '信用卡' };
+function displayFamily(key) {
+  if (!key) return null;
+  if (key.startsWith('alipay')) return 'alipay';
+  if (key.startsWith('wechat')) return 'wechat';
+  if (key.startsWith('stripe')) return 'card';
+  return null;
+}
+
+/**
+ * 一条渠道在页面上叫什么：`name` 是付款方式（支付宝／微信支付／信用卡），`channel` 是同族里
+ * 有两条以上时的「通道 N」，`full` 是拼起来给按钮和结果页用的一句话。
+ * `familyIdx` 由调用方在同一次渲染里传进来累加，序号才是按屏幕上的位置编的。
+ */
+function methodDisplayLabel(key, familyCount, familyIdx) {
+  const def = METHOD_DEFS[key];
+  const fam = displayFamily(key);
+  const name = (fam && FAMILY_DISPLAY_NAMES[fam]) || (def && def.name) || key;
+  if (!fam || (familyCount[fam] || 0) < 2) return { name, channel: '', full: name };
+  familyIdx[fam] = (familyIdx[fam] || 0) + 1;
+  const channel = '通道 ' + familyIdx[fam];
+  return { name, channel, full: name + '（' + channel + '）' };
+}
+
+/** 当前选中的渠道在选择页上标的「通道 N」；没选、屏幕上已经没有它、或同族只有一条时返回 ''。 */
+function selectedMethodChannel() {
+  if (!selectedPayment) return '';
+  const el = document.querySelector(`.method[data-method="${selectedPayment}"]`);
+  return (el && el.dataset.channel) || '';
+}
+
+// 只要有一种付款方式挂着两条以上通道，就在网格下面把「通道是什么、怎么选」说清楚；
+// 一条都没重复时整块不显示。文案不提任何收款方的名字：用户要知道的只是「随便选一条，
+// 不通就换」，收款方是谁对他没有意义。
+function renderChannelNote(familyCount) {
+  const note = document.getElementById('methodChannelNote');
+  if (!note) return;
+  const dup = Object.keys(familyCount).filter((fam) => familyCount[fam] >= 2)
+    .map((fam) => FAMILY_DISPLAY_NAMES[fam]);
+  if (dup.length === 0) { note.textContent = ''; note.style.display = 'none'; return; }
+  note.textContent = dup.join('、') + '各有几条收款通道，价格、到账和付款步骤完全一样，任选一条即可；'
+    + '如果二维码打不开或付款失败，换另一条通道再试。';
+  note.style.display = 'block';
+}
+
+function renderMethods(methods) {
+  // 月卡详情付款页（u26 #7092）：与充值 tab 同一份渠道列表里的人民币渠道全部可选。
+  // 信用卡只在这条链接放行了信用卡单次购买、且这张卡按汇率换出的美元不低于下限时才摆（u26 #7533）；
+  // 否则不摆，也不摆置灰的（u26 #7141）。渠道列表里有 stripe 本身就说明信用卡全局开关开着。
+  const cardDetail = cardDetailOffer !== null;
+  if (cardDetail) {
+    const card = cardOnetimeQuote(cardDetailOffer) !== null;
+    methods = methods.filter((m) => CNY_METHODS.includes(m) || (card && m === 'stripe'));
+  }
+  // 🔴 月卡不接信用卡这条不变式必须在**这一个收口处**保证，不能靠各个调用点自觉。
+  // init() 里 `renderMethods(默认三个)` -> await 拉真实渠道 -> `renderMethods(availableMethods)`，
+  // 后面那次无条件重渲染会把信用卡放回来，于是按钮接受一个月卡付不了的渠道，
+  // 最后在收银台服务端被 400 拒掉（死路）。把过滤放进这里，所有调用点（包括那次异步的）
+  // 都不可能再把它放回来。
+  // 只收窄列表；「选中的渠道已经不在列表里」这件事交给本函数末尾那段既有逻辑处理——
+  // 它已经会清掉 selectedPayment 并重画按钮。在这里提前清掉反而会让那段的
+  // `if (selectedPayment)` 落空，updateBtn 不被调用，按钮带着旧文案继续可点。
+  if (pointsCardOrderId) {
+    methods = methods.filter((m) => CNY_METHODS.includes(m));
+  }
+  // 人民币版本不列信用卡2：它的履约本轮不认人民币快照，服务端 checkout 也会拒。
+  if (pricingMode === 'rmb_v1') {
+    methods = methods.filter((m) => m !== 'stripe-2');
+  }
+  const container = document.getElementById('methodsContainer');
+  container.innerHTML = '';
+  container.style.gridTemplateColumns = methods.length <= 3
+    ? `repeat(${methods.length}, 1fr)`
+    : 'repeat(auto-fill, minmax(80px, 1fr))';
+  // 同一种付款方式后面可以挂几条收款通道（alipay / alipay-2 / alipay-3 …）。对用户来说它们
+  // 价格、到账、扫码流程完全一样，唯一的差别是「这一条此刻通不通」，所以显示名只按
+  // 「付款方式 + 通道序号」来写，序号按同族里的位置分配、不绑定 key：哪条被摘掉，剩下的
+  // 重新从 1 编，用户看不到跳号；同族只剩一条时不编号。
+  // 病历（#4501）：这里原来写的是「支付宝／支付宝2／支付宝3」，三个一样的图标只差一个数字，
+  // 页面上没有任何一句话说它们是什么关系，用户到了付款这一步只能猜一个或逐个试。
+  const familyCount = {};
+  methods.forEach((key) => {
+    const fam = displayFamily(key);
+    if (fam) familyCount[fam] = (familyCount[fam] || 0) + 1;
+  });
+  const familyIdx = {};
+  methods.forEach((key, i) => {
+    const def = METHOD_DEFS[key];
+    if (!def) return;
+    const label = methodDisplayLabel(key, familyCount, familyIdx);
+    const el = document.createElement('div');
+    el.className = 'method';
+    el.dataset.method = key;
+    el.dataset.channelLabel = label.full;
+    el.dataset.channel = label.channel;
+    el.onclick = () => selectMethod(el);
+    const chan = label.channel;
+    el.innerHTML = def.svg + '<div class="name">' + label.name + '</div>'
+      + (chan ? '<div class="chan">' + chan + '</div>' : '');
+    el.style.animationDelay = (0.25 + i * 0.05) + 's';
+    container.appendChild(el);
+  });
+  renderChannelNote(familyCount);
+  trackViewedMethods(methods);
+  // 人民币版本：受限地区可能一个方式都不剩，方式区要显示一句说明而不是空白。
+  if (pricingMode === 'rmb_v1' && methods.length === 0) {
+    container.innerHTML = '<div style="grid-column:1/-1;font-size:.82rem;color:var(--text-2);line-height:1.6;padding:8px 2px">当前地区暂无可用的支付方式。<br>No payment method is available in your region.</div>';
+    container.style.gridTemplateColumns = '1fr';
+  }
+  // 页面加载时先渲染了一份默认列表，真实列表回来后可能已经不含之前选中的那个。
+  // 之前只重画按钮不管 selectedPayment，被隐藏的渠道会带着旧选中值一直留到点支付。
+  // 所以：还在列表里就把选中态画回去，不在了就清掉并禁用支付按钮。
+  if (selectedPayment) {
+    if (methods.includes(selectedPayment)) {
+      const keep = container.querySelector(`.method[data-method="${selectedPayment}"]`);
+      if (keep) keep.classList.add('sel');
+    } else {
+      selectedPayment = null;
+    }
+    updateBtn();
+  }
+
+  // 月卡详情付款页不替用户选渠道：选了才可点付款。人民币渠道一条都没有时写一句为什么
+  // （受限地区那句由 renderRegionNotice 在方式区下面写，这里不重复）。
+  if (cardDetail) {
+    const hint = document.getElementById('methodHint');
+    const noCny = !methods.some((m) => CNY_METHODS.includes(m));
+    const noCard = !methods.includes('stripe');
+    if (hint) {
+      hint.textContent = noCny && noCard && !cnyRegionBlocked ? '支付宝和微信支付暂时都不可用，月卡暂时无法购买，请稍后再试。' : '';
+      hint.style.display = hint.textContent ? 'block' : 'none';
+    }
+    updateBtn();
+    return;
+  }
+
+  // 如果只有一种方式，自动选中
+  if (methods.length === 1) {
+    const el = container.querySelector('.method');
+    if (el) selectMethod(el, 'auto_single');
+  }
+  if (pricingMode === 'rmb_v1') {
+    applyRmbMethodAvailability();
+    // 默认选中列表里第一个可用方式
+    if (!selectedPayment) {
+      const first = container.querySelector('.method:not(.disabled)');
+      if (first) selectMethod(first, 'auto_first');
+    }
+    updateBtn();
+  }
+}
+
+/**
+ * 月卡详情页地址：用户是从哪个域过来的，就回哪个域的月卡页。
+ * returnUrl 是链接创建时由主站传进来、跟着 token 签名带过来的那个 origin，
+ * 所以 beta 和 www 各自回自己的域，不会把 beta 的用户丢到 www 上去。
+ * 没有 returnUrl（老链接、或者不是从网页端来的）就用兜底地址。
+ */
+function pointsCardLandingUrl(planCode) {
+  const base = (function () {
+    if (!returnUrl) return DEFAULT_POINTS_CARD_URL;
+    try {
+      return new URL(POINTS_CARD_PATH, returnUrl).toString();
+    } catch {
+      return DEFAULT_POINTS_CARD_URL;
+    }
+  })();
+  // 点的是哪张卡就带哪张卡过去。主站校验它在不在售，不在就整个丢掉、回落默认那张——
+  // 所以这里带一个它不认识的代号最坏只是回到默认页，不会卖错东西。
+  if (typeof planCode !== 'string' || planCode.trim() === '') return base;
+  try {
+    const url = new URL(base);
+    url.searchParams.set('plan', planCode.trim());
+    return url.toString();
+  } catch {
+    return base;
+  }
+}
+
+/**
+ * 月卡 tab 与它的几张卡。充值 tab 上不再摆月卡曝光卡（u26 #7029），月卡只在月卡 tab。
+ * direct 灰度打开时，点卡片进这张卡的详情付款页（u26 #7092）：完整介绍权益和须知，
+ * 下面摆和充值 tab 同一份支付方式，选了渠道点底部付款按钮才建单；关着时点卡片仍回主站那张卡的月卡页。
+ *
+ * 🔴 展示与否只看服务端给的这一个布尔值（放行位在链接创建时由主站算好、
+ * 跟 token 一起签过来）。这里不做任何本地判断，也不在取不到时给个默认展示：
+ * 传进来不是 true 就整块不渲染。
+ *
+ * 🔴 价格同样只认服务端给的那个数，**页面里不许写死**。它来自给月卡定价的同一份
+ * config，所以改一次 config，卡上的价和实收价一起动；写死一个数字就会出现
+ * 「卡上写 A、真收 B」，而且没有任何东西会响。拿不到数就整块不渲染——
+ * 会花钱的东西不许在没有价格的情况下出现。
+ */
+function renderPointsCardPromo(show, offers) {
+  const tiles = document.getElementById('pointsCardTiles');
+  if (tiles) tiles.innerHTML = '';
+  pointsCardOffers = Array.isArray(offers) ? offers.filter(isRenderableOffer) : [];
+  offerTabsVisible = show === true && pointsCardOffers.length > 0;
+  if (!offerTabsVisible) {
+    // 一张都摆不出来就回到今天那一页：没有 tab、没有月卡区，充值屏原样。
+    selectOfferTab('topup');
+    return;
+  }
+  renderPointsCardTiles();
+  applyOfferView();
+}
+
+/**
+ * 月卡 tab 里的卡片列表。
+ * 🔴 每个节点取了都判空：这一页在测试里跑在一个只认识固定几个 id 的 DOM 替身上。
+ */
+function renderPointsCardTiles() {
+  const tiles = document.getElementById('pointsCardTiles');
+  if (!tiles) return;
+  tiles.innerHTML = '';
+  const note = document.createElement('div');
+  note.className = 'card-tab-note';
+  note.textContent = '月卡可同时持有，同一档也能买多张';
+  tiles.appendChild(note);
+  pointsCardOffers.forEach(function (offer) {
+    tiles.appendChild(offerTile(offer));
+  });
+}
+
+/**
+ * 进一张卡的详情付款页。只换这一屏，不发任何请求、不建单——建单只在底部付款按钮上。
+ * 充值 tab 选中的支付方式先收起来，回列表时还原：详情页要用户自己为这张卡选一次渠道，
+ * 付款按钮在选之前不可点（充值 tab 默认选中的那一个不算这张卡选过）。
+ */
+function openCardDetail(offer) {
+  if (directPointsCardStarting) return;
+  hideError();
+  cardDetailOffer = offer;
+  paymentBeforeCardDetail = selectedPayment;
+  selectedPayment = null;
+  renderCardDetail();
+  applyOfferView();
+  renderMethods(availableMethods);
+  renderRegionNotice(availableMethods);
+  updateBtn();
+  try { window.scrollTo(0, 0); } catch {}
+}
+
+/** 详情页左上角「返回月卡列表」：回到月卡 tab 的卡片列表，充值 tab 的支付方式选择原样还回去。 */
+function closeCardDetail() {
+  if (directPointsCardStarting) return;
+  hideError();
+  if (cardDetailOffer === null) return;
+  cardDetailOffer = null;
+  selectedPayment = paymentBeforeCardDetail;
+  paymentBeforeCardDetail = null;
+  const hint = document.getElementById('methodHint');
+  if (hint) { hint.textContent = ''; hint.style.display = 'none'; }
+  applyOfferView();
+  renderMethods(availableMethods);
+  renderRegionNotice(availableMethods);
+  updateBtn();
+}
+
+/** 详情页的卡片介绍：与带订单号的付款屏同一个渲染函数，只是报价来自这张卡的在售报价。 */
+function renderCardDetail() {
+  const info = document.getElementById('cardDetailInfo');
+  if (!info || !cardDetailOffer) return;
+  info.innerHTML = pointsCardInfoHtml(cardDetailOffer, cardDetailOffer.name || '积分月卡');
+}
+
+/**
+ * 🔴 会花钱的入口不许在没有价格的情况下出现。
+ * 服务端已经按「开关开着 + Plan 解析得出来」筛过一轮，这里再挡一次形状：
+ * 一条读不出价的记录不该变成一张没有价的卡片。
+ */
+function isRenderableOffer(offer) {
+  if (!offer || typeof offer !== 'object') return false;
+  if (typeof offer.plan_code !== 'string' || offer.plan_code.trim() === '') return false;
+  const cny = offer.price_cny;
+  const usd = offer.price_usd;
+  const price = offer.price_currency === 'CNY' ? cny : usd;
+  return typeof price === 'number' && isFinite(price) && price > 0;
+}
+
+/**
+ * 这张卡是哪一档，只按 plan_code 前缀认：与主站 card-name.ts、服务端 pointsCardFamilyName 同一组前缀，
+ * 不一致用户就会在商品页、收银台卡片和付款屏看到不同的档位。认不出的返回 null——不猜档位，
+ * 卡片保持中性样式，付款屏不出角标。
+ */
+function pointsCardTier(planCode) {
+  const code = typeof planCode === 'string' ? planCode.trim().toLowerCase() : '';
+  if (code.startsWith('bronze_')) return 'bronze';
+  if (code.startsWith('gold_')) return 'gold';
+  return null;
+}
+
+const POINTS_CARD_TIER_LABEL = { gold: '黄金', bronze: '青铜' };
+
+/**
+ * 月卡 tab 里的一张卡。direct 灰度打开时点它进这张卡的详情付款页；
+ * 关着时点它回主站那张卡的月卡页，不在本页买。
+ */
+function offerTile(offer) {
+  const el = document.createElement('div');
+  const tier = pointsCardTier(offer.plan_code);
+  el.className = 'promo-card' + (tier ? ' tier-' + tier : '');
+  el.dataset.planCode = offer.plan_code;
+  el.onclick = function () {
+    if (pointsCardCashierDirect === true) {
+      openCardDetail(offer);
+      return;
+    }
+    window.location.href = pointsCardLandingUrl(offer.plan_code);
+  };
+  // 🔴 有人民币价就报人民币原价，不再用「美元价 × 7.3」算一个数出来：
+  // 那个数和真正收的钱是两条来源，config 一改就开始各说各的。
+  const isCny = offer.price_currency === 'CNY' && typeof offer.price_cny === 'number';
+  const price = isCny ? fmtCny(offer.price_cny) : 'US$' + Number(offer.price_usd).toFixed(2);
+  // 只有「人民币价是从美元换算出来的」那种卡才带这一行；原生标人民币价的不带。
+  // 取整与页面其它换算处一致。
+  const cnyNote = isCny ? '' : '<div class="cny">≈ ¥' + Math.round(offer.price_usd * EXCHANGE_RATE) + '</div>';
+  const total = typeof offer.total_credits === 'number'
+    ? '<div class="amt"><span class="lead">领满最高</span>' + fmtInt(offer.total_credits) + '<small>积分</small></div>'
+    : '';
+  const daily = typeof offer.daily_credits === 'number'
+    ? '<div class="sub">' + escapeHtml(offer.name) + ' · 每天登录自动领取 ' + fmtInt(offer.daily_credits) + ' 积分</div>'
+    : '<div class="sub">' + escapeHtml(offer.name) + '</div>';
+  // 左上角写档位名；认不出档位就不写。
+  const chip = tier ? '<span class="tier-chip">' + POINTS_CARD_TIER_LABEL[tier] + '</span>' : '';
+  // 卡片本身就是购买入口时不再加一行引导字（u26 #7029）；回主站的那种仍说明点了去哪。
+  const go = pointsCardCashierDirect === true ? '' : '<div class="go">点击了解详情 ›</div>';
+  el.innerHTML =
+    chip +
+    total + daily +
+    '<div class="price">' + price + '</div>' + cnyNote + go;
+  return el;
+}
+
+/**
+ * 详情付款页底部付款按钮：用用户选的那条人民币渠道，在本收银台一次请求里让主后端建月卡待付款单、
+ * 收银台开支付会话，回来就是付款页（二维码或跳转），与充值付款同一个结果页。
+ * 每次点击用新的请求号；同一档还有没过期的待付款单时主后端会把那张还给我们，不会重复建。
+ */
+async function startDirectPointsCardCheckout(offer, method) {
+  if (directPointsCardStarting || !currentToken || !userUUID) return;
+  if (!CNY_METHODS.includes(method)) return;
+  hideError();
+  directPointsCardStarting = true;
+  markStep('checkout_pay_button_clicked');
+  trackClientEvent('checkout_pay_button_clicked', { payment_method: method, package_id: offer.plan_code });
+  markStep('checkout_request');
+  setLoading(true);
+  try {
+    const requestId = newRequestId();
+    const body = {
+      supaUUID: userUUID, token: currentToken, paymentType: method, requestId,
+      planCode: offer.plan_code, planVersion: offer.version, expectedQuote: offer,
+      checkout_session_id: currentCheckoutSessionId, triggerPage: 'payment_page', tz: deviceTimeZone(),
+    };
+    if (returnUrl) body.returnUrl = returnUrl;
+    if (sourceContext) body.sourceContext = sourceContext;
+    const res = await fetch('/api/points-card/checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.type === 'url' && data.data) {
+      showResult(data.data, data.payment_attempt_id || null);
+      return;
+    }
+    trackCheckoutApiFailed(res.ok ? 'INVALID_RESPONSE' : 'HTTP_' + res.status, res.status);
+    // 条款变了：把服务端给的新报价换到这张卡上（列表与详情页一起换），让用户看过新价再点一次。
+    if (data.code === 'quote_changed' && isRenderableOffer(data.quote)) {
+      pointsCardOffers = pointsCardOffers.map(function (o) { return o.plan_code === offer.plan_code ? data.quote : o; });
+      if (cardDetailOffer && cardDetailOffer.plan_code === offer.plan_code) cardDetailOffer = data.quote;
+      renderPointsCardTiles();
+      renderCardDetail();
+    }
+    showError(data.error || '月卡暂时无法购买，请稍后重试', res.status === 403 && !!data.error && data.error.includes('地区'));
+  } catch {
+    trackCheckoutApiFailed('NETWORK_ERROR');
+    showError('网络错误，请稍后重试', false);
+  } finally {
+    setLoading(false);
+    directPointsCardStarting = false;
+    updateBtn();
+  }
+}
+
+// ────────────────────────── 月卡信用卡单次购买（u26 #7533） ──────────────────────────
+//
+// 订单照旧按人民币开，信用卡只是付款方式：付款时按充值规则的汇率换成美元扣（¥73 → US$10.00）。
+// 页面上的美元由 resolve 下发的汇率按 rmbUsdCents 实时算；服务端与主后端各按自己那份规则再算一遍，
+// 三方对不上就把新数带回来让用户看过再点，不出付款链接。
+
+/** resolve 下发的 cardOnetime 只认这一个形状，别的一律当没放行。 */
+function readCardOnetime(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  if (!Number.isSafeInteger(raw.rateMilli) || raw.rateMilli <= 0) return null;
+  if (!Number.isSafeInteger(raw.minUsdCents) || raw.minUsdCents <= 0) return null;
+  return { rateMilli: raw.rateMilli, minUsdCents: raw.minUsdCents };
+}
+
+/**
+ * 这张卡用信用卡单次购买时的人民币价、汇率与实扣美元；不放行、不是人民币标价的卡、
+ * 或换出来低于信用卡下限时返回 null（这张卡就不摆信用卡）。
+ */
+function cardOnetimeQuote(offer) {
+  if (!cardOnetime || !offer || offer.price_currency !== 'CNY' || typeof offer.price_cny !== 'number') return null;
+  const priceCnyCents = Math.round(offer.price_cny * 100);
+  if (!Number.isSafeInteger(priceCnyCents) || priceCnyCents <= 0) return null;
+  const usdCents = rmbUsdCents(priceCnyCents, cardOnetime.rateMilli);
+  if (usdCents < cardOnetime.minUsdCents) return null;
+  return { priceCnyCents, rateMilli: cardOnetime.rateMilli, usdCents };
+}
+
+/**
+ * 选信用卡点付款：收银台一次请求里建（或复用）待付月卡单、请主后端开 A+Pay 付款，回来直接跳去付款。
+ * 每次点击用新的请求号；网络错误或服务端 5xx 时下一次点击沿用同一个，免得重复开付款。
+ */
+async function startCardOnetimeCheckout(offer) {
+  const card = cardOnetimeQuote(offer);
+  if (directPointsCardStarting || !currentToken || !userUUID || !card) return;
+  hideError();
+  directPointsCardStarting = true;
+  markStep('checkout_pay_button_clicked');
+  trackClientEvent('checkout_pay_button_clicked', { payment_method: 'stripe', method_family: 'card', package_id: offer.plan_code });
+  markStep('checkout_request');
+  setLoading(true);
+  if (!cardOnetimeRequest || cardOnetimeRequest.planCode !== offer.plan_code) {
+    cardOnetimeRequest = { planCode: offer.plan_code, requestId: newRequestId() };
+  }
+  try {
+    const body = {
+      supaUUID: userUUID, token: currentToken, requestId: cardOnetimeRequest.requestId,
+      planCode: offer.plan_code, planVersion: offer.version, expectedQuote: offer, expectedCard: card,
+      checkout_session_id: currentCheckoutSessionId, triggerPage: 'payment_page',
+    };
+    if (sourceContext) body.sourceContext = sourceContext;
+    const res = await fetch('/api/points-card/card-checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status < 500) cardOnetimeRequest = null;
+    if (res.ok && typeof data.url === 'string' && data.url) {
+      showResult(data.url, data.payment_attempt_id || null);
+      return;
+    }
+    trackCheckoutApiFailed(res.ok ? 'INVALID_RESPONSE' : 'HTTP_' + res.status, res.status);
+    if (data.code === 'quote_changed') {
+      // 月卡条款变了：换新报价（与支付宝/微信同一做法）；汇率变了：换新汇率，按钮上的美元跟着重算。
+      if (isRenderableOffer(data.quote)) {
+        pointsCardOffers = pointsCardOffers.map(function (o) { return o.plan_code === offer.plan_code ? data.quote : o; });
+        if (cardDetailOffer && cardDetailOffer.plan_code === offer.plan_code) cardDetailOffer = data.quote;
+        renderPointsCardTiles();
+      }
+      if (data.card && Number.isSafeInteger(data.card.rateMilli) && data.card.rateMilli > 0) {
+        cardOnetime = { rateMilli: data.card.rateMilli, minUsdCents: cardOnetime.minUsdCents };
+      }
+      renderCardDetail();
+      // 换完可能低于信用卡下限：重画渠道，信用卡不再可用时选中态一并清掉
+      renderMethods(availableMethods);
+    }
+    showError(data.error || '信用卡支付暂不可用，请稍后重试', false);
+  } catch {
+    trackCheckoutApiFailed('NETWORK_ERROR');
+    showError('网络错误，请稍后重试', false);
+  } finally {
+    setLoading(false);
+    directPointsCardStarting = false;
+    updateBtn();
+  }
+}
+
+// ────────────────────────── 连续包月（FEATURE-150，u26 #7141） ──────────────────────────
+//
+// 报价、档位、金额、已开通与待付款全部来自 resolve 下发的 subscription（收银台服务端问的主后端）。
+// 页面不编价格、不猜档位；一张报价读不出就不画，一张都没有就连切换都不出现。
+// 付款只走美元信用卡；单次购买那一屏（支付宝／微信）一个字节不因这里改变。
+
+/** 这一档在页面上叫什么：只按 plan_code 前缀认，认不出就用中性名。 */
+const SUB_TIER_INFO = {
+  bronze: { badge: 'Basic', name: '青铜月卡' },
+  plus: { badge: 'Plus', name: '100 元积分包' },
+  gold: { badge: 'Pro', name: '黄金月卡' },
+};
+
+function subscriptionOffers() {
+  const offers = subscriptionState && Array.isArray(subscriptionState.offers) ? subscriptionState.offers : [];
+  return offers.filter(isRenderableSubscriptionOffer).slice(0, 3);
+}
+
+function isRenderableSubscriptionOffer(o) {
+  return !!o && typeof o === 'object' && typeof o.planCode === 'string' && o.planCode.trim() !== ''
+    && o.currency === 'USD' && Number.isSafeInteger(o.amountCents) && o.amountCents > 0
+    && Number.isSafeInteger(o.listPriceCents) && o.listPriceCents > 0
+    && Number.isSafeInteger(o.planVersion) && o.planVersion > 0;
+}
+
+/** 切换出不出现：有可摆的订阅档位，且这一屏是月卡 tab 的卡片列表或月卡付款屏（详情付款页不出）。 */
+function subscriptionToggleVisible() {
+  if (subscriptionOffers().length === 0) return false;
+  if (pointsCardOrderId) return true;
+  return offerTab === 'card' && cardDetailOffer === null;
+}
+
+function selectSubscriptionMode(mode) {
+  if (subscriptionStarting) return;
+  subscriptionMode = mode === 'sub' ? 'sub' : 'once';
+  const once = document.getElementById('subToggleOnce');
+  const sub = document.getElementById('subToggleSub');
+  if (once) once.className = subscriptionMode === 'once' ? 'sel' : '';
+  if (sub) sub.className = subscriptionMode === 'sub' ? 'sel' : '';
+  hideError();
+  if (subscriptionMode === 'sub') renderSubscriptionView();
+  applyOfferView();
+}
+
+/** resolve 回来后调一次：记下订阅状态；报价不可用就保持单次购买、切换不出现。 */
+function applySubscriptionState(state) {
+  subscriptionState = state && typeof state === 'object' ? state : null;
+  if (subscriptionOffers().length === 0) subscriptionMode = 'once';
+  const method = document.getElementById('subMethod');
+  if (method) {
+    method.innerHTML = METHOD_DEFS.stripe.svg + '<span>美元信用卡</span><span class="chan">按月自动扣款</span>';
+  }
+  if (subscriptionMode === 'sub') renderSubscriptionView();
+  applyOfferView();
+}
+
+function subTier(planCode) {
+  const code = typeof planCode === 'string' ? planCode.trim().toLowerCase() : '';
+  if (code.startsWith('bronze_')) return 'bronze';
+  if (code.startsWith('plus_')) return 'plus';
+  if (code.startsWith('gold_')) return 'gold';
+  return null;
+}
+
+function subOfferName(offer) {
+  const tier = subTier(offer.planCode);
+  return tier ? SUB_TIER_INFO[tier].name : '连续包月';
+}
+
+/** 88 折、8 折：订阅价 ÷ 原价，四舍五入到百分位；不便宜就不写。 */
+function subDiscountLabel(offer) {
+  if (!(offer.amountCents < offer.listPriceCents)) return '';
+  const pct = Math.round(offer.amountCents * 100 / offer.listPriceCents);
+  if (pct <= 0 || pct >= 100) return '';
+  return (pct % 10 === 0 ? String(pct / 10) : String(pct)) + '折';
+}
+
+function subCreditWord(type) {
+  return type === 'permanent' ? '长期积分' : '临时积分';
+}
+
+/**
+ * 卡片副文案（开发单第 4.1 节第 1、3、4 条）：不写固定总数、不写「签到／满签」。
+ * 三项都是同一种积分时不逐项标类型（青铜），混发时逐项标（黄金）。
+ */
+function subOfferCopy(offer) {
+  if (offer.productKind === 'points_pack') {
+    return '每期扣款成功后一次到账 ' + fmtInt(offer.upfrontCredits) + ' 积分';
+  }
+  const types = [offer.upfrontCreditType, offer.dailyCreditType, offer.completionCreditType];
+  const mixed = types.some(function (t) { return t !== types[0]; });
+  const word = function (t) { return mixed ? ' ' + subCreditWord(t) : ''; };
+  return '开通即得 ' + fmtInt(offer.upfrontCredits) + word(offer.upfrontCreditType)
+    + '，每天登录自动领取 ' + fmtInt(offer.dailyCredits) + word(offer.dailyCreditType)
+    + '，领满本期天数再得 ' + fmtInt(offer.completionCredits) + word(offer.completionCreditType);
+}
+
+/** 一期能拿到的积分区间：本期通常 28 到 31 天，每天额度与开卡、领满奖励不变。 */
+function subPeriodRange(offer) {
+  const base = offer.upfrontCredits + offer.completionCredits;
+  return { min: base + offer.dailyCredits * 28, max: base + offer.dailyCredits * 31 };
+}
+
+/** 已开通（有已履约扣款且非终态）的那一条；有它时三张卡置灰。 */
+function effectiveSubscription() {
+  const s = subscriptionState && subscriptionState.subscription;
+  return s && s.effective === true ? s : null;
+}
+
+function pendingSubscriptionFor(planCode) {
+  const list = subscriptionState && Array.isArray(subscriptionState.pending) ? subscriptionState.pending : [];
+  return list.find(function (p) { return p && p.planCode === planCode && typeof p.checkoutUrl === 'string'; }) || null;
+}
+
+function selectedSubscriptionOffer() {
+  return subscriptionOffers().find(function (o) { return o.planCode === selectedSubscriptionPlan; }) || null;
+}
+
+function renderSubscriptionView() {
+  const tiles = document.getElementById('subTiles');
+  if (!tiles) return;
+  tiles.innerHTML = '';
+  const locked = effectiveSubscription() !== null;
+  if (locked) selectedSubscriptionPlan = null;
+  subscriptionOffers().forEach(function (offer) {
+    const tier = subTier(offer.planCode);
+    const el = document.createElement('div');
+    el.className = 'promo-card sub-card' + (tier ? ' tier-' + tier : '')
+      + (offer.planCode === selectedSubscriptionPlan ? ' sel' : '') + (locked ? ' locked' : '');
+    el.dataset.planCode = offer.planCode;
+    el.onclick = function () { selectSubscriptionOffer(offer.planCode); };
+    const chip = tier ? '<span class="tier-chip">' + SUB_TIER_INFO[tier].badge + '</span>' : '';
+    const off = subDiscountLabel(offer);
+    el.innerHTML = chip +
+      '<div class="sub-head"><span class="sub-name">' + escapeHtml(subOfferName(offer)) + '</span></div>' +
+      '<div class="sub-price-row"><span class="sub-price">US$' + (offer.amountCents / 100).toFixed(2) + '<small>/月</small></span>' +
+      '<span class="sub-list">US$' + (offer.listPriceCents / 100).toFixed(2) + '</span>' +
+      (off ? '<span class="sub-off">' + off + '</span>' : '') + '</div>' +
+      '<div class="sub-copy">' + escapeHtml(subOfferCopy(offer)) + '</div>';
+    tiles.appendChild(el);
+    // 点卡片后在卡片正下方原地展开权益抽屉；Plus 积分包没有抽屉（开发单第 4.1 节第 1 条）。
+    if (offer.planCode === selectedSubscriptionPlan && subscriptionDrawerOpen && offer.productKind !== 'points_pack') {
+      const drawer = document.createElement('div');
+      drawer.className = 'sub-drawer';
+      drawer.innerHTML = subscriptionDrawerHtml(offer);
+      tiles.appendChild(drawer);
+    }
+  });
+  renderSubscriptionNotice();
+  updateSubscriptionButton();
+}
+
+function subscriptionDrawerHtml(offer) {
+  const range = subPeriodRange(offer);
+  const perks = [
+    '开通即得 <b>' + fmtInt(offer.upfrontCredits) + '</b> ' + subCreditWord(offer.upfrontCreditType) + '，每期扣款成功后到账',
+    '每天登录自动领取 <b>' + fmtInt(offer.dailyCredits) + '</b> ' + subCreditWord(offer.dailyCreditType) + '，不用手动领取',
+    '领满本期天数再得 <b>' + fmtInt(offer.completionCredits) + '</b> ' + subCreditWord(offer.completionCreditType),
+    '本期合计 <b>' + fmtInt(range.min) + '</b> 到 <b>' + fmtInt(range.max) + '</b> 积分，随本期天数变化',
+  ];
+  if (offer.makeupCardQuota > 0) perks.push('每期随卡 <b>' + fmtInt(offer.makeupCardQuota) + '</b> 张补签卡，本期结束清零');
+  const notes = [
+    '每期从扣款成功那天起，到下次扣款日为止，通常 28 到 31 天；续费扣款晚到时按实际扣成功那天起算。',
+    '每期扣款成功后才发放当期月卡与积分。',
+    '临时积分自发放起 30 天内有效，长期积分不过期。',
+    '开通后不能直接换档；要换档请关闭自动续费，等本期结束后重新开通。',
+  ];
+  return '<div><b>' + escapeHtml(subOfferName(offer)) + ' · 每期权益</b></div><ul>'
+    + perks.map(function (p) { return '<li>' + p + '</li>'; }).join('') + '</ul>'
+    + '<div style="margin-top:6px"><b>说明</b></div><ul>'
+    + notes.map(function (n) { return '<li>' + n + '</li>'; }).join('') + '</ul>';
+}
+
+function selectSubscriptionOffer(planCode) {
+  if (subscriptionStarting || effectiveSubscription()) return;
+  if (selectedSubscriptionPlan === planCode) {
+    subscriptionDrawerOpen = !subscriptionDrawerOpen;
+  } else {
+    selectedSubscriptionPlan = planCode;
+    subscriptionDrawerOpen = true;
+  }
+  hideSubscriptionError();
+  renderSubscriptionView();
+}
+
+function onSubscriptionAgree() {
+  const box = document.getElementById('subAgree');
+  subscriptionAgreed = !!(box && box.checked);
+  updateSubscriptionButton();
+}
+
+function renderSubscriptionNotice() {
+  const el = document.getElementById('subNotice');
+  if (!el) return;
+  const active = effectiveSubscription();
+  const offer = selectedSubscriptionOffer();
+  const pending = offer ? pendingSubscriptionFor(offer.planCode) : null;
+  const manage = subscriptionState && typeof subscriptionState.manageUrl === 'string' ? subscriptionState.manageUrl : null;
+  let html = '';
+  if (active) {
+    html = '你已开通连续包月' + (manage ? '<a href="' + escapeHtml(manage) + '">管理订阅 ›</a>' : '');
+  } else if (pending) {
+    html = '你有一笔待付款的连续包月，可以继续付款；付款链接约 23 小时后失效。';
+  }
+  el.innerHTML = html;
+  el.style.display = html ? 'block' : 'none';
+}
+
+function updateSubscriptionButton() {
+  const btn = document.getElementById('subBtn');
+  if (!btn) return;
+  const offer = selectedSubscriptionOffer();
+  if (effectiveSubscription()) {
+    btn.disabled = true;
+    btn.textContent = '你已开通连续包月';
+    return;
+  }
+  if (!offer) {
+    btn.disabled = true;
+    btn.textContent = '请选择连续包月档位';
+    return;
+  }
+  const pending = pendingSubscriptionFor(offer.planCode);
+  btn.textContent = pending ? '继续付款' : '开通连续包月 US$' + (offer.amountCents / 100).toFixed(2) + '/月';
+  btn.disabled = subscriptionStarting || !subscriptionAgreed;
+}
+
+function showSubscriptionError(msg) {
+  const el = document.getElementById('subError');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+function hideSubscriptionError() {
+  const el = document.getElementById('subError');
+  if (el) { el.textContent = ''; el.style.display = 'none'; }
+}
+
+/** 每次付款点击生成一个请求号（8–128 位 A-Za-z0-9_-）；同一次点击里的重试沿用它（主后端按它幂等返回同一笔）。 */
+function newRequestId() {
+  const raw = crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + '-' + Math.random();
+  return raw.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 128);
+}
+
+/**
+ * 付款页一律在新窗口打开。🔴 空白窗口必须在点击的同一个同步调用里开，等接口回来再开会被浏览器当弹窗拦掉；
+ * 回来后把付款链接填进去。开不出来（被拦截）就本页跳转过去，付完 A+Pay 会按 completeUrl 回到开通结果页。
+ */
+function openPaymentWindow() {
+  try {
+    const w = window.open('', '_blank');
+    return w || null;
+  } catch {
+    return null;
+  }
+}
+
+function sendToPayment(win, url) {
+  if (win && !win.closed) {
+    try { win.location.href = url; return true; } catch {}
+  }
+  window.location.href = url;
+  return false;
+}
+
+/** 拿不到只读结果凭证（老服务端）时的退路：换成静态结果页，请用户回主站月卡页查看。 */
+function goToSubscriptionResult(url) {
+  if (typeof url === 'string' && url) window.location.href = url;
+}
+
+/**
+ * 原收银台页面停在「开通确认中」原地轮询（开发单 B4）。凭证是 purchase／resolve 响应体里那张只读的结果凭证，
+ * 只放请求体，不进任何网址、不交给 A+Pay。拿不到凭证返回 false，调用方改走静态结果页。
+ */
+function startSubscriptionConfirm(token, subscriptionId) {
+  if (typeof token !== 'string' || token === '' || !Number.isSafeInteger(subscriptionId)) return false;
+  if (subscriptionConfirm && subscriptionConfirm.timer) clearTimeout(subscriptionConfirm.timer);
+  subscriptionConfirm = { token: token, subscriptionId: subscriptionId, startedAt: Date.now(), phase: 'waiting', sub: null, timer: null, throttled: false };
+  renderSubscriptionConfirm();
+  applyOfferView();
+  pollSubscriptionOnce();
+  return true;
+}
+
+/** 开通成功的判据：这一条有已履约扣款、不是终态、有下次扣款日。 */
+function subscriptionSucceeded(sub) {
+  return !!sub && sub.effective === true && sub.terminal !== true && typeof sub.nextChargeAt === 'string' && sub.nextChargeAt !== '';
+}
+
+async function pollSubscriptionOnce() {
+  const c = subscriptionConfirm;
+  if (!c || c.phase === 'done' || c.phase === 'stopped') return;
+  let list = [];
+  let refused = null;
+  let throttled = false;
+  try {
+    const res = await fetch('/api/subscription/status', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
+      body: JSON.stringify({ s: c.token }),
+    });
+    const data = await res.json().catch(function () { return {}; });
+    if (res.ok) {
+      list = Array.isArray(data.subscriptions) ? data.subscriptions : [];
+    } else if (res.status >= 400 && res.status < 500 && res.status !== 429) {
+      // 凭证过期（410）、无效（401）这类拒绝：再问也不会变，停下来把原因和去处告诉用户。
+      // 5xx、429 与网络错误不算拒绝，照现节奏继续重试。
+      refused = typeof data.error === 'string' && data.error ? data.error : '开通结果暂时查不到';
+    } else if (res.status === 429) {
+      throttled = true;
+    }
+  } catch {
+    list = [];
+  }
+  if (subscriptionConfirm !== c) return;
+  if (refused !== null) {
+    c.phase = 'stopped';
+    c.reason = refused;
+    renderSubscriptionConfirm();
+    return;
+  }
+  // 只认这次开通（或继续付款）的那一条：拿别的订阅当成功会把旧订阅错报成刚开通。
+  const target = list.find(function (s) { return s && s.id === c.subscriptionId; }) || null;
+  if (subscriptionSucceeded(target)) {
+    c.phase = 'done';
+    c.sub = target;
+    renderSubscriptionConfirm();
+    return;
+  }
+  const slow = Date.now() - c.startedAt > SUB_SLOW_AFTER_MS;
+  // 429 只是查得太勤：在确认中下面说一句，照常继续问；下一次不是 429 就把这句收掉。
+  if ((slow && c.phase !== 'slow') || throttled !== c.throttled) {
+    if (slow) c.phase = 'slow';
+    c.throttled = throttled;
+    renderSubscriptionConfirm();
+  }
+  // 前 10 分钟每 3 秒问一次，之后放慢到 30 秒：页面不关就继续等，确认了照样切到「已开通」。
+  c.timer = setTimeout(pollSubscriptionOnce, slow ? SUB_POLL_SLOW_MS : SUB_POLL_FAST_MS);
+}
+
+/** 日期按北京时间写 YYYY-MM-DD：用户在国内，扣款日按他那边的日子说。 */
+function subFmtDate(iso) {
+  const d = new Date(iso);
+  if (typeof iso !== 'string' || isNaN(d.getTime())) return '—';
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+  } catch {
+    return d.toISOString().slice(0, 10);
+  }
+}
+
+function subscriptionPeriodPerks(sub) {
+  const p = sub && sub.currentPeriod && typeof sub.currentPeriod === 'object' ? sub.currentPeriod : null;
+  if (!p) return ['本期权益已发放，可在主站月卡页查看'];
+  if (sub.productKind === 'points_pack') return ['本期已到账 <b>' + fmtInt(p.upfrontCredits || 0) + '</b> 长期积分'];
+  const perks = ['开通即得 <b>' + fmtInt(p.upfrontCredits || 0) + '</b> 积分'];
+  if (p.dailyCredits) perks.push('本期 <b>' + fmtInt(p.durationDays || 0) + '</b> 天，每天登录自动领取 <b>' + fmtInt(p.dailyCredits) + '</b> 积分');
+  if (p.completionCredits) perks.push('领满本期天数再得 <b>' + fmtInt(p.completionCredits) + '</b> 积分');
+  return perks;
+}
+
+function renderSubscriptionConfirm() {
+  const el = document.getElementById('subConfirmBody');
+  const c = subscriptionConfirm;
+  if (!el || !c) return;
+  el.className = 'sub-confirm' + (c.phase === 'done' ? ' done' : '');
+  if (c.phase === 'done') {
+    const sub = c.sub;
+    const tier = subTier(sub.planCode);
+    const name = tier ? SUB_TIER_INFO[tier].badge + ' · ' + SUB_TIER_INFO[tier].name : '连续包月';
+    const price = Number.isSafeInteger(sub.amountCents) ? 'US$' + (sub.amountCents / 100).toFixed(2) + '/月' : '';
+    // 「管理订阅」只回主站月卡页的管理入口：这张只读凭证不在收银台换管理链接。
+    el.innerHTML = '<div class="sc-label">已开通</div>'
+      + '<div class="sc-title">' + escapeHtml(name) + '</div>'
+      + (price ? '<div class="sc-price">' + price + '</div>' : '')
+      + '<div class="sc-label">本期权益</div><ul>' + subscriptionPeriodPerks(sub).map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul>'
+      + '<div class="sc-kv"><span>下次扣款日</span><b>' + subFmtDate(sub.nextChargeAt) + '</b></div>'
+      + '<div class="sc-actions"><a class="btn" id="subConfirmManage" href="' + escapeHtml(pointsCardLandingUrl(null)) + '">管理订阅</a>'
+      + '<button type="button" class="btn-outline" onclick="returnToDzmm(\'subscription_confirm\')">返回</button></div>';
+    return;
+  }
+  if (c.phase === 'stopped') {
+    el.innerHTML = '<div class="sc-title">暂时查不到开通结果</div>'
+      + '<div class="sc-hint">' + escapeHtml(c.reason) + '</div>'
+      + '<div class="sc-hint">请回主站月卡页查看连续包月状态，或从那里进入订阅管理。请勿重复付款。开通结果以原收银台页面或主站月卡页显示为准。</div>'
+      + '<div class="sc-actions"><a class="btn" id="subConfirmManage" href="' + escapeHtml(pointsCardLandingUrl(null)) + '">回主站月卡页查看</a></div>';
+    return;
+  }
+  const throttledHint = c.throttled ? '<div class="sc-hint" id="subConfirmThrottled">查询太频繁，稍后自动重试</div>' : '';
+  if (c.phase === 'slow') {
+    el.innerHTML = '<div class="sc-title">仍在处理中</div>'
+      + '<div class="sc-hint">仍在处理中，稍后可在订阅管理查看。</div>' + throttledHint
+      + '<div class="sc-actions"><a class="btn-outline" href="' + escapeHtml(pointsCardLandingUrl(null)) + '">回主站月卡页</a></div>';
+    return;
+  }
+  el.innerHTML = '<div class="sc-spin"></div><div class="sc-title">开通确认中</div>'
+    + '<div class="sc-hint">请在新打开的页面完成付款。付款完成后通常几十秒内确认，本页会自动刷新。请勿重复付款。开通结果以原收银台页面或主站月卡页显示为准。</div>'
+    + throttledHint;
+}
+
+async function startSubscription() {
+  const offer = selectedSubscriptionOffer();
+  if (subscriptionStarting || !offer || !subscriptionAgreed || effectiveSubscription() || !currentToken) return;
+  hideSubscriptionError();
+  const pending = pendingSubscriptionFor(offer.planCode);
+  const win = openPaymentWindow();
+  if (pending) {
+    // 继续付款：付款链接取自主后端订阅查询；原页同样原地轮询（凭证取自 resolve 响应体里的只读结果凭证）。
+    // 被拦截改本页跳转时，A+Pay 付完回到静态结果页，回跳网址不带任何凭证。
+    const opened = sendToPayment(win, pending.checkoutUrl);
+    if (opened && !startSubscriptionConfirm(subscriptionState && subscriptionState.statusToken, pending.id)) {
+      goToSubscriptionResult('https://payweld.com/subscription/result');
+    }
+    return;
+  }
+  subscriptionStarting = true;
+  updateSubscriptionButton();
+  const requestId = newRequestId();
+  const body = JSON.stringify({
+    token: currentToken, planCode: offer.planCode, planVersion: offer.planVersion,
+    amountCents: offer.amountCents, requestId,
+  });
+  let res = null;
+  let data = {};
+  for (let attempt = 0; attempt < 2 && res === null; attempt++) {
+    try {
+      res = await fetch('/api/subscription/purchase', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+      data = await res.json().catch(function () { return {}; });
+    } catch {
+      res = null;
+    }
+  }
+  subscriptionStarting = false;
+  if (res && res.ok && typeof data.url === 'string') {
+    const opened = sendToPayment(win, data.url);
+    if (opened && !startSubscriptionConfirm(data.statusToken, data.subscriptionId)) goToSubscriptionResult(data.resultUrl);
+    return;
+  }
+  if (win && !win.closed) { try { win.close(); } catch {} }
+  if (res === null) {
+    showSubscriptionError('网络错误，请稍后重试；如果已经付款，可稍后在订阅管理查看。');
+  } else {
+    if (data.code === 'quote_changed' && data.subscription) {
+      applySubscriptionState(data.subscription);
+      renderSubscriptionView();
+    }
+    showSubscriptionError(data.error || '连续包月暂时无法开通，请稍后重试。');
+  }
+  updateSubscriptionButton();
+}
+
+function escapeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/**
+ * 切 tab。月卡 tab 上没有充值档位和下方那块支付方式／支付按钮；direct 灰度打开时点卡片进详情付款页
+ * （支付方式与付款按钮回到详情页下方），关着时卡片只是回主站月卡页的入口。
+ */
+function selectOfferTab(tab) {
+  offerTab = tab === 'card' ? 'card' : 'topup';
+  // 离开详情页只走 closeCardDetail 这一个出口：渠道、按钮、充值 tab 的选择都在那里还原（评审 24098 第 3 条）。
+  if (offerTab === 'topup' && cardDetailOffer !== null) { closeCardDetail(); return; }
+  applyOfferView();
+  // The payment area is hidden while the monthly-card list is shown, but the
+  // selected top-up package and method are intentionally kept for the return
+  // to the recharge tab. Recompute the button presentation so the top-up
+  // card's FX note cannot remain visible under the monthly-card list.
+  updateBtn();
+}
+
+/**
+ * 这一屏哪些块出现，只有这一处说了算：充值 tab、月卡列表、月卡详情付款页三种。
+ * 详情页不出 tab 条：要回列表走左上角那一个返回，免得一边开着详情一边切到充值。
+ * 元素一律取了再判空：这一页的测试替身只认识固定的一组 id。
+ */
+function applyOfferView() {
+  const showCard = offerTab === 'card';
+  const detail = showCard && cardDetailOffer !== null;
+  // 连续包月那一屏替掉月卡卡片列表（或月卡付款屏）和下面的支付方式、付款按钮；单次购买时一切照旧。
+  const toggle = subscriptionToggleVisible();
+  const sub = toggle && subscriptionMode === 'sub';
+  // 开通确认中：这一屏只剩确认卡片，别的选购块都收起来，免得用户在等结果时又点一次开通。
+  const confirming = subscriptionConfirm !== null;
+  syncRmbCustomBox();
+  const ids = [
+    ['offerTabs', offerTabsVisible && !detail && !confirming, 'flex'],
+    ['subToggle', toggle && !confirming, 'flex'],
+    ['pointsCardTiles', showCard && !detail && !sub && !confirming],
+    ['cardDetail', detail && !confirming],
+    ['subscriptionView', sub && !confirming],
+    ['subConfirm', confirming],
+    ['packages', !showCard && !sub && !confirming],
+    ['methodsSection', (!showCard || detail) && !sub && !confirming],
+    ['payBtn', (!showCard || detail) && !sub && !confirming],
+    ['ctaArea', !sub && !confirming],
+  ];
+  ids.forEach(function (row) {
+    const el = document.getElementById(row[0]);
+    if (el) el.style.display = row[1] ? (row[2] || '') : 'none';
+  });
+  const tabTopup = document.getElementById('offerTabTopup');
+  const tabCard = document.getElementById('offerTabCard');
+  if (tabTopup) tabTopup.className = 'offer-tab' + (showCard ? '' : ' sel');
+  if (tabCard) tabCard.className = 'offer-tab' + (showCard ? ' sel' : '');
+}
+
+/**
+ * 自定义金额框出不出现，只有这一处说了算：人民币版本、充值 tab、且活动没开。
+ * 活动开没开只认 resolve 下发的 pricing.promotion_active——服务端按请求时刻判（enabled 为 true 且
+ * until 未过），与给四档报价的是同一个结果；页面不自己比时间。活动期只卖四个固定档；活动结束后
+ * 下一次 resolve（刷新、或 409 报价过期自动重载）回 false，框自动回来。报价与建单校验不看这里。
+ * 🔴 显示写 'block' 不写 ''：.custom 的样式表默认 display:none，写 '' 等于藏起来——切到月卡
+ * tab 再切回充值，框就再也回不来。usd_v0 下永远是 'none'，与改动前逐字节相同。
+ *
+ * 框藏起来时，同一位置那句「活动期间暂停自定义金额，某时后恢复」也在这里定：用的就是上面藏框的
+ * 同一个 rmbTopup && promotionOn，再加一条「服务端给了截止时间」（只在活动判成开着时才给）。
+ * 没设截止或读不出来就不写这句——不替用户猜一个时间。人民币档位下那句小字跟充值 tab 走。
+ */
+function syncRmbCustomBox() {
+  const rmbTopup = pricingMode === 'rmb_v1' && offerTab !== 'card';
+  const promotionOn = !!(rmbPricing && rmbPricing.promotion_active === true);
+  // ¥6 新人首充链接（studio #11304）只卖 ¥6 这一档，不开自定义金额（服务端也只收 ¥6）
+  const first6 = !!(rmbPricing && rmbPricing.cny_first_6 === true);
+  const box = document.getElementById('customBox');
+  if (box) box.style.display = rmbTopup && !promotionOn && !first6 ? 'block' : 'none';
+  const paused = document.getElementById('customPaused');
+  if (paused) {
+    const until = rmbTopup && promotionOn ? fmtBeijingTime(rmbPricing.promotion_until) : '';
+    paused.textContent = until ? '活动期间暂停自定义金额，' + until + '后恢复' : '';
+    paused.style.display = until ? 'block' : 'none';
+  }
+  const note = document.getElementById('rmbPriceNote');
+  if (note) note.style.display = rmbTopup ? 'block' : 'none';
+}
+
+/** ISO 时刻 → 「10月3日 08:00（北京时间）」。固定按 UTC+8 换算，不看用户设备时区；读不出来返回 ''。 */
+function fmtBeijingTime(iso) {
+  const ms = typeof iso === 'string' ? Date.parse(iso) : NaN;
+  if (!Number.isFinite(ms)) return '';
+  const d = new Date(ms + 8 * 3600 * 1000);
+  const pad = (n) => String(n).padStart(2, '0');
+  return (d.getUTCMonth() + 1) + '月' + d.getUTCDate() + '日 ' + pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()) + '（北京时间）';
+}
+
+// 与服务端 rmb-pricing.ts 同一套整数公式，只用来实时显示；真值由服务端建单时再算一遍。
+// 金额正好等于某个固定档时直接用 resolve 下发的那档 points：活动期那一档的到账是活动积分、
+// 不再是区间公式算出来的数，而按金额取值让「自定义输入 50」和「点 ¥50 按钮」在页面上也同价。
+// 赠送积分 = points − points_base，活动与否都成立。
+function quoteRmb(fen) {
+  if (!rmbPricing || !Number.isSafeInteger(fen) || fen <= 0 || fen % 100 !== 0) return null;
+  if (fen < rmbPricing.min_cny || fen > rmbPricing.max_cny) return null;
+  const band = (rmbPricing.bands || []).find((b) => fen >= b.min && fen <= b.max);
+  if (!band) return null;
+  const usd = rmbUsdCents(fen, rmbPricing.rate_milli);
+  const item = (rmbPricing.items || []).find((it) => it.price_cny === fen);
+  const points = item && Number.isSafeInteger(item.points) ? item.points : usd + Math.floor((usd * band.pct) / 100);
+  return { price_cny: fen, price_usd: usd, points_base: usd, bonus_rate: band.pct, bonus: points - usd, points };
+}
+
+/** 人民币分 → 美元等值（美分），与服务端 rmb-pricing.ts 的 cnyFenToUsdCents 同一公式。 */
+function rmbUsdCents(fen, rateMilli) {
+  return Math.floor((fen * 1000 * 2 + rateMilli) / (2 * rateMilli));
+}
+
+function fmtRounds(points) {
+  return '约可聊 ' + Math.floor(points / 2).toLocaleString() + '–' + points.toLocaleString() + ' 轮';
+}
+
+function fmtUsd(cents) {
+  return 'US$' + (cents / 100).toFixed(2);
+}
+
+/** 当前选中的人民币报价（固定档或自定义），没选返回 null */
+function currentRmbQuote() {
+  if (pricingMode !== 'rmb_v1') return null;
+  if (selectedCustomCny !== null) return quoteRmb(selectedCustomCny);
+  if (selectedPkg && selectedPkg.rmb) return quoteRmb(selectedPkg.price_cny);
+  return null;
+}
+
+/**
+ * 人民币版本的档位区：只有人民币固定档，卡上只显示人民币价、到账积分和约可聊，不出现美元。
+ * 新手礼包（首充档）不对人民币收银台开放（工单 #5821），resolve 在 rmb_v1 下不下发它。
+ */
+function renderRmbPackages() {
+  const grid = document.getElementById('packages');
+  grid.innerHTML = '';
+  selectedPkg = null;
+  selectedCustomCny = null;
+  const packages = [];
+  let i = 0;
+  let defaultEl = null;
+  let defaultPkg = null;
+  let defaultIndex = -1;
+  rmbPricing.items.forEach((item) => {
+    const pkg = { rmb: true, symbol: item.symbol, price_cny: item.price_cny, points: item.points, credits: item.points, usd: item.price_usd / 100 };
+    packages.push(pkg);
+    const el = document.createElement('div');
+    el.className = 'pkg';
+    const idx = i++;
+    el.onclick = () => selectPkg(el, pkg, idx);
+    el.innerHTML = `
+      <div class="amt"><span class="cur">¥</span>${(item.price_cny / 100).toLocaleString()}</div>
+      <div class="pts">到账 ${item.points.toLocaleString()} 积分</div>
+      <div class="rounds">${fmtRounds(item.points)}</div>
+    `;
+    if (item.promotion_active === true && item.points > item.points_base) {
+      // 活动期这一档照 usd_v0 活动期的样子：右上角粉色「+N%」（N 按到账相对基础积分算，
+      // 与 renderPackages 同一公式），配置里的常规角标文案（「赠送 10%」那类说的是常规比例）这时不渲染。
+      const pct = Math.round((item.points - item.points_base) / item.points_base * 100);
+      if (pct > 0) {
+        const bonus = document.createElement('span');
+        bonus.className = 'bonus';
+        bonus.textContent = '+' + pct + '%';
+        el.prepend(bonus);
+      }
+    } else if (rmbPricing.cny_first_6 === true) {
+      const badge = document.createElement('span');
+      badge.className = 'badge-tag gift';
+      badge.textContent = '新人首充';
+      el.prepend(badge);
+    } else if (item.badge) {
+      // 角标文案来自配置行：只当文本渲染，和页面里其它动态串一样不进 innerHTML
+      const badge = document.createElement('span');
+      badge.className = 'badge-tag' + (item.points > item.points_base ? ' gift' : '');
+      badge.textContent = item.badge;
+      el.prepend(badge);
+    }
+    el.style.animationDelay = (0.05 + idx * 0.05) + 's';
+    grid.appendChild(el);
+    if (item.is_default && !defaultEl) { defaultEl = el; defaultPkg = pkg; defaultIndex = idx; }
+    if (!hasSessionMarker('package-viewed-' + pkg.symbol)) {
+      setSessionMarker('package-viewed-' + pkg.symbol);
+      markStep('topup_package_viewed');
+      trackClientEvent('topup_package_viewed', { package_id: pkg.symbol, package_credits: pkg.credits, package_index: idx });
+    }
+  });
+  // 自定义输入框：占位由规则算出，页面不内置数字
+  const box = document.getElementById('customBox');
+  const input = document.getElementById('customInput');
+  input.placeholder = `输入 ${rmbPricing.min_cny / 100}–${rmbPricing.max_cny / 100} 的整数金额`;
+  input.value = '';
+  document.getElementById('customQuote').style.display = 'none';
+  document.getElementById('customErr').style.display = 'none';
+  document.getElementById('customHint').textContent = '或输入自定义金额';
+  syncRmbCustomBox();
+  box.classList.remove('sel');
+  if (!restorePackageSelection(packages) && defaultEl) selectPkg(defaultEl, defaultPkg, defaultIndex, 'default');
+}
+
+function onCustomInput() {
+  if (pricingMode !== 'rmb_v1') return;
+  const input = document.getElementById('customInput');
+  const raw = input.value.trim();
+  const box = document.getElementById('customBox');
+  const quoteEl = document.getElementById('customQuote');
+  const errEl = document.getElementById('customErr');
+  // 选中自定义时四卡取消选中
+  document.querySelectorAll('.pkg').forEach((e) => e.classList.remove('sel'));
+  selectedPkg = null;
+  box.classList.add('sel');
+  if (raw === '') {
+    selectedCustomCny = null;
+    quoteEl.style.display = 'none';
+    errEl.style.display = 'none';
+    updateBtn();
+    return;
+  }
+  const num = Number(raw);
+  const minYuan = rmbPricing.min_cny / 100;
+  const maxYuan = rmbPricing.max_cny / 100;
+  let err = null;
+  if (!Number.isFinite(num) || !Number.isInteger(num)) err = '请输入整数人民币金额';
+  else if (num < minYuan) err = `最低 ¥${minYuan} 起充`;
+  else if (num > maxYuan) err = `单笔最高 ¥${maxYuan}`;
+  const quote = err ? null : quoteRmb(num * 100);
+  if (!quote) {
+    selectedCustomCny = null;
+    quoteEl.style.display = 'none';
+    errEl.textContent = err || '无效的支付金额';
+    errEl.style.display = 'block';
+    updateBtn();
+    return;
+  }
+  selectedCustomCny = quote.price_cny;
+  // 真填出一个能付的自定义金额才算放弃那张卡；只是点进输入框、还没填，不作废（#2150 同一张链接照旧恢复）
+  rememberLastPackage(null);
+  errEl.style.display = 'none';
+  document.getElementById('customBase').textContent = quote.points_base.toLocaleString();
+  document.getElementById('customBonusLine').style.display = quote.bonus > 0 ? 'flex' : 'none';
+  document.getElementById('customBonus').textContent = '+' + quote.bonus.toLocaleString();
+  document.getElementById('customTotal').textContent = quote.points.toLocaleString() + ' 积分';
+  document.getElementById('customRounds').textContent = fmtRounds(quote.points);
+  quoteEl.style.display = 'block';
+  markStep('topup_package_selected');
+  maybeTrackPaymentMethodSelection();
+  updateBtn();
+}
+
+/**
+ * 人民币版本下信用卡的可用性：金额低于 card_min_cny（由信用卡通道的美元下限和汇率算出）时置灰。
+ * 置灰只是展示，服务端 checkout 按同一个下限再拒一道。
+ */
+function applyRmbMethodAvailability() {
+  const hint = document.getElementById('methodHint');
+  if (pricingMode !== 'rmb_v1') { hint.style.display = 'none'; return; }
+  const quote = currentRmbQuote();
+  const minCny = rmbPricing.card_min_cny;
+  const cardTooLow = quote !== null && minCny !== null && quote.price_cny < minCny;
+  const cardUnavailable = minCny === null;
+  const hasAlternative = Array.from(document.querySelectorAll('.method'))
+    .some((el) => CNY_METHODS.includes(el.dataset.method));
+  const lowAmountAlternative = hasAlternative ? '可选择支付宝或微信支付' : '请提高金额后重试';
+  const unavailableAlternative = hasAlternative ? '可选择支付宝或微信支付' : '请稍后重试';
+  const unavailableReason = cardTooLow
+    ? `当前金额不足以使用信用卡，${lowAmountAlternative}`
+    : cardUnavailable
+      ? `信用卡暂时不可用，${unavailableAlternative}`
+      : '';
+  let text = '';
+  document.querySelectorAll('.method').forEach((el) => {
+    if (el.dataset.method !== 'stripe') return;
+    const disabled = cardTooLow || cardUnavailable;
+    el.classList.toggle('disabled', disabled);
+    el.dataset.unavailableReason = disabled ? unavailableReason : '';
+    el.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+    el.title = disabled ? unavailableReason : '';
+    let note = el.querySelector('.method-unavailable');
+    if (disabled) {
+      if (!note) {
+        note = document.createElement('div');
+        note.className = 'method-unavailable';
+        el.appendChild(note);
+      }
+      note.textContent = unavailableReason;
+    } else if (note) {
+      note.remove();
+    }
+    if (disabled && selectedPayment === 'stripe') {
+      el.classList.remove('sel');
+      selectedPayment = null;
+    }
+  });
+  if (cardTooLow || cardUnavailable) {
+    const minUsd = rmbPricing.card_min_usd_cents;
+    text = cardTooLow
+      ? `信用卡最低扣款为 ${fmtUsd(minUsd)}` + (minCny !== null ? `（约 ¥${minCny / 100}）` : '') + `，${lowAmountAlternative}`
+      : `信用卡暂时不可用，${unavailableAlternative}`;
+  }
+  hint.textContent = text;
+  hint.style.display = text ? 'block' : 'none';
+}
+
+function renderPackages(packages) {
+  const grid = document.getElementById('packages');
+  grid.innerHTML = '';
+  selectedPkg = null;
+  packages.forEach((pkg, i) => {
+    const el = document.createElement('div');
+    el.className = 'pkg';
+    el.onclick = () => selectPkg(el, pkg, i);
+    let badges = '';
+    if (pkg.firstTimeOnly) {
+      badges += '<span class="first-time">新用户特惠</span>';
+    } else if (pkg.bonus > 0) {
+      const pct = Math.round((pkg.credits - pkg.usd * 100) / (pkg.usd * 100) * 100);
+      if (pct > 0) badges += `<span class="bonus">+${pct}%</span>`;
+    }
+    if (pkg.popular) {
+      badges += '<span class="popular">HOT</span>';
+    }
+    el.innerHTML = `
+      ${badges}
+      <div class="amt">${pkg.credits.toLocaleString()}<small>积分</small></div>
+      <div class="price">US$${pkg.usd.toFixed(2)}</div>
+      <div style="font-size:.68rem;color:var(--text-3);margin-top:2px">≈ ¥${(pkg.usd * EXCHANGE_RATE).toFixed(0)}</div>
+    `;
+    el.style.animationDelay = (0.05 + i * 0.05) + 's';
+    grid.appendChild(el);
+    if (!hasSessionMarker('package-viewed-' + pkg.symbol)) {
+      setSessionMarker('package-viewed-' + pkg.symbol);
+      markStep('topup_package_viewed');
+      trackClientEvent('topup_package_viewed', {
+        package_id: pkg.symbol,
+        package_credits: pkg.credits,
+        package_index: i,
+      });
+    }
+  });
+  restorePackageSelection(packages);
+}
+
+// 用户刚才亲手点的那一档，按「这个标签页 + 这个用户」记。
+// 原来按 checkout 会话记，只管同一张链接里的重渲染（看完月卡详情返回、刷新，#2150）；
+// 可用户按浏览器返回回到主站、再点「充值」拿到的是一张新链接、新会话，档位就掉回默认。
+// 同一个标签页里同一个用户的新旧链接本来就是同一次充值，所以两种情况用这一份记忆接住（#6737）：
+// 同一张链接里照旧一直有效（#2150 不设期限）；换了新链接只接 30 分钟内点的。
+// 只记用户点的（默认选中和恢复都不记）；填出一个能付的自定义金额就作废（记 null），免得回来又预选一张已经放弃的卡。
+// 档位这次不在列表里、换了人（共用浏览器）都落默认档，免得把别人或很久以前的金额预选上。
+const LAST_PACKAGE_KEY = 'payweld:last-package';
+const LAST_PACKAGE_TTL_MS = 30 * 60 * 1000;
+
+function rememberLastPackage(symbol) {
+  if (!userUUID) return;
+  try {
+    sessionStorage.setItem(LAST_PACKAGE_KEY, JSON.stringify({ uuid: userUUID, session: currentCheckoutSessionId, symbol, at: Date.now() }));
+  } catch {}
+}
+
+function recallLastPackage() {
+  if (!userUUID) return null;
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(LAST_PACKAGE_KEY) || 'null');
+    if (!saved || saved.uuid !== userUUID || typeof saved.symbol !== 'string') return null;
+    if (currentCheckoutSessionId && saved.session === currentCheckoutSessionId) return saved.symbol;
+    const age = Date.now() - saved.at;
+    return age >= 0 && age < LAST_PACKAGE_TTL_MS ? saved.symbol : null;
+  } catch {
+    return null;
+  }
+}
+
+function restorePackageSelection(packages) {
+  const symbol = recallLastPackage();
+  if (!symbol) return false;
+  const index = packages.findIndex((pkg) => pkg.symbol === symbol);
+  if (index < 0) return false;
+  const el = document.querySelectorAll('.pkg')[index];
+  if (!el) return false;
+  selectPkg(el, packages[index], index, 'restore');
+  return true;
+}
+
+// 设备时区。人民币通路的辖区闸拿它做放松项（详见 server.ts 的 decideCnyRegion）。
+// 🔴 刻意由这个页面自己取，不从主站传过来：收银台在 payweld.com，主站那个 _tz cookie
+// 跨域根本读不到；而绕道主站签进 token 也买不到可信度——用户在上报那一刻就能撒谎，
+// HMAC 只防签发之后被改。取不到就发空串，服务端按「不放松」处理。
+function deviceTimeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+  } catch {
+    return '';
+  }
+}
+
+async function fetchPaymentMethods(token) {
+  try {
+    let url = '/api/payment-methods?t=' + encodeURIComponent(token)
+      + '&tz=' + encodeURIComponent(deviceTimeZone());
+    // 隐藏开关：URL 带 &c=1 / &j=1 时传给后端
+    const p = new URLSearchParams(location.search);
+    if (p.get('c') === '1') url += '&c=1';
+    if (p.get('j') === '1') url += '&j=1';
+    if (p.get('m') === '1') url += '&m=1';
+    const res = await fetch(url);
+    const data = await res.json();
+    cnyRegionBlocked = data.cnyRegionBlocked === true;
+    return data.methods || ['alipay', 'wechat'];
+  } catch {
+    // 取不到就按「不知道」处理：不显示地区提示，也不擅自摘按钮。
+    // 强制始终在开单侧，所以这里保守与否都不影响合规，只影响体验。
+    cnyRegionBlocked = false;
+    return ['alipay', 'wechat'];
+  }
+}
+
+// 人民币通路是否因所在地区不可用。渲染那句解释用，不参与任何放行判断。
+let cnyRegionBlocked = false;
+
+/**
+ * 🔴 命中地区限制的人此前**什么解释都看不到**：支付宝/微信按钮直接不出现，
+ * 而那句双语文案只在开单侧返回、他们根本点不到。实测 9 小时里 800+ 个用户
+ * 对着一个孤零零的信用卡按钮，页面上没有一个字说为什么。这个函数就是补这句话。
+ */
+function renderRegionNotice(methods) {
+  const el = document.getElementById('cnyRegionNotice');
+  if (!el) return;
+  if (!cnyRegionBlocked) { el.style.display = 'none'; el.textContent = ''; return; }
+  // 月卡详情付款页只在这张卡能用信用卡单次购买时才劝用信用卡，否则那句「请使用国际信用卡」是一条死路。
+  const cardDetail = cardDetailOffer !== null;
+  const hasCard = cardDetail
+    ? methods.includes('stripe') && cardOnetimeQuote(cardDetailOffer) !== null
+    : methods.some((m) => m.startsWith('stripe'));
+  el.innerHTML =
+    '<div>此服务在您所在的地区不可用</div>'
+    + '<div>This service is unavailable in your region.</div>'
+    + (hasCard
+      ? '<div class="region-notice-hint">请使用国际信用卡（Visa/Mastercard）完成支付。'
+        + '<br>Please pay with an international credit card (Visa/Mastercard).</div>'
+      : cardDetail ? '<div class="region-notice-hint">月卡只能用支付宝或微信支付购买，暂不支持信用卡。</div>' : '');
+  el.style.display = 'block';
+}
+
+async function init() {
+  const p = new URLSearchParams(location.search);
+  setupReturnContext(p);
+  const token = p.get('t');
+  const variant = p.get('variant');
+  pointsCardOrderId = (p.get('pointsCardOrderId') || '').trim() || null;
+  checkoutMode = pointsCardOrderId ? 'monthly_card' : 'topup';
+  currentCheckoutSessionId = null;
+  currentPaymentAttemptId = null;
+  currentLinkId = null;
+  markStep('resolve_started');
+  if (pointsCardOrderId) enterPointsCardMode();
+  currentToken = token;
+
+  if (!token) {
+    showNoUuid('请从应用内进入充值', '在 酒馆AI / DZMM / NovelGPT Bot 中点击「充值」按钮获取专属链接');
+    return;
+  }
+  try {
+    let resolveUrl = '/api/resolve?t=' + encodeURIComponent(token);
+    resolveUrl += '&mode=' + encodeURIComponent(checkoutMode);
+    if (variant) resolveUrl += '&variant=' + encodeURIComponent(variant);
+    ['source_entry', 'source', 'source_context', 'trigger_page'].forEach((key) => {
+      const value = p.get(key);
+      if (value) resolveUrl += '&' + key + '=' + encodeURIComponent(value);
+    });
+    const res = await fetch(resolveUrl);
+    const data = await res.json();
+    if (!res.ok) {
+      showNoUuid(data.error || '链接无效', '请返回应用重新点击「充值」获取新链接');
+      return;
+    }
+    applySignedReturnUrl(data.returnUrl);
+    pointsCardCashierDirect = data.pointsCardCashierDirect === true;
+    cardOnetime = readCardOnetime(data.cardOnetime);
+    if (data.pointsCardOrderId) {
+      pointsCardOrderId = data.pointsCardOrderId;
+      checkoutMode = 'monthly_card';
+    }
+    if (pointsCardOrderId) {
+      // 月卡屏的报价与权益：只认对象或 null；别的形状（服务端还是老版本、没这个键）
+      // 按「读不到」处理，按钮保持锁死——没有价格的东西不许让人付钱。
+      pointsCardPlan = (data.pointsCardPlan && typeof data.pointsCardPlan === 'object') ? data.pointsCardPlan : null;
+    }
+    userUUID = data.uuid;
+    currentCheckoutSessionId = data.checkout_session_id || null;
+    currentLinkId = data.link_id || null;
+    rememberCheckoutIdentity();
+    markStep('page_interactive');
+    document.getElementById('selectView').style.display = 'block';
+    showUserInfo(data);
+    // 活动横幅：usd_v0 照旧看 data.promotion；rmb_v1 看它自己的开关（pricing.promotion_active，
+    // 与两个后端同一判法），横幅的文案与样子和 usd_v0 活动期一样。
+    const isRmbPage = !!(data.pricing && data.pricing.version === 'rmb_v1');
+    const promotionOn = isRmbPage ? data.pricing.promotion_active === true : data.promotion;
+    if (promotionOn && data.promotionText) {
+      document.getElementById('promoBannerText').textContent = data.promotionText;
+      document.getElementById('promoBanner').style.display = 'block';
+    }
+    if (!data.packages || data.packages.length === 0) {
+      showNoUuid('套餐加载失败', '请刷新页面重试，如问题持续请联系客服');
+      return;
+    }
+    // 🔴 月卡模式不渲染充值档位。
+    // 评审第 4 轮打回的第二条就是这里：enterPointsCardMode 把说明写进 #packages，
+    // 而这条成功路径随后总会调 renderPackages，它开头就清空同一个 #packages，
+    // 于是每一个合法的月卡链接最后看到的都是普通充值档位，月卡说明一次都没显示过。
+    // 改成互斥：月卡模式渲染月卡说明，其余照旧渲染档位。
+    if (pointsCardOrderId) {
+      enterPointsCardMode();
+      applySubscriptionState(data.subscription);
+    } else if (data.pricing && data.pricing.version === 'rmb_v1' && data.pricing.items && data.pricing.items.length) {
+      // 人民币版本：版本来自签名载荷（resolve 从 token 读），URL 参数改不了它。
+      // 档位、规则、信用卡门槛全部由 resolve 下发，页面不内置任何价格或比例常量。
+      pricingMode = 'rmb_v1';
+      rmbPricing = data.pricing;
+      enterRmbMode();
+      renderPointsCardPromo(data.showPointsCard === true || pointsCardCashierDirect, data.pointsCardOffers);
+      applySubscriptionState(data.subscription);
+      renderRmbPackages();
+    } else {
+      // 曝光位跟着积分档位这一屏走，位置与旧版一致：「选择套餐」标题下、档位网格上方。
+      // 月卡付款那一屏（URL 带订单号）不出现——那时用户已经在付月卡，没有可引的流。
+      // 放在 renderPackages 之前调用：returnUrl 在上面 applySignedReturnUrl 时已经就位。
+      renderPointsCardPromo(data.showPointsCard === true || pointsCardCashierDirect, data.pointsCardOffers);
+      applySubscriptionState(data.subscription);
+      renderPackages(data.packages);
+    }
+    trackTopupPageOpened();
+  } catch {
+    showNoUuid('网络连接失败', '请检查网络后刷新页面重试');
+    return;
+  }
+
+  // 先渲染默认支付方式（避免空白），然后异步检测更新
+  renderMethods(['alipay', 'wechat', 'stripe']);
+  availableMethods = await fetchPaymentMethods(token);
+  renderMethods(availableMethods);
+  renderRegionNotice(availableMethods);
+}
+
+function showUserInfo(data) {
+  const banner = document.getElementById('userBanner');
+  const name = data.name || '用户';
+  document.getElementById('userName').textContent = name;
+  const uid = data.uuid || '';
+  document.getElementById('userIdLabel').textContent = 'ID: ' + uid.slice(0, 8) + '-' + uid.slice(9, 13) + '-...-' + uid.slice(-12);
+  const fb = document.getElementById('userAvatarFallback');
+  fb.textContent = name.charAt(0);
+  if (data.avatar) {
+    const img = document.getElementById('userAvatar');
+    img.src = data.avatar;
+    img.style.display = 'block';
+    fb.style.display = 'none';
+    img.onerror = () => { img.style.display = 'none'; fb.style.display = 'flex'; };
+  } else {
+    document.getElementById('userAvatar').style.display = 'none';
+    fb.style.display = 'flex';
+  }
+  if (data.isAnon) {
+    document.getElementById('anonWarning').style.display = 'block';
+  }
+  banner.style.display = 'block';
+}
+
+function showNoUuid(title, subtitle) {
+  const el = document.getElementById('noUuid');
+  el.querySelector('p:first-child').textContent = title;
+  el.querySelector('p:last-child').textContent = subtitle;
+  el.style.display = 'flex';
+  document.getElementById('selectView').style.display = 'none';
+}
+
+/** 人民币版本的静态文案：顶部说明与积分说明改成人民币口径，其它位置不动。 */
+function enterRmbMode() {
+  const notice = document.getElementById('priceNotice');
+  if (notice) notice.innerHTML = '💱 所有价格以<strong>人民币 (CNY)</strong> 标价';
+  const line = document.getElementById('infoPricingLine');
+  if (line) line.textContent = '标价为人民币 (CNY)，支付宝/微信按标价扣款；信用卡按美元等值扣款，发卡行可能产生汇率差或手续费';
+}
+
+function selectPkg(el, pkg, packageIndex, selectSource = 'user_click') {
+  document.querySelectorAll('.pkg').forEach(e => e.classList.remove('sel'));
+  el.classList.add('sel');
+  if (pricingMode === 'rmb_v1') {
+    // 选中固定档时自定义取消选中，反之亦然
+    selectedCustomCny = null;
+    const box = document.getElementById('customBox');
+    if (box) box.classList.remove('sel');
+  }
+  selectedPkg = { ...pkg, index: packageIndex };
+  markStep('topup_package_selected');
+  if (selectSource === 'user_click') rememberLastPackage(pkg.symbol);
+  trackClientEvent('topup_package_selected', {
+    package_id: pkg.symbol,
+    package_credits: pkg.credits,
+    package_index: packageIndex,
+    trigger_page: 'payment_page',
+    select_source: selectSource,
+  });
+  maybeTrackPaymentMethodSelection();
+  updateBtn();
+}
+
+function selectMethod(el, selectSource = 'user_click') {
+  if (el.classList.contains('disabled')) {
+    // A disabled payment method is still an explanation target. On touch
+    // screens a silent no-op looks like a broken black button, so tapping it
+    // repeats the reason and the available alternatives below the grid.
+    const hint = document.getElementById('methodHint');
+    const reason = el.dataset.unavailableReason;
+    if (hint && reason) {
+      hint.textContent = reason;
+      hint.style.display = 'block';
+    }
+    return;
+  }
+  document.querySelectorAll('.method').forEach(e => e.classList.remove('sel'));
+  el.classList.add('sel');
+  selectedPayment = el.dataset.method;
+  maybeTrackPaymentMethodSelection(selectSource);
+  updateBtn();
+}
+
+/** 进入月卡模式（带订单号的付款屏）：把积分档位换成月卡说明——报价、权益和购买须知。 */
+function enterPointsCardMode() {
+  const grid = document.getElementById('packages');
+  if (!grid) return;
+  grid.innerHTML =
+    '<div class="pkg selected" style="grid-column:1/-1;cursor:default;text-align:left">' +
+    pointsCardInfoHtml(pointsCardPlan, pointsCardTitle()) +
+    '</div>';
+  // 按钮文案统一交给 updateBtn，这里不重复设置——两处写同一个东西迟早对不上。
+  updateBtn();
+}
+
+/**
+ * 一张月卡的完整介绍：报价、「你将获得」（首批到账、每日自动到账、满签奖励、补签卡）与「购买须知」。
+ * 带订单号的付款屏和月卡 tab 的详情付款页共用这一份（u26 #7092），两处说的话不会各写一套。
+ * 事实与主站月卡页同一口径（权益与须知逐条对过）；数全部来自服务端给的报价，页面不编数。
+ * plan 三态：undefined 还没拿到 → 占位；null 读不到 → 明说暂时买不了；对象 → 金额与权益。
+ */
+function pointsCardInfoHtml(plan, title) {
+  // 报价与权益那一块（工单 #4500）：用户在选支付方式、点提交之前就能读到「付多少、买到什么」。
+  let quote;
+  let perksHtml = '';
+  if (plan === undefined) {
+    quote = '<div class="card-quote"><div class="card-price muted">价格加载中…</div></div>';
+  } else if (plan === null) {
+    quote = '<div class="card-quote"><div class="card-unavailable">月卡暂时无法购买，请稍后从月卡页重新发起</div></div>';
+  } else {
+    // 🔴 每一条按它自己的发放类型标「长期」还是「限时」。一句通用的「限时积分」
+    // 在同时发两种的卡上，对其中一半就是假话——而那一半正是用户多付的钱买到的东西。
+    const kind = function (which) { return creditKindLabel(plan, which); };
+    const perks = [];
+    if (plan.upfront_credits !== null) perks.push('<li><b>+' + fmtInt(plan.upfront_credits) + '</b> ' + kind('upfront') + '积分付款后立即到账</li>');
+    if (plan.daily_credits !== null && plan.completion_required_checkins !== null) {
+      perks.push('<li>连续 <b>' + fmtInt(plan.completion_required_checkins) + '</b> 天，每天登录自动领取 <b>' + fmtInt(plan.daily_credits) + '</b> ' + kind('daily') + '积分</li>');
+    }
+    if (plan.completion_credits !== null && plan.completion_required_checkins !== null) {
+      perks.push('<li>' + fmtInt(plan.completion_required_checkins) + ' 天全部领满后，再得 <b>+' + fmtInt(plan.completion_credits) + '</b> ' + kind('completion') + '积分</li>');
+    }
+    // 补签卡随卡发、到期归零（青铜 v2）。缺席或 0 张就是这份 Plan 不带补签卡，不显示这一行。
+    if (hasMakeupCards(plan)) {
+      perks.push('<li>随卡 <b>' + fmtInt(plan.makeup_card_quota) + '</b> 张补签卡，漏掉的日子可补，到期清零</li>');
+    }
+    // 括号里的美元只给「人民币价是从美元换算出来的」Plan：那时美元才是标价、人民币是换算结果。
+    // Plan 原生标人民币价（price_currency = CNY）时美元价只是历史字段，不再拿出来展示。
+    const usdNote = plan.price_currency === 'USD' ? '<small>（US$' + plan.price_usd.toFixed(2) + '）</small>' : '';
+    quote =
+      '<div class="card-quote">' +
+      '<div class="card-price">' + fmtCny(plan.price_cny) + usdNote + '</div>' +
+      (plan.duration_days !== null ? '<div class="card-term">有效期 ' + fmtInt(plan.duration_days) + ' 天</div>' : '') +
+      (plan.total_credits !== null ? '<div class="card-total">' + totalCreditsLine(plan) + '</div>' : '') +
+      '</div>';
+    if (perks.length) perksHtml = '<div class="card-sec">你将获得</div><ul class="card-perks">' + perks.join('') + '</ul>';
+  }
+  // 标题前的档位角标只在认得出档位时出现；还没拿到报价或读不到时不出。
+  const tier = plan ? pointsCardTier(plan.plan_code) : null;
+  const tierChip = tier ? '<span class="tierchip tier-' + tier + '">' + POINTS_CARD_TIER_LABEL[tier] + '</span>' : '';
+  const notes = pointsCardNotes(plan);
+  return '<div style="display:flex;align-items:center;gap:8px;font-weight:600;margin-bottom:6px">' + tierChip + escapeHtml(title) + '</div>' +
+    quote + perksHtml +
+    '<div class="card-sec">购买须知</div>' +
+    '<ul class="card-notes">' + notes.map(function (n) { return '<li>' + n + '</li>'; }).join('') + '</ul>';
+}
+
+function hasMakeupCards(plan) {
+  return !!plan && typeof plan.makeup_card_quota === 'number' && plan.makeup_card_quota > 0;
+}
+
+/**
+ * 购买须知，与主站月卡页「购买须知」同一组事实：积分有效期、消耗顺序、多卡同时持有、每日自动到账、
+ * 补签卡规则、最后一天、成长值、支付方式。须知里的天数跟这张卡的 Plan 走；没有 Plan 时不编造天数，
+ * 只说与 Plan 无关的那几条。
+ * 🔴 主站那句「发起新的购买会替换掉还没付款的那一笔」自 u26 #7029 起已不成立（同一用户可以同时
+ * 有多张待付款月卡单），这里不照抄，只留仍然成立的「同一订单付了两次得两张卡」。
+ */
+function pointsCardNotes(plan) {
+  const notes = [];
+  if (plan) {
+    const kinds = ['upfront', 'daily', 'completion'].concat(hasMakeupCards(plan) ? ['makeup'] : []);
+    const labels = kinds.map(function (k) { return creditKindLabel(plan, k); });
+    if (labels.indexOf('限时') !== -1) notes.push('本卡的限时积分自发放起 30 天内有效');
+    if (labels.indexOf('长期') !== -1) notes.push('本卡的长期积分不过期');
+  }
+  notes.push('限时积分会优先于永久积分消耗，不会浪费');
+  // 须知里的天数跟这张单的 Plan 走；没有订单快照时不编造履约口径。
+  const termDays = plan && typeof plan.duration_days === 'number' ? fmtInt(plan.duration_days) : null;
+  const termNotice = termDays === null ? '' : '各自 ' + termDays + ' 天，';
+  notes.push('青铜、黄金可以同时持有，同一档也可以买多张；每成功付款一笔就是一张独立的卡，' + termNotice + '权益叠加。');
+  notes.push('每天北京时间 8:00 后第一次打开 DZMM，当天积分自动到账，不用手动领取。');
+  notes.push('你所有在领取期的月卡每天各自到账，并弹窗告诉你每张卡各到账多少；购买当天自动到账第 1 天。');
+  if (hasMakeupCards(plan)) {
+    notes.push('随卡赠送 ' + fmtInt(plan.makeup_card_quota) + ' 张补签卡，只能补这张卡已经过去、没到账的日子；这张卡领取期结束后，没用完的补签卡清零，不结转、不折现。');
+  }
+  notes.push('最后一天要当天打开一次，过了就补不回来了。');
+  if (plan) notes.push('每张卡的成长值分别计入，30 天内叠加。');
+  notes.push('同一订单如果付了两次，会得到两张完整的卡；只想买一张的话，换支付方式前先关掉已经打开的收银台。');
+  // 只有详情付款页这张卡真摆了信用卡才这么说；主站月卡页来的付款屏不收信用卡。
+  const cardOffered = cardDetailOffer !== null && cardOnetimeQuote(plan) !== null && availableMethods.includes('stripe');
+  notes.push(cardOffered
+    ? '月卡支持支付宝 / 微信支付和信用卡；信用卡按美元等值扣款，发卡行可能产生汇率差或手续费。'
+    : '月卡支持支付宝 / 微信支付，暂不支持信用卡。');
+  return notes;
+}
+
+/** 一项发放落到哪种积分的显示词。缺席按限时——多卡之前唯一存在过的口径。 */
+function creditKindLabel(plan, which) {
+  const types = plan && plan.credit_types;
+  return types && types[which] === 'permanent' ? '长期' : '限时';
+}
+
+/**
+ * 满签最高可得那一行。两种类型都发时拆开写——一个总数在混合卡上会被读成一种积分，
+ * 而用户会照着那个数安排怎么花。
+ */
+function totalCreditsLine(plan) {
+  const days = plan.completion_required_checkins;
+  const permanent =
+    (creditKindLabel(plan, 'upfront') === '长期' ? (plan.upfront_credits || 0) : 0)
+    + (creditKindLabel(plan, 'daily') === '长期' && typeof days === 'number' ? (plan.daily_credits || 0) * days : 0)
+    + (creditKindLabel(plan, 'completion') === '长期' ? (plan.completion_credits || 0) : 0);
+  const total = plan.total_credits;
+  if (permanent > 0 && permanent < total) {
+    return '领满最高可得 <b>' + fmtInt(total) + '</b> 积分（' + fmtInt(permanent) + ' 长期 ＋ ' + fmtInt(total - permanent) + ' 限时）';
+  }
+  return '领满最高可得 <b>' + fmtInt(total) + '</b> ' + creditKindLabel(plan, 'upfront') + '积分';
+}
+
+/** 这一屏卖的是哪张卡。名字由服务端给（订单名走同一个函数），页面不按代号猜。 */
+function pointsCardTitle() {
+  const plan = pointsCardPlan;
+  return plan && typeof plan.name === 'string' && plan.name ? plan.name : '积分月卡';
+}
+
+function fmtInt(n) { return Number(n).toLocaleString('en-US'); }
+function fmtCny(n) { return '¥' + Number(n).toFixed(2); }
+
+function updateBtn() {
+  const btn = document.getElementById('payBtn');
+  const sub = document.getElementById('payBtnSub');
+  if (sub) sub.textContent = cardDetailOffer ? '付款后最长可能需要 10 分钟开通月卡' : '充值后最长可能需要 10 分钟到账';
+  if (cardDetailOffer) {
+    // 月卡详情付款页：按钮写这张卡的人民币价（服务端报价），选了一条人民币渠道才可点。
+    // 选信用卡时按钮写实扣美元，下面挂与充值同一句换算说明；美元按 resolve 下发的汇率实时算。
+    const fx = document.getElementById('cardFxNote');
+    const card = selectedPayment === 'stripe' ? cardOnetimeQuote(cardDetailOffer) : null;
+    if (card) {
+      btn.textContent = '支付 ' + fmtUsd(card.usdCents);
+      if (fx) {
+        fx.textContent = '商品价格 ¥' + (card.priceCnyCents / 100) + '，信用卡实际扣款 ' + fmtUsd(card.usdCents) + '，发卡行可能产生汇率差或手续费';
+        fx.style.display = 'block';
+      }
+    } else {
+      if (fx) fx.style.display = 'none';
+      btn.textContent = '支付 ' + fmtCny(cardDetailOffer.price_cny) + ' 购买' + (cardDetailOffer.name || '积分月卡');
+    }
+    btn.disabled = directPointsCardStarting || !(card || (selectedPayment && CNY_METHODS.includes(selectedPayment)));
+    return;
+  }
+  // The monthly-card list has no selected product or payment action of its
+  // own. A previously selected top-up card may still be retained so returning
+  // to the recharge tab restores the user's choice, but its FX note must stay
+  // out of the monthly-card list.
+  if (offerTab === 'card') {
+    const fx = document.getElementById('cardFxNote');
+    if (fx) fx.style.display = 'none';
+    return;
+  }
+  if (pointsCardOrderId) {
+    // 月卡模式不选套餐，只要选了支付方式就能付。
+    // 🔴 按钮上的金额只能是服务端 resolve 报下来的那个数，页面不做换算（美元分 vs 人民币分那个坑）；
+    // 月卡只走人民币族，所以按钮报人民币。没拿到报价（还在加载 / 读不到）时按钮锁死：
+    // 没有价格的东西不许让人付钱，也免得选完支付方式点下去才在 checkout 吃 400。
+    const plan = pointsCardPlan;
+    if (!plan) {
+      btn.disabled = true;
+      btn.textContent = plan === null ? '月卡暂时无法购买' : '购买' + pointsCardTitle();
+      return;
+    }
+    btn.disabled = !selectedPayment;
+    btn.textContent = '支付 ' + fmtCny(plan.price_cny) + ' 购买' + pointsCardTitle();
+    return;
+  }
+  if (pricingMode === 'rmb_v1') {
+    applyRmbMethodAvailability();
+    const fx = document.getElementById('cardFxNote');
+    const quote = currentRmbQuote();
+    if (quote && selectedPayment) {
+      btn.disabled = false;
+      if (selectedPayment === 'stripe') {
+        btn.textContent = `支付 ${fmtUsd(quote.price_usd)}`;
+        fx.textContent = `商品价格 ¥${quote.price_cny / 100}，信用卡实际扣款 ${fmtUsd(quote.price_usd)}，发卡行可能产生汇率差或手续费`;
+        fx.style.display = 'block';
+      } else {
+        btn.textContent = `支付 ¥${quote.price_cny / 100}`;
+        fx.style.display = 'none';
+      }
+    } else {
+      btn.disabled = true;
+      btn.textContent = quote ? '请选择支付方式' : '选择套餐和支付方式';
+      fx.style.display = 'none';
+    }
+    return;
+  }
+  if (selectedPkg && selectedPayment) {
+    btn.disabled = false;
+    if (!['alipay', 'wechat', 'alipay-2', 'wechat-2', 'alipay-3', 'wechat-3'].includes(selectedPayment)) {
+      btn.textContent = `支付 US$${selectedPkg.usd.toFixed(2)}`;
+    } else {
+      const cny = (selectedPkg.usd * EXCHANGE_RATE).toFixed(2);
+      btn.textContent = `支付 ¥${cny}`;
+    }
+  } else {
+    // 原来只会开不会关：选中的渠道被摘掉之后按钮仍是可点的。
+    btn.disabled = true;
+  }
+}
+
+function showError(msg, isRegionBlock) {
+  const el = document.getElementById('error');
+  if (isRegionBlock) {
+    el.innerHTML = `
+      <div>${msg}</div>
+      <div class="vpn-hint">
+        <button class="vpn-btn" onclick="location.reload()">我已关闭 VPN，刷新页面</button>
+      </div>
+    `;
+  } else {
+    el.textContent = msg;
+  }
+  el.style.display = 'block';
+}
+
+function hideError() {
+  document.getElementById('error').style.display = 'none';
+}
+
+function setLoading(on) {
+  document.getElementById('spinner').style.display = on ? 'block' : 'none';
+  document.getElementById('payBtn').disabled = on;
+}
+
+async function checkout() {
+  if (!selectedPayment || !userUUID) return;
+  // 月卡详情付款页：点付款才用选中的渠道建单（建单与开支付会话在服务端一次完成）。
+  if (cardDetailOffer) {
+    if (selectedPayment === 'stripe') await startCardOnetimeCheckout(cardDetailOffer);
+    else await startDirectPointsCardCheckout(cardDetailOffer, selectedPayment);
+    return;
+  }
+  if (!pointsCardOrderId && !selectedPkg && selectedCustomCny === null) return;
+  hideError();
+  markStep('checkout_pay_button_clicked');
+  trackClientEvent('checkout_pay_button_clicked', {
+    payment_method: selectedPayment,
+    package_id: selectedPkg ? selectedPkg.symbol : null,
+  });
+  markStep('checkout_request');
+  setLoading(true);
+
+  if (pointsCardOrderId) {
+    // 🔴 月卡请求体**不带 credit / name / packageSymbol**：
+    // 带了 credit 就会落到服务端那条「客户端说了算金额」的兼容分支上
+    // （服务端已经会拒，但前端更不该发）；packageSymbol 是积分档位的东西，月卡没有。
+    // 服务端拿 pointsCardOrderId 去读月卡自己的 Plan config 定价，
+    // 与后端冻结进订单快照的是同一份。
+    try {
+      const body = {
+        supaUUID: userUUID,
+        paymentType: selectedPayment,
+        pointsCardOrderId,
+        token: currentToken,
+        checkout_session_id: currentCheckoutSessionId,
+        sourceContext,
+        triggerPage: 'payment_page',
+        tz: deviceTimeZone(),
+      };
+      if (returnUrl) body.returnUrl = returnUrl;
+      const res = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        trackCheckoutApiFailed('HTTP_' + res.status, res.status);
+        // 月卡只走人民币族，所以辖区闸对它同样会命中——这里必须和直充那条
+        // 一样把地区错误标出来，否则受限用户在月卡上拿到的是通用报错。
+        showError(data.error || '创建支付会话失败', res.status === 403 && !!data.error && data.error.includes('地区'));
+        setLoading(false);
+        return;
+      }
+      if (data.type === 'url' && data.data) {
+        showResult(data.data, data.payment_attempt_id || null);
+        return;
+      }
+      trackCheckoutApiFailed('INVALID_RESPONSE', res.status);
+      showError('创建支付会话失败', false);
+      setLoading(false);
+    } catch (e) {
+      trackCheckoutApiFailed('NETWORK_ERROR');
+      showError('网络错误，请稍后重试', false);
+      setLoading(false);
+    }
+    return;
+  }
+
+  // 人民币版本（固定档与自定义）：请求体只带 price_cny 与 package_symbol，金额与积分由服务端按规则定，
+  // 不带 credit / name（带了会落到服务端「客户端说了算金额」的兼容分支）。
+  const rmbQuote = currentRmbQuote();
+  if (pricingMode === 'rmb_v1' && rmbQuote) {
+    try {
+      const body = {
+        supaUUID: userUUID,
+        paymentType: selectedPayment,
+        pricing_version: 'rmb_v1',
+        price_cny: rmbQuote.price_cny,
+        package_symbol: selectedCustomCny !== null ? RMB_CUSTOM_SYMBOL : selectedPkg.symbol,
+        // 把用户确认过的报价一起送回：规则在服务端缓存窗口里换了就拒建，让页面重新展示
+        rule_version: rmbPricing.rule_version,
+        expected_points: rmbQuote.points,
+        expected_price_usd: rmbQuote.price_usd,
+        packageIndex: selectedPkg ? selectedPkg.index : null,
+        token: currentToken,
+        checkout_session_id: currentCheckoutSessionId,
+        triggerPage: 'payment_page',
+        tz: deviceTimeZone(),
+      };
+      if (returnUrl) body.returnUrl = returnUrl;
+      if (sourceContext) body.sourceContext = sourceContext;
+      const res = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        trackCheckoutApiFailed('HTTP_' + res.status, res.status);
+        const isRegion = res.status === 403 && data.error && data.error.includes('地区');
+        showError(data.error || '创建支付会话失败', isRegion);
+        // 报价已过期：不静默替换，重新拉一次 resolve 把新档位与积分展示给用户再让他选
+        if (res.status === 409) setTimeout(() => location.reload(), 1500);
+        return;
+      }
+      if (data.type === 'url' && data.data) {
+        showResult(data.data, data.payment_attempt_id || null);
+      } else {
+        trackCheckoutApiFailed('INVALID_RESPONSE', res.status);
+        showError('服务器返回了意外的响应格式');
+      }
+    } catch (err) {
+      trackCheckoutApiFailed('NETWORK_ERROR');
+      showError('网络错误，请检查网络连接后重试');
+    } finally {
+      // 失败后保留已选档位与支付方式，可直接重试
+      setLoading(false);
+    }
+    return;
+  }
+
+  if (!selectedPkg) { setLoading(false); return; }
+
+  let credit, name;
+  const isCny = ['alipay', 'wechat', 'alipay-2', 'wechat-2', 'alipay-3', 'wechat-3'].includes(selectedPayment);
+  if (isCny) {
+    credit = Math.round(selectedPkg.usd * EXCHANGE_RATE * 10000);
+    name = 'AI 充值';
+  } else {
+    credit = Math.round(selectedPkg.usd * 10000);
+    name = 'DZMM Topup US$' + selectedPkg.usd.toFixed(2);
+  }
+
+  try {
+    const checkoutBody = {
+      credit,
+      name,
+      supaUUID: userUUID,
+      paymentType: selectedPayment,
+      packageSymbol: selectedPkg.symbol,
+      packageIndex: selectedPkg.index,
+      token: currentToken,
+      checkout_session_id: currentCheckoutSessionId,
+      triggerPage: 'payment_page',
+      tz: deviceTimeZone(),
+    };
+    if (returnUrl) checkoutBody.returnUrl = returnUrl;
+    if (sourceContext) checkoutBody.sourceContext = sourceContext;
+    const mp = new URLSearchParams(location.search);
+    if (mp.get('m') === '1') checkoutBody.forceMaple = '1';
+    const res = await fetch('/api/checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(checkoutBody),
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      trackCheckoutApiFailed('HTTP_' + res.status, res.status);
+      const isRegion = res.status === 403 && data.error && data.error.includes('地区');
+      showError(data.error || '创建支付会话失败', isRegion);
+      return;
+    }
+
+    if (data.type === 'url' && data.data) {
+      showResult(data.data, data.payment_attempt_id || null);
+    } else {
+      trackCheckoutApiFailed('INVALID_RESPONSE', res.status);
+      showError('服务器返回了意外的响应格式');
+    }
+  } catch (err) {
+    trackCheckoutApiFailed('NETWORK_ERROR');
+    showError('网络错误，请检查网络连接后重试');
+  } finally {
+    setLoading(false);
+  }
+}
+
+function showResult(url, paymentAttemptId = null) {
+  currentPaymentAttemptId = paymentAttemptId || currentPaymentAttemptId;
+  try {
+    if (currentPaymentAttemptId) sessionStorage.setItem('payweld:payment-attempt-id', currentPaymentAttemptId);
+  } catch {}
+  markStep('payment_result');
+  document.getElementById('selectView').style.display = 'none';
+  const rv = document.getElementById('resultView');
+  rv.style.display = 'block';
+
+  if (selectedPayment === 'stripe' || selectedPayment === 'stripe-2') {
+    location.href = url;
+    return;
+  }
+
+  const methodName = ['alipay', 'alipay-2', 'alipay-3'].includes(selectedPayment) ? '支付宝' : '微信';
+  // 标题带上这条通道在选择页上的序号（「支付宝扫码支付（通道 2）」），用户付不动回去换的时候
+  // 才知道刚才走的是哪一条；同族只有一条时 channel 是空串，标题照旧。
+  const channel = selectedMethodChannel();
+  document.getElementById('resultTitle').textContent = `${methodName}扫码支付` + (channel ? `（${channel}）` : '');
+  document.getElementById('resultHint').textContent = `请使用${methodName}扫描二维码完成支付`
+    + (channel ? '；付不了可返回换另一条通道' : '');
+
+  const showQR = ['alipay', 'wechat', 'alipay-2', 'wechat-2', 'alipay-3', 'wechat-3'].includes(selectedPayment);
+
+  const qrWrap = document.getElementById('qrWrap');
+  const qrContainer = document.getElementById('qrContainer');
+  qrContainer.innerHTML = '';
+  if (showQR && typeof QRCode !== 'undefined') {
+    qrWrap.style.display = 'block';
+    new QRCode(qrContainer, { text: url, width: 240, height: 240, correctLevel: QRCode.CorrectLevel.L });
+  } else {
+    qrWrap.style.display = 'none';
+  }
+
+  const actions = document.getElementById('resultActions');
+  // 买月卡（详情付款页或带订单号的付款屏）付完回主站月卡页看这张卡，不是回首页（u26 #7092）。
+  const back = cardDetailOffer || pointsCardOrderId
+    ? `<button class="btn-outline" onclick="return returnToPointsCard('result_page')">已付款，回月卡页</button>`
+    : `<button class="btn-outline" onclick="return returnToDzmm('result_page')">返回 DZMM</button>`;
+  actions.innerHTML = `
+    <a class="btn" href="${url}" target="_blank" rel="noopener" style="display:block;text-decoration:none;text-align:center">前往${methodName}支付</a>
+    <button class="btn-outline" onclick="copyLink('${url.replace(/'/g, "\\'")}')">复制支付链接</button>
+    ${back}
+  `;
+}
+
+function copyLink(url) {
+  navigator.clipboard.writeText(url).then(() => {
+    const btn = document.querySelector('.btn-outline');
+    if (btn) { const orig = btn.textContent; btn.textContent = '已复制'; setTimeout(() => { btn.textContent = orig; }, 2000); }
+  }).catch(() => {});
+}
+
+function backToSelect() {
+  document.getElementById('resultView').style.display = 'none';
+  document.getElementById('selectView').style.display = 'block';
+}
+
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>

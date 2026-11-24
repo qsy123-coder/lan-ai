@@ -717,7 +717,7 @@ Remove-Item -Recurse -Force out\*,notes\*.tmp -ErrorAction SilentlyContinue     
 | 2026-11-19 | `fix/upgrade-needed-exhausted` | upgrade_needed 区分 credit/trial：只有 credit 才标账号 exhausted，trial/vip 档位限制只换号（notes/057） | 已上线 |
 | 2026-11-19 | `fix/session-rebind-deadlock` | 换号链 session_bound_elsewhere 死锁：拿到 cid 后推进 active_chat/active_acct 基准，不再误报「会话都被占用」（notes/059） | 已上线（备份 backup-20261119224131） |
 | 2026-11-24 | `chore/desktop-workspace-import` | 桌面工作区整体迁入：`dzmm/` `recon/` `tools/` `sub3/` `sub_new/` `sub_new2/` + `PROGRESS-desktop.md`；记忆归入 `docs/memory/`；入口文档 `docs/HOWTO-dzmm工具链.md` | 已提交并推送 |
-| 2026-11-24 | `chore/secret-scan-gate` | 凭证扫描器 `scripts/scan_secrets.py`（HIGH=JWT/Bearer/云 key/Supabase cookie；MED=password/uuid 赋值与内联 `password:`）；写进提交前门禁；修正 `.gitignore` 对三个 sub.yaml 的说明（flow 单行内联凭证，行首匹配抓不到） | 待合并 |
+| 2026-11-24 | `chore/secret-scan-gate` | 凭证扫描器 `scripts/scan_secrets.py`（HIGH=JWT/Bearer/云 key/Supabase cookie；MED=password/uuid 赋值与内联 `password:`）；写进提交前门禁；修正 `.gitignore` 对三个 sub.yaml 的说明（flow 单行内联凭证，行首匹配抓不到） | 已上线（fa4c145） |
 
 > 规矩：分支从 `main` 切出；质量门禁通过后可自行 commit / push / 部署 / 合并（见上「Claude 执行规范」）。
 > 不可逆操作（删数据 / 改库 / `.env.production` / force-push）前先确认。

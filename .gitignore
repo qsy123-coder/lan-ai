@@ -65,7 +65,8 @@ token*.json
 **/*session*.json
 **/login_guest_out.json
 **/grab2.json
-# 订阅快照含节点 password/uuid（75 个代理），只留本地
+# 订阅快照都是 flow 风格单行 proxy，凭证内联：实测 sub3 44 条 / sub_new2 34 条 /
+# sub_new 44 条 password|uuid，行首匹配抓不到 —— 一律只留本地（用 scripts/scan_secrets.py --all 复核）
 sub_new/sub.yaml
 sub3/sub.yaml
 sub_new2/sub.yaml

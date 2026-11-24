@@ -413,6 +413,9 @@ git checkout main && git checkout -b <type>/<slug>   # 从 main 切，不许在 
 git ls-files | ForEach-Object {
   if ($_ -match 'accounts\.json$|accounts\.md$|\.env$|\.(pem|key|p12|pfx)$|^captures/|^out/|node_modules/') { "!! $_" }
 }
+
+# 凭证模式扫描（HIGH 命中即退出码 1；--strict 连 MED 一起卡）
+& $PY scripts\scan_secrets.py --strict
 ```
 
 ### 推送
@@ -646,7 +649,10 @@ Remove-Item -Recurse -Force out\*,notes\*.tmp -ErrorAction SilentlyContinue     
 1. **引擎**：`python -m py_compile engine/server.py engine/memory.py engine/users.py` 零错误；
    涉及记忆/账本逻辑改动跑 `python -m pytest engine/tests`。
 2. **站点**：`cd site && npm run build` 必须成功（改前端时）。
-3. **提交前硬检查**：`git ls-files` 里不含 `accounts.json` / `.env` / `*.pem` / `captures/` / `out/`。
+3. **提交前硬检查**：`python scripts/scan_secrets.py --strict` 退出码 0（扫 `git ls-files`，
+   HIGH = JWT / Bearer / 云 key / Supabase 认证 cookie / 长 Cookie 头，MED = password/uuid 赋值、
+   `password:` 内联凭证）；配合 `git ls-files` 路径检查不含 `accounts.json` / `.env` / `*.pem` /
+   `captures/` / `out/`。要看本地未入库的凭证文件有没有写漏，跑 `--all`。
 4. **部署后验收**：`/health` 200 + 关键页面 200 + `/site/chat` 出 `event: complete`。
 
 **工作流**：
@@ -711,6 +717,7 @@ Remove-Item -Recurse -Force out\*,notes\*.tmp -ErrorAction SilentlyContinue     
 | 2026-11-19 | `fix/upgrade-needed-exhausted` | upgrade_needed 区分 credit/trial：只有 credit 才标账号 exhausted，trial/vip 档位限制只换号（notes/057） | 已上线 |
 | 2026-11-19 | `fix/session-rebind-deadlock` | 换号链 session_bound_elsewhere 死锁：拿到 cid 后推进 active_chat/active_acct 基准，不再误报「会话都被占用」（notes/059） | 已上线（备份 backup-20261119224131） |
 | 2026-11-24 | `chore/desktop-workspace-import` | 桌面工作区整体迁入：`dzmm/` `recon/` `tools/` `sub3/` `sub_new/` `sub_new2/` + `PROGRESS-desktop.md`；记忆归入 `docs/memory/`；入口文档 `docs/HOWTO-dzmm工具链.md` | 已提交并推送 |
+| 2026-11-24 | `chore/secret-scan-gate` | 凭证扫描器 `scripts/scan_secrets.py`（HIGH=JWT/Bearer/云 key/Supabase cookie；MED=password/uuid 赋值与内联 `password:`）；写进提交前门禁；修正 `.gitignore` 对三个 sub.yaml 的说明（flow 单行内联凭证，行首匹配抓不到） | 待合并 |
 
 > 规矩：分支从 `main` 切出；质量门禁通过后可自行 commit / push / 部署 / 合并（见上「Claude 执行规范」）。
 > 不可逆操作（删数据 / 改库 / `.env.production` / force-push）前先确认。
